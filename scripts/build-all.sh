@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+echo "=== Cybermanju Drive — Full Build ==="
+echo ""
+
+# Check dependencies
+command -v cargo >/dev/null 2>&1 || { echo "Error: cargo not found"; exit 1; }
+command -v node >/dev/null 2>&1 || { echo "Error: node not found"; exit 1; }
+
+echo "[1/4] Installing frontend dependencies..."
+cd "$PROJECT_ROOT"
+npm ci
+
+echo "[2/4] Type-checking frontend..."
+npm run typecheck
+
+echo "[3/4] Building frontend..."
+npm run build
+
+echo "[4/4] Building Tauri application..."
+npm run tauri:build
+
+echo ""
+echo "=== Build Complete ==="
+echo "Artifacts in: src-tauri/target/release/bundle/"
+ls -la src-tauri/target/release/bundle/ 2>/dev/null || echo "(no bundle directory found)"

@@ -1,0 +1,49 @@
+{
+  "name": "cybermanju-drive",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "tauri:build:debug": "tauri build --debug",
+    "typecheck": "vue-tsc --noEmit",
+    "typecheck:watch": "vue-tsc --noEmit --watch",
+    "lint": "vue-tsc --noEmit",
+    "rust:check": "cd src-tauri && cargo check 2>&1",
+    "rust:clippy": "cd src-tauri && cargo clippy -- -W clippy::all 2>&1",
+    "rust:fmt": "cd src-tauri && cargo fmt -- --check 2>&1",
+    "rust:fmt:fix": "cd src-tauri && cargo fmt",
+    "rust:test": "cd src-tauri && cargo test 2>&1",
+    "check:all": "npm run typecheck && npm run rust:check && npm run rust:clippy",
+    "clean": "rm -rf dist src-tauri/target cybermanju.db tantivy_index",
+    "db:reset": "rm -f cybermanju.db tantivy_index",
+    "build:wasm": "vite build --mode wasm --config vite.config.wasm.ts --outDir dist-wasm"
+  },
+  "dependencies": {
+    "vue": "^3.5.13",
+    "pinia": "^3.0.2",
+    "@tauri-apps/api": "^2.5.0",
+    "@tauri-apps/plugin-fs": "^2.2.1",
+    "@tauri-apps/plugin-dialog": "^2.2.1",
+    "@tauri-apps/plugin-shell": "^2.2.1",
+    "@tauri-apps/plugin-notification": "^2.2.1",
+    "@tauri-apps/plugin-store": "^2.2.1",
+    "@tauri-apps/plugin-log": "^2.2.1",
+    "@tauri-apps/plugin-os": "^2.2.1",
+    "@tauri-apps/plugin-process": "^2.2.1",
+    "maplibre-gl": "^5.4.0",
+    "lucide-vue-next": "^0.525.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.3",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vue-tsc": "^2.2.8",
+    "@tauri-apps/cli": "^2.5.0"
+  }
+}

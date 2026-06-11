@@ -1,0 +1,769 @@
+/* ═══════════════════════════════════════════════════════════════
+   Cybermanju Drive — Main Stylesheet
+   Neobrutalism × Buddhist-Nepalese × Matrix × Cyberpunk
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── CSS Reset ─────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #app {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  font-family: 'system-ui', -apple-system, 'Segoe UI', sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #F5F5F4;
+  background: #0a0a0f;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button, input, textarea, select {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  border: none;
+  outline: none;
+  background: none;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+ul, ol {
+  list-style: none;
+}
+
+img, canvas {
+  display: block;
+}
+
+/* ── CSS Custom Properties ─────────────────────────────────── */
+:root {
+  /* Core backgrounds */
+  --cyber-bg-deep: #0a0a0f;
+  --cyber-bg-panel: #12121a;
+  --cyber-bg-card: #1a1a2e;
+  --cyber-bg-hover: #252540;
+
+  /* Borders */
+  --cyber-border-heavy: #000000;
+  --cyber-border-neon: #00FF41;
+  --cyber-border-gold: #FFB800;
+
+  /* Saffron & Temple */
+  --cyber-saffron-gold: #FFB800;
+  --cyber-lotus-pink: #FF2D6F;
+  --cyber-temple-orange: #FF6B2B;
+
+  /* Prayer flag colors */
+  --cyber-prayer-blue: #1E3A8A;
+  --cyber-prayer-white: #F5F5F4;
+  --cyber-prayer-red: #DC2626;
+  --cyber-prayer-green: #16A34A;
+  --cyber-prayer-yellow: #FACC15;
+
+  /* Matrix & Cyber */
+  --cyber-matrix-green: #00FF41;
+  --cyber-matrix-dark-green: #003B00;
+  --cyber-cyber-blue: #00D4FF;
+  --cyber-cyber-purple: #A855F7;
+  --cyber-neon-pink: #FF00FF;
+  --cyber-neon-yellow: #EFFF00;
+
+  /* Text */
+  --cyber-text-primary: #F5F5F4;
+  --cyber-text-secondary: #9CA3AF;
+  --cyber-text-muted: #6B7280;
+  --cyber-text-neon: #00FF41;
+
+  /* Sizing */
+  --border-heavy: 3px;
+  --border-light: 1px;
+  --radius-neo: 2px;
+  --shadow-neo: 4px 4px 0 #000000;
+
+  /* Scrollbar */
+  --scrollbar-track: #0a0a0f;
+  --scrollbar-thumb: #1a1a2e;
+  --scrollbar-thumb-hover: #252540;
+}
+
+/* ── Selection ─────────────────────────────────────────────── */
+::selection {
+  background: rgba(0, 255, 65, 0.3);
+  color: #F5F5F4;
+}
+
+/* ── Scrollbar ─────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--cyber-matrix-dark-green);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--cyber-matrix-green);
+  box-shadow: 0 0 6px rgba(0, 255, 65, 0.4);
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--cyber-matrix-dark-green) var(--scrollbar-track);
+}
+
+/* ── Neobrutalism Card ─────────────────────────────────────── */
+.neobrutalism-card {
+  background: var(--cyber-bg-card);
+  border: var(--border-heavy) solid var(--cyber-border-heavy);
+  border-radius: var(--radius-neo);
+  box-shadow: var(--shadow-neo);
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.neobrutalism-card:hover {
+  box-shadow: 6px 6px 0 #000000;
+  transform: translate(-1px, -1px);
+}
+
+/* ── Neobrutalism Button ───────────────────────────────────── */
+.neobrutalism-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: var(--cyber-bg-card);
+  border: var(--border-heavy) solid var(--cyber-border-heavy);
+  border-radius: var(--radius-neo);
+  box-shadow: 3px 3px 0 #000000;
+  color: var(--cyber-text-primary);
+  cursor: pointer;
+  font-family: monospace;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: all 0.1s ease;
+  user-select: none;
+}
+
+.neobrutalism-btn:hover {
+  box-shadow: 1px 1px 0 #000000;
+  transform: translate(2px, 2px);
+}
+
+.neobrutalism-btn:active {
+  box-shadow: 0 0 0 #000000;
+  transform: translate(3px, 3px);
+}
+
+.neobrutalism-btn.btn-neon {
+  border-color: var(--cyber-matrix-green);
+  box-shadow: 3px 3px 0 var(--cyber-matrix-green);
+  color: var(--cyber-matrix-green);
+}
+
+.neobrutalism-btn.btn-neon:hover {
+  box-shadow: 1px 1px 0 var(--cyber-matrix-green);
+  background: rgba(0, 255, 65, 0.08);
+}
+
+.neobrutalism-btn.btn-gold {
+  border-color: var(--cyber-saffron-gold);
+  box-shadow: 3px 3px 0 var(--cyber-saffron-gold);
+  color: var(--cyber-saffron-gold);
+}
+
+.neobrutalism-btn.btn-gold:hover {
+  box-shadow: 1px 1px 0 var(--cyber-saffron-gold);
+  background: rgba(255, 184, 0, 0.08);
+}
+
+.neobrutalism-btn.btn-pink {
+  border-color: var(--cyber-lotus-pink);
+  box-shadow: 3px 3px 0 var(--cyber-lotus-pink);
+  color: var(--cyber-lotus-pink);
+}
+
+.neobrutalism-btn.btn-pink:hover {
+  box-shadow: 1px 1px 0 var(--cyber-lotus-pink);
+  background: rgba(255, 45, 111, 0.08);
+}
+
+/* ── Neon Text ─────────────────────────────────────────────── */
+.neon-text {
+  color: var(--cyber-matrix-green);
+  text-shadow:
+    0 0 4px rgba(0, 255, 65, 0.6),
+    0 0 11px rgba(0, 255, 65, 0.4),
+    0 0 19px rgba(0, 255, 65, 0.3),
+    0 0 40px rgba(0, 255, 65, 0.15);
+  font-family: monospace;
+}
+
+.neon-text-gold {
+  color: var(--cyber-saffron-gold);
+  text-shadow:
+    0 0 4px rgba(255, 184, 0, 0.6),
+    0 0 11px rgba(255, 184, 0, 0.4),
+    0 0 19px rgba(255, 184, 0, 0.2);
+  font-family: monospace;
+}
+
+.neon-text-cyan {
+  color: var(--cyber-cyber-blue);
+  text-shadow:
+    0 0 4px rgba(0, 212, 255, 0.6),
+    0 0 11px rgba(0, 212, 255, 0.4),
+    0 0 19px rgba(0, 212, 255, 0.2);
+  font-family: monospace;
+}
+
+.neon-text-purple {
+  color: var(--cyber-cyber-purple);
+  text-shadow:
+    0 0 4px rgba(168, 85, 247, 0.6),
+    0 0 11px rgba(168, 85, 247, 0.4),
+    0 0 19px rgba(168, 85, 247, 0.2);
+  font-family: monospace;
+}
+
+/* ── Matrix Glow ───────────────────────────────────────────── */
+.matrix-glow {
+  box-shadow:
+    0 0 8px rgba(0, 255, 65, 0.3),
+    0 0 15px rgba(0, 255, 65, 0.15),
+    inset 0 0 8px rgba(0, 255, 65, 0.05);
+}
+
+.matrix-glow-strong {
+  box-shadow:
+    0 0 10px rgba(0, 255, 65, 0.5),
+    0 0 25px rgba(0, 255, 65, 0.3),
+    0 0 50px rgba(0, 255, 65, 0.15),
+    inset 0 0 10px rgba(0, 255, 65, 0.08);
+}
+
+/* ── Cyber Border (animated gradient) ──────────────────────── */
+.cyber-border {
+  position: relative;
+  border: none !important;
+}
+
+.cyber-border::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 4px;
+  padding: 3px;
+  background: linear-gradient(
+    90deg,
+    var(--cyber-matrix-green),
+    var(--cyber-cyber-blue),
+    var(--cyber-cyber-purple),
+    var(--cyber-lotus-pink),
+    var(--cyber-saffron-gold),
+    var(--cyber-matrix-green)
+  );
+  background-size: 300% 100%;
+  animation: cyber-border-flow 4s linear infinite;
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* ── Prayer Flags ──────────────────────────────────────────── */
+.prayer-flag {
+  display: flex;
+  gap: 0;
+  overflow: hidden;
+  height: 32px;
+}
+
+.prayer-flag-strip {
+  flex: 1;
+  animation: flag-wave 3s ease-in-out infinite;
+  transform-origin: top center;
+  position: relative;
+}
+
+.prayer-flag-strip:nth-child(1) {
+  background: var(--cyber-prayer-blue);
+  animation-delay: 0s;
+}
+.prayer-flag-strip:nth-child(2) {
+  background: var(--cyber-prayer-white);
+  animation-delay: 0.2s;
+}
+.prayer-flag-strip:nth-child(3) {
+  background: var(--cyber-prayer-red);
+  animation-delay: 0.4s;
+}
+.prayer-flag-strip:nth-child(4) {
+  background: var(--cyber-prayer-green);
+  animation-delay: 0.6s;
+}
+.prayer-flag-strip:nth-child(5) {
+  background: var(--cyber-prayer-yellow);
+  animation-delay: 0.8s;
+}
+
+/* ── Mandala Pattern ───────────────────────────────────────── */
+.mandala-pattern {
+  background:
+    repeating-conic-gradient(
+      from 0deg at 50% 50%,
+      rgba(255, 184, 0, 0.03) 0deg 10deg,
+      transparent 10deg 20deg
+    ),
+    repeating-conic-gradient(
+      from 36deg at 50% 50%,
+      rgba(168, 85, 247, 0.02) 0deg 10deg,
+      transparent 10deg 20deg
+    ),
+    var(--cyber-bg-panel);
+  background-size: 80px 80px;
+}
+
+/* ── Panel & Layout Utilities ──────────────────────────────── */
+.panel-left {
+  border-right: var(--border-heavy) solid var(--cyber-border-heavy);
+  background: var(--cyber-bg-panel);
+}
+
+.panel-right {
+  border-left: var(--border-heavy) solid var(--cyber-border-heavy);
+  background: var(--cyber-bg-panel);
+}
+
+.panel-top {
+  border-bottom: var(--border-heavy) solid var(--cyber-border-heavy);
+  background: var(--cyber-bg-panel);
+}
+
+.panel-bottom {
+  border-top: 2px solid #252540;
+  background: var(--cyber-bg-deep);
+}
+
+.app-layout {
+  display: grid;
+  grid-template-rows: 56px 1fr 28px;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas:
+    "topbar    topbar    topbar"
+    "sidebar   content   preview"
+    "statusbar statusbar statusbar";
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background: var(--cyber-bg-deep);
+}
+
+.app-layout .topbar {
+  grid-area: topbar;
+}
+
+.app-layout .sidebar {
+  grid-area: sidebar;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.app-layout .content {
+  grid-area: content;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.app-layout .preview {
+  grid-area: preview;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.app-layout .statusbar {
+  grid-area: statusbar;
+}
+
+/* ── Monospace Utility ─────────────────────────────────────── */
+.mono {
+  font-family: 'Courier New', 'Fira Code', 'JetBrains Mono', monospace;
+}
+
+.text-neon {
+  color: var(--cyber-text-neon);
+}
+
+.text-gold {
+  color: var(--cyber-saffron-gold);
+}
+
+.text-muted {
+  color: var(--cyber-text-muted);
+}
+
+.text-secondary {
+  color: var(--cyber-text-secondary);
+}
+
+.text-pink {
+  color: var(--cyber-lotus-pink);
+}
+
+.text-cyan {
+  color: var(--cyber-cyber-blue);
+}
+
+.text-purple {
+  color: var(--cyber-cyber-purple);
+}
+
+.text-orange {
+  color: var(--cyber-temple-orange);
+}
+
+/* ── Badge Utilities ───────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-family: monospace;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-radius: 2px;
+  border: 1px solid;
+}
+
+.badge-green {
+  color: var(--cyber-matrix-green);
+  border-color: var(--cyber-matrix-green);
+  background: rgba(0, 255, 65, 0.1);
+}
+
+.badge-gold {
+  color: var(--cyber-saffron-gold);
+  border-color: var(--cyber-saffron-gold);
+  background: rgba(255, 184, 0, 0.1);
+}
+
+.badge-cyan {
+  color: var(--cyber-cyber-blue);
+  border-color: var(--cyber-cyber-blue);
+  background: rgba(0, 212, 255, 0.1);
+}
+
+.badge-purple {
+  color: var(--cyber-cyber-purple);
+  border-color: var(--cyber-cyber-purple);
+  background: rgba(168, 85, 247, 0.1);
+}
+
+.badge-pink {
+  color: var(--cyber-lotus-pink);
+  border-color: var(--cyber-lotus-pink);
+  background: rgba(255, 45, 111, 0.1);
+}
+
+.badge-red {
+  color: var(--cyber-prayer-red);
+  border-color: var(--cyber-prayer-red);
+  background: rgba(220, 38, 38, 0.1);
+}
+
+.badge-orange {
+  color: var(--cyber-temple-orange);
+  border-color: var(--cyber-temple-orange);
+  background: rgba(255, 107, 43, 0.1);
+}
+
+/* ── Context Menu ──────────────────────────────────────────── */
+.context-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 180px;
+  background: var(--cyber-bg-card);
+  border: var(--border-heavy) solid var(--cyber-border-heavy);
+  border-radius: var(--radius-neo);
+  box-shadow: 4px 4px 0 #000000;
+  padding: 4px 0;
+  overflow: hidden;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--cyber-text-primary);
+  transition: background 0.1s;
+}
+
+.context-menu-item:hover {
+  background: var(--cyber-bg-hover);
+}
+
+.context-menu-item.danger {
+  color: var(--cyber-lotus-pink);
+}
+
+.context-menu-divider {
+  height: 1px;
+  background: var(--cyber-border-heavy);
+  margin: 4px 0;
+}
+
+/* ── Animations ────────────────────────────────────────────── */
+@keyframes matrix-rain {
+  0% {
+    transform: translateY(-100%);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(100vh);
+    opacity: 0;
+  }
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow:
+      0 0 4px rgba(0, 255, 65, 0.2),
+      0 0 8px rgba(0, 255, 65, 0.1);
+  }
+  50% {
+    box-shadow:
+      0 0 8px rgba(0, 255, 65, 0.4),
+      0 0 20px rgba(0, 255, 65, 0.2),
+      0 0 40px rgba(0, 255, 65, 0.1);
+  }
+}
+
+@keyframes flag-wave {
+  0%, 100% {
+    transform: rotate(-2deg) scaleY(1);
+  }
+  25% {
+    transform: rotate(1deg) scaleY(1.03);
+  }
+  50% {
+    transform: rotate(2deg) scaleY(0.97);
+  }
+  75% {
+    transform: rotate(-1deg) scaleY(1.02);
+  }
+}
+
+@keyframes scanline {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes cyber-border-flow {
+  0% {
+    background-position: 0% 50%;
+  }
+  100% {
+    background-position: 300% 50%;
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ── Utility Animation Classes ─────────────────────────────── */
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+
+.animate-slide-in {
+  animation: slide-in-left 0.2s ease-out;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+.animate-spin-slow {
+  animation: spin-slow 8s linear infinite;
+}
+
+/* ── Tooltip ───────────────────────────────────────────────── */
+.tooltip {
+  position: relative;
+}
+
+.tooltip::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  background: var(--cyber-bg-card);
+  border: 2px solid var(--cyber-border-heavy);
+  border-radius: var(--radius-neo);
+  box-shadow: 2px 2px 0 #000000;
+  font-size: 11px;
+  font-family: monospace;
+  white-space: nowrap;
+  color: var(--cyber-text-primary);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+  z-index: 1000;
+}
+
+.tooltip:hover::after {
+  opacity: 1;
+}
+
+/* ── Input Styles ──────────────────────────────────────────── */
+.cyber-input {
+  background: var(--cyber-bg-deep);
+  border: 2px solid var(--cyber-bg-hover);
+  border-radius: var(--radius-neo);
+  padding: 6px 10px;
+  color: var(--cyber-text-primary);
+  font-family: monospace;
+  font-size: 12px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.cyber-input:focus {
+  border-color: var(--cyber-matrix-green);
+  box-shadow: 0 0 8px rgba(0, 255, 65, 0.2);
+}
+
+.cyber-input::placeholder {
+  color: var(--cyber-text-muted);
+}
+
+/* ── Dot Indicators ────────────────────────────────────────── */
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.dot-green {
+  background: var(--cyber-matrix-green);
+  box-shadow: 0 0 6px var(--cyber-matrix-green);
+}
+
+.dot-red {
+  background: var(--cyber-prayer-red);
+  box-shadow: 0 0 6px var(--cyber-prayer-red);
+}
+
+.dot-gold {
+  background: var(--cyber-saffron-gold);
+  box-shadow: 0 0 6px var(--cyber-saffron-gold);
+}
+
+.dot-cyan {
+  background: var(--cyber-cyber-blue);
+  box-shadow: 0 0 6px var(--cyber-cyber-blue);
+}
+
+.dot-purple {
+  background: var(--cyber-cyber-purple);
+  box-shadow: 0 0 6px var(--cyber-cyber-purple);
+}
+
+.dot-pink {
+  background: var(--cyber-lotus-pink);
+  box-shadow: 0 0 6px var(--cyber-lotus-pink);
+}
+
+.dot-orange {
+  background: var(--cyber-temple-orange);
+  box-shadow: 0 0 6px var(--cyber-temple-orange);
+}
+
+/* ── Truncation ────────────────────────────────────────────── */
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Scanline Overlay ──────────────────────────────────────── */
+.scanline-overlay::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.03) 2px,
+    rgba(0, 0, 0, 0.03) 4px
+  );
+  z-index: 1;
+}

@@ -1,0 +1,63 @@
+[package]
+name = "cybermanju-drive"
+version = "0.1.0"
+description = "Cybermanju Drive — Quantum-resistant encrypted file manager"
+authors = ["Cybermanju Team"]
+edition = "2021"
+
+[lib]
+name = "cybermanju_drive_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-fs = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-store = "2"
+tauri-plugin-log = "2"
+tauri-plugin-os = "2"
+tauri-plugin-process = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+blake3 = "1"
+redb = "2"
+# Post-quantum cryptography
+rustpq = "0.2"
+# Compression
+lz4_flex = "0.11"
+zstd = "0.13"
+brotli = "7"
+# Full-text search
+tantivy = "0.22"
+# Tree-sitter
+tree-sitter = "0.24"
+# Face detection / ML inference
+ort = "2.0.0-rc.12"
+# EXIF GPS
+kamadak-exif = "0.5"
+# Thumbnail generation
+image = "0.25"
+# MIME type detection
+infer = "0.16"
+mime_guess = "2"
+# Encryption at rest
+chacha20poly1305 = "0.10"
+# Logging
+log = "0.4"
+env_logger = "0.11"
+# Async
+futures = "0.3"
+# Base64 for key serialization
+base64 = "0.22"
+# Password hashing
+argon2 = "0.5"
+rand_core = { version = "0.6", features = ["getrandom"] }

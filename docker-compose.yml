@@ -1,0 +1,57 @@
+services:
+  cybermanju-drive:
+    image: cybermanju-drive:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cybermanju-drive
+    restart: unless-stopped
+    ports:
+      - "3456:3456"
+    volumes:
+      - /DATA/AppData/cybermanju-drive/config:/data
+    environment:
+      - RUST_LOG=info
+      - PORT=3456
+      - DB_PATH=/data/cybermanju.db
+      - STATIC_DIR=/app/static
+      - TZ=UTC
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3456/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  author: Cybermanju Team
+  category:
+    - File Sync
+    - Utilities
+  description:
+    en_us: >-
+      Cybermanju Drive is a quantum-resistant encrypted file manager with a web
+      dashboard for browser-based access from any device. Features include
+      post-quantum cryptography (Kyber/Dilithium), triple-layer compression
+      (LZ4 + Zstd + Brotli), full-text search, face detection clustering,
+      GPS map view, multi-user permissions, and cloud sync.
+    zh_cn: >-
+      Cybermanju Drive 是一款具有后量子加密保护能力的文件管理器，配备网页仪表板，
+      可从任何设备通过浏览器访问。支持后量子密码学（Kyber/Dilithium）、
+      三层压缩（LZ4 + Zstd + Brotli）、全文搜索、人脸检测聚类、
+      GPS 地图视图、多用户权限和云端同步。
+  developer: Cybermanju Team
+  icon: https://raw.githubusercontent.com/cybermanju/cybermanju-drive/main/src-tauri/icons/icon.svg
+  tagline:
+    en_us: Quantum-resistant encrypted file manager
+    zh_cn: 后量子加密文件管理器
+  thumbnail: ""
+  title:
+    en_us: Cybermanju Drive
+    zh_cn: Cybermanju Drive
+  index: /
+  port_map: "3456"
+  version: "0.1.0"
