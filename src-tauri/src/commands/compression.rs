@@ -45,7 +45,7 @@ pub fn compress_file(
         ));
     }
 
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.write().map_err(|e| e.to_string())?;
 
     let tx_read = db.begin_read().map_err(|e| e.to_string())?;
     let table_read = tx_read.open_table(crate::db::Database::get_files_table())
@@ -191,7 +191,7 @@ pub fn compress_file(
 /// Decompress a file by removing all compression layers.
 #[tauri::command]
 pub fn decompress_file(file_id: String, state: State<'_, AppState>) -> Result<FrontendCompressionStats, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.write().map_err(|e| e.to_string())?;
 
     let tx_read = db.begin_read().map_err(|e| e.to_string())?;
     let table_read = tx_read.open_table(crate::db::Database::get_files_table())
@@ -316,7 +316,7 @@ pub fn get_compression_stats(
     file_id: String,
     state: State<'_, AppState>,
 ) -> Result<FrontendCompressionStats, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.read().map_err(|e| e.to_string())?;
     let tx = db.begin_read().map_err(|e| e.to_string())?;
     let table = tx.open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;

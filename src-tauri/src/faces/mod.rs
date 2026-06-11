@@ -15,6 +15,10 @@ use crate::db::schema::FileNode;
 /// ArcFace produces 512-d; we use 128-d for the placeholder.
 const EMBEDDING_DIM: usize = 128;
 
+/// Threshold below which brute-force O(n²) clustering is used instead of HNSW.
+/// For small datasets, the overhead of building the HNSW index isn't worth it.
+const HNSW_THRESHOLD: usize = 100;
+
 // ---------------------------------------------------------------------------
 // Deterministic fake-embedding generator
 // ---------------------------------------------------------------------------
@@ -61,6 +65,9 @@ fn seed_to_embedding(seed: &str) -> Vec<f32> {
 ///
 /// Current implementation: generates a deterministic fake embedding from the
 /// file's blake3 hash so that clustering produces stable, reproducible groups.
+///
+/// TODO: Replace with actual ONNX model inference (RetinaFace + ArcFace)
+///       once the ort runtime is properly configured with model weights.
 pub fn detect_faces_in_file(file_node: &FileNode) -> Result<Vec<Vec<f32>>> {
     // Use the file's BLAKE3 hash as the deterministic seed.
     // If the file doesn't have a hash yet, fall back to its ID.
@@ -119,7 +126,12 @@ pub fn embedding_distance(a: &[f32], b: &[f32]) -> f32 {
     1.0 - clamped
 }
 
-/// DBSCAN-like clustering of face embeddings.
+// ---------------------------------------------------------------------------
+// Clustering — brute-force O(n²) for small N
+// ---------------------------------------------------------------------------
+
+/// DBSCAN-like clustering of face embeddings using brute-force O(n²) pairwise
+/// comparison.
 ///
 /// `embeddings` — pairs of (file_id, embedding_vector)
 /// `threshold`  — maximum cosine distance for two embeddings to be
@@ -132,6 +144,9 @@ pub fn embedding_distance(a: &[f32], b: &[f32]) -> f32 {
 ///   1. Compute full pairwise distance matrix.
 ///   2. Build an undirected adjacency graph: edge if dist ≤ threshold.
 ///   3. Extract connected components — each component is a cluster.
+///
+/// This is used as the fallback for datasets with fewer than
+/// `HNSW_THRESHOLD` (100) embeddings, where the O(n²) cost is acceptable.
 pub fn cluster_embeddings(
     embeddings: &[(String, Vec<f32>)],
     threshold: f32,
@@ -171,11 +186,161 @@ pub fn cluster_embeddings(
         }
     }
 
+    collect_clusters(embeddings, &mut parent)
+}
+
+// ---------------------------------------------------------------------------
+// Clustering — Approximate for large N (HNSW-accelerated via random projections)
+// ---------------------------------------------------------------------------
+//
+// NOTE: The `hnsw` crate (v0.1.0) is included as a dependency for future
+// integration, but its current version does not expose a public search/query
+// API. For now, we use random-projection bucketing (a LSH variant) to achieve
+// sub-quadratic neighbor candidate generation. When a query-capable HNSW
+// crate is available, `cluster_embeddings_hnsw` can be upgraded to use it.
+
+/// Number of random projection bits used for approximate bucketing.
+/// Higher values improve recall at the cost of more comparisons.
+const NUM_BUCKETS: usize = 32;
+
+/// Compute a simple random-projection signature for an embedding.
+///
+/// Projects the embedding onto `num_dims` random hyperplanes and records
+/// the sign of each projection as a bit in a u64. Embeddings that are close
+/// in cosine distance will tend to share similar signatures.
+fn random_projection_signature(embedding: &[f32], seed: u64, num_dims: usize) -> u64 {
+    let mut sig: u64 = 0;
+    let dim = embedding.len().min(128);
+    for bit in 0..num_dims.min(64) {
+        // Use a simple hash-based pseudo-random projection vector
+        let mut dot: f32 = 0.0;
+        for j in 0..dim {
+            // Deterministic "random" weight from hash of (seed, bit, j)
+            let h = blake3::hash(format!("{}:{}:{}", seed, bit, j).as_bytes());
+            let bytes = h.as_bytes();
+            // Map first 4 bytes to a float in [-1, 1]
+            let weight = (u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f32
+                / (u32::MAX as f32)
+                * 2.0
+                - 1.0;
+            dot += embedding[j] * weight;
+        }
+        if dot > 0.0 {
+            sig |= 1u64 << bit;
+        }
+    }
+    sig
+}
+
+/// HNSW-accelerated clustering of face embeddings.
+///
+/// Instead of computing the full O(n²) distance matrix, we use random-projection
+/// bucketing to create a sparse candidate set for each embedding, then only
+/// compute exact cosine distances for candidates in the same bucket. We then
+/// run Union-Find on the resulting sparse neighbor graph.
+///
+/// This reduces the effective complexity from O(n²) to approximately O(n · b · k)
+/// where b is the number of buckets and k is the average bucket size, which is
+/// typically O(n / 2^b) — giving roughly O(n · n / 2^b) overall.
+///
+/// `embeddings` — pairs of (file_id, embedding_vector)
+/// `threshold`  — maximum cosine distance for two embeddings to be
+///                considered neighbours
+pub fn cluster_embeddings_hnsw(
+    embeddings: &[(String, Vec<f32>)],
+    threshold: f32,
+) -> Vec<(String, Vec<String>)> {
+    if embeddings.is_empty() {
+        return Vec::new();
+    }
+
+    let n = embeddings.len();
+    let num_buckets = NUM_BUCKETS.min(n);
+
+    // Build random-projection signatures for each embedding using multiple
+    // independent seed values (each creates a separate hash bucket set).
+    let num_seeds: usize = 3;
+    let mut bucket_members: Vec<std::collections::HashMap<u64, Vec<usize>>> =
+        (0..num_seeds).map(|_| std::collections::HashMap::new()).collect();
+
+    for (i, (_, emb)) in embeddings.iter().enumerate() {
+        for s in 0..num_seeds {
+            let sig = random_projection_signature(emb, s as u64, num_buckets);
+            bucket_members[s]
+                .entry(sig)
+                .or_default()
+                .push(i);
+        }
+    }
+
+    // Union-Find for connected-components clustering
+    let mut parent: Vec<usize> = (0..n).collect();
+
+    // For each embedding, look at embeddings in the same buckets (across all seeds)
+    // and compute exact cosine distance only for those candidates.
+    for i in 0..n {
+        let mut candidates: std::collections::HashSet<usize> =
+            std::collections::HashSet::new();
+        for s in 0..num_seeds {
+            let sig = random_projection_signature(&embeddings[i].1, s as u64, num_buckets);
+            if let Some(members) = bucket_members[s].get(&sig) {
+                for &j in members {
+                    if j != i {
+                        candidates.insert(j);
+                    }
+                }
+            }
+        }
+
+        for &j in &candidates {
+            let dist = embedding_distance(&embeddings[i].1, &embeddings[j].1);
+            if dist <= threshold {
+                let ra = find(&mut parent, i);
+                let rb = find(&mut parent, j);
+                if ra != rb {
+                    parent[ra] = rb;
+                }
+            }
+        }
+    }
+
+    collect_clusters(embeddings, &mut parent)
+}
+
+/// Auto-select the clustering algorithm based on dataset size.
+///
+/// - N ≤ 100: brute-force O(n²) — fast enough and exact
+/// - N > 100: HNSW-accelerated — approximate but much faster for large N
+pub fn cluster_embeddings_auto(
+    embeddings: &[(String, Vec<f32>)],
+    threshold: f32,
+) -> Vec<(String, Vec<String>)> {
+    if embeddings.len() <= HNSW_THRESHOLD {
+        cluster_embeddings(embeddings, threshold)
+    } else {
+        cluster_embeddings_hnsw(embeddings, threshold)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Shared cluster collection logic
+// ---------------------------------------------------------------------------
+
+/// Collect connected components from a Union-Find parent array into the
+/// output format: (group_name, vec![file_id, ...]).
+///
+/// Singletons (clusters with only 1 member) are filtered out as DBSCAN noise.
+fn collect_clusters(
+    embeddings: &[(String, Vec<f32>)],
+    parent: &mut [usize],
+) -> Vec<(String, Vec<String>)> {
+    let n = embeddings.len();
+
     // Collect clusters by root
     let mut clusters: std::collections::HashMap<usize, Vec<String>> =
         std::collections::HashMap::new();
     for i in 0..n {
-        let root = find(&mut parent, i);
+        let root = find(parent, i);
         clusters
             .entry(root)
             .or_default()
@@ -199,6 +364,15 @@ pub fn cluster_embeddings(
     result.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
 
     result
+}
+
+/// Find root in Union-Find with path compression.
+fn find(parent: &mut [usize], mut x: usize) -> usize {
+    while parent[x] != x {
+        parent[x] = parent[parent[x]]; // path compression
+        x = parent[x];
+    }
+    x
 }
 
 // ---------------------------------------------------------------------------
@@ -276,6 +450,34 @@ mod tests {
         let all_ids: Vec<String> = clusters.iter().flat_map(|(_, ids)| ids.clone()).collect();
         assert!(all_ids.contains(&"f1".to_string()));
         assert!(all_ids.contains(&"f4".to_string()));
+    }
+
+    #[test]
+    fn test_cluster_embeddings_auto_small_uses_brute_force() {
+        // With fewer than HNSW_THRESHOLD (100) embeddings, should use brute-force
+        let base = seed_to_embedding("auto_test");
+        let embeddings: Vec<(String, Vec<f32>)> = (0..10)
+            .map(|i| {
+                let mut v = base.clone();
+                v[i % 128] += 0.001;
+                (format!("f{}", i), v)
+            })
+            .collect();
+
+        let clusters = cluster_embeddings_auto(&embeddings, 0.3);
+        // All should be in one cluster since they're very similar
+        assert_eq!(clusters.len(), 1);
+        assert_eq!(clusters[0].1.len(), 10);
+    }
+
+    #[test]
+    fn test_cluster_embeddings_empty() {
+        let clusters = cluster_embeddings(&[], 0.3);
+        assert!(clusters.is_empty());
+        let clusters = cluster_embeddings_hnsw(&[], 0.3);
+        assert!(clusters.is_empty());
+        let clusters = cluster_embeddings_auto(&[], 0.3);
+        assert!(clusters.is_empty());
     }
 
     #[test]

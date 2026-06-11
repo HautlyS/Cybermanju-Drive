@@ -1,5 +1,5 @@
 // Cybermanju Drive — Core Library
-// Orchestrates redb, rustpq PQC, Tantivy, Tree-sitter, triple compression, face clustering
+// Orchestrates redb, ML-KEM PQC (pqcrypto-mlkem), Tantivy, Tree-sitter, triple compression, face clustering
 
 pub mod commands;
 pub mod compression;
@@ -18,59 +18,71 @@ use commands::{
 use commands::faces as face_cmd;
 use commands::sync as sync_cmd;
 use db::Database;
-use log::info;
-use std::sync::Mutex;
+use std::sync::RwLock;
 use tauri::Manager;
 
 pub struct AppState {
-    pub db: Mutex<Database>,
-    pub tantivy_index: Mutex<search::SearchIndex>,
+    pub db: RwLock<Database>,
+    pub tantivy_index: RwLock<search::SearchIndex>,
     pub compression: compression::TripleCompressor,
+    pub hmac_secret: [u8; 32],
 }
 
+// WebDashboard now handles its own shutdown (Drop impl with signal channel + thread join).
+
 pub fn run() {
-    env_logger::init();
-    info!("Cybermanju Drive starting...");
+    // Initialize tracing subscriber (replaces env_logger)
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+    tracing::info!("Cybermanju Drive starting...");
 
     // Initialize redb database
     let db = match Database::new("cybermanju.db") {
         Ok(d) => d,
         Err(e) => {
-            log::error!("Failed to initialize redb database: {}", e);
+            tracing::error!("Failed to initialize redb database: {}", e);
             std::process::exit(1);
         }
     };
-    info!("redb database initialized");
+    tracing::info!("redb database initialized");
 
     // Initialize Tantivy full-text search index
     let tantivy_index = match search::SearchIndex::new("tantivy_index") {
         Ok(i) => i,
         Err(e) => {
-            log::error!("Failed to initialize Tantivy: {}", e);
+            tracing::error!("Failed to initialize Tantivy: {}", e);
             std::process::exit(1);
         }
     };
-    info!("Tantivy search index ready");
+    tracing::info!("Tantivy search index ready");
 
     // Initialize triple-layer compressor
     let compressor = compression::TripleCompressor::new();
 
+    // Initialize HMAC secret for secure session tokens
+    let mut hmac_secret = [0u8; 32];
+    use rand_core::{RngCore, OsRng};
+    OsRng.fill_bytes(&mut hmac_secret);
+
     let state = AppState {
-        db: Mutex::new(db),
-        tantivy_index: Mutex::new(tantivy_index),
+        db: RwLock::new(db),
+        tantivy_index: RwLock::new(tantivy_index),
         compression: compressor,
+        hmac_secret,
     };
 
-    // ─── Start Web Dashboard (before .run() so handle stays alive) ────────
+    // ─── Start Web Dashboard (localhost-only, JWT-authenticated) ────────
     let dashboard = std::sync::Arc::new(
         web_dashboard::WebDashboard::new(3456, "cybermanju.db")
     );
-    let _dashboard_handle = dashboard.start();
-    if _dashboard_handle.is_ok() {
-        info!("Web Dashboard started on port 3456");
-    } else {
-        log::error!("Failed to start Web Dashboard: {:?}", _dashboard_handle.err());
+    match dashboard.start() {
+        Ok(()) => tracing::info!("Web Dashboard started on port 3456 (localhost only, JWT auth)"),
+        Err(e) => tracing::error!("Failed to start Web Dashboard: {}", e),
     }
+    // dashboard.stop() is called explicitly below after Tauri exits,
+    // ensuring the accept thread is joined from the MAIN thread (not from
+    // the accept thread's own Drop, which would self-deadlock).
 
     tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
@@ -138,6 +150,7 @@ pub fn run() {
             users::revoke_file_permission,
             users::verify_file_access,
             users::get_file_permissions,
+            users::verify_token,
             // Dashboard
             dashboard::dashboard_status,
             dashboard::start_dashboard,
@@ -159,4 +172,8 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("Fatal error while running Cybermanju Drive — see logs above");
+
+    // ─── Clean shutdown: stop the dashboard before dropping the Arc ──
+    dashboard.stop();
+    tracing::info!("Web Dashboard shut down cleanly");
 }

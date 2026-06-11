@@ -11,7 +11,7 @@ use crate::sync::models::*;
 /// List all saved sync configurations.
 #[tauri::command]
 pub fn list_sync_configs(state: State<'_, AppState>) -> Result<Vec<SyncConfig>, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.read().map_err(|e| e.to_string())?;
     let tx = db.begin_read().map_err(|e| e.to_string())?;
     let table = tx
         .open_table(crate::db::Database::get_sync_configs_table())
@@ -34,7 +34,7 @@ pub fn create_sync_config(
     config: SyncConfig,
     state: State<'_, AppState>,
 ) -> Result<SyncConfig, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.write().map_err(|e| e.to_string())?;
 
     // Generate an ID if none provided
     let config_id = if config.id.is_empty() {
@@ -67,7 +67,7 @@ pub fn delete_sync_config(
     config_id: String,
     state: State<'_, AppState>,
 ) -> Result<bool, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.write().map_err(|e| e.to_string())?;
     let tx = db.begin_write().map_err(|e| e.to_string())?;
     {
         let mut table = tx
@@ -93,7 +93,7 @@ pub fn start_sync(
     state: State<'_, AppState>,
 ) -> Result<SyncResult, String> {
     // 1. Load the sync config from DB
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.read().map_err(|e| e.to_string())?;
     let tx_read = db.begin_read().map_err(|e| e.to_string())?;
     let table = tx_read
         .open_table(crate::db::Database::get_sync_configs_table())
@@ -109,6 +109,9 @@ pub fn start_sync(
     if !config.enabled {
         return Err(format!("Sync config '{}' is not enabled", config_id));
     }
+
+    // Drop db read lock before calling pipeline which acquires its own locks
+    drop(db);
 
     // 2. Create pipeline and run sync
     let pipeline = crate::sync::SyncPipeline::new(config, "cybermanju.db".to_string());

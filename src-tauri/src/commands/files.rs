@@ -1,6 +1,4 @@
 use tauri::State;
-use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
 use chrono::Utc;
 
 use crate::AppState;
@@ -8,20 +6,43 @@ use crate::db::schema::FileNode;
 use crate::db::schema::LooseGroup;
 
 /// List all file nodes whose parent_id matches the given parent_path.
+/// Uses the parent_index secondary index for O(1) lookup instead of O(N) full scan.
 #[tauri::command]
 pub fn list_files(parent_path: String, state: State<'_, AppState>) -> Result<Vec<FileNode>, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
-    let tx = db.begin_read().map_err(|e| e.to_string())?;
-    let mut results = Vec::new();
-    let read_table = tx.open_table(crate::db::Database::get_files_table())
+    let db = state.db.read().map_err(|e| e.to_string())?;
+
+    // Use the parent index for O(1) lookup
+    let file_ids = db
+        .list_by_parent(&parent_path)
         .map_err(|e| e.to_string())?;
 
-    for entry in read_table.iter().map_err(|e| e.to_string())? {
-        let (_, value) = entry.map_err(|e| e.to_string())?;
-        let file_node: FileNode = serde_json::from_str(&value.value())
-            .map_err(|e| e.to_string())?;
-        if file_node.parent_id == parent_path {
-            results.push(file_node);
+    if file_ids.is_empty() {
+        // No entries in the parent index — return empty
+        return Ok(Vec::new());
+    }
+
+    let tx = db.begin_read().map_err(|e| e.to_string())?;
+    let read_table = tx
+        .open_table(crate::db::Database::get_files_table())
+        .map_err(|e| e.to_string())?;
+
+    let mut results = Vec::new();
+    for file_id in &file_ids {
+        match read_table.get(file_id.as_str()).map_err(|e| e.to_string())? {
+            Some(value) => {
+                match serde_json::from_str::<FileNode>(&value.value()) {
+                    Ok(node) => results.push(node),
+                    Err(_) => {
+                        // Stale index entry — file was deleted but index wasn't updated.
+                        // Clean up the index entry in the background.
+                        log::warn!("Stale parent index entry for file_id={}", file_id);
+                    }
+                }
+            }
+            None => {
+                // File was deleted but parent index wasn't updated — skip
+                log::warn!("Parent index references non-existent file_id={}", file_id);
+            }
         }
     }
 
@@ -31,9 +52,10 @@ pub fn list_files(parent_path: String, state: State<'_, AppState>) -> Result<Vec
 /// Get a single file node by its ID.
 #[tauri::command]
 pub fn get_file(file_id: String, state: State<'_, AppState>) -> Result<FileNode, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.read().map_err(|e| e.to_string())?;
     let tx = db.begin_read().map_err(|e| e.to_string())?;
-    let table = tx.open_table(crate::db::Database::get_files_table())
+    let table = tx
+        .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
 
     let value = table
@@ -56,7 +78,7 @@ pub fn create_folder(name: String, parent_id: String, state: State<'_, AppState>
         id: folder_id.clone(),
         name,
         file_type: "folder".to_string(),
-        parent_id: Some(parent_id),
+        parent_id: Some(parent_id.clone()),
         size_bytes: 0,
         mime_type: None,
         hash_blake3: None,
@@ -75,16 +97,22 @@ pub fn create_folder(name: String, parent_id: String, state: State<'_, AppState>
         gps_lon: None,
     };
 
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.write().map_err(|e| e.to_string())?;
     let serialized = serde_json::to_string(&folder).map_err(|e| e.to_string())?;
     let tx = db.begin_write().map_err(|e| e.to_string())?;
     {
-        let mut table = tx.open_table(crate::db::Database::get_files_table())
+        let mut table = tx
+            .open_table(crate::db::Database::get_files_table())
             .map_err(|e| e.to_string())?;
-        table.insert(&folder_id, serialized.as_str())
+        table
+            .insert(&folder_id, serialized.as_str())
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
+
+    // Update parent index
+    db.add_to_parent_index(&folder_id, &parent_id)
+        .map_err(|e| e.to_string())?;
 
     Ok(folder)
 }
@@ -92,12 +120,34 @@ pub fn create_folder(name: String, parent_id: String, state: State<'_, AppState>
 /// Delete a file or folder by its ID.
 #[tauri::command]
 pub fn delete_file(file_id: String, state: State<'_, AppState>) -> Result<bool, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.write().map_err(|e| e.to_string())?;
+
+    // First read the file node to get its parent_id for index cleanup
+    let tx_read = db.begin_read().map_err(|e| e.to_string())?;
+    let table_read = tx_read
+        .open_table(crate::db::Database::get_files_table())
+        .map_err(|e| e.to_string())?;
+    let value = table_read.get(&file_id).map_err(|e| e.to_string())?;
+
+    // Remove from parent index if we have parent info
+    if let Some(val) = &value {
+        if let Ok(node) = serde_json::from_str::<FileNode>(val.value()) {
+            if let Some(ref parent) = node.parent_id {
+                db.remove_from_parent_index(&file_id, parent)
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    drop(tx_read);
+
+    // Now delete from the files table
     let tx = db.begin_write().map_err(|e| e.to_string())?;
     {
-        let mut table = tx.open_table(crate::db::Database::get_files_table())
+        let mut table = tx
+            .open_table(crate::db::Database::get_files_table())
             .map_err(|e| e.to_string())?;
-        let removed = table.remove(&file_id)
+        let removed = table
+            .remove(&file_id)
             .map_err(|e| e.to_string())?
             .is_some();
         if !removed {
@@ -105,19 +155,22 @@ pub fn delete_file(file_id: String, state: State<'_, AppState>) -> Result<bool, 
         }
     }
     tx.commit().map_err(|e| e.to_string())?;
+
     Ok(true)
 }
 
 /// Rename a file or folder.
 #[tauri::command]
 pub fn rename_file(file_id: String, new_name: String, state: State<'_, AppState>) -> Result<FileNode, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.write().map_err(|e| e.to_string())?;
 
     // Read existing
     let tx_read = db.begin_read().map_err(|e| e.to_string())?;
-    let table_read = tx_read.open_table(crate::db::Database::get_files_table())
+    let table_read = tx_read
+        .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
-    let value = table_read.get(&file_id)
+    let value = table_read
+        .get(&file_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
     let mut file_node: FileNode = serde_json::from_str(&value.value())
@@ -130,9 +183,11 @@ pub fn rename_file(file_id: String, new_name: String, state: State<'_, AppState>
     let serialized = serde_json::to_string(&file_node).map_err(|e| e.to_string())?;
     let tx = db.begin_write().map_err(|e| e.to_string())?;
     {
-        let mut table = tx.open_table(crate::db::Database::get_files_table())
+        let mut table = tx
+            .open_table(crate::db::Database::get_files_table())
             .map_err(|e| e.to_string())?;
-        table.insert(&file_id, serialized.as_str())
+        table
+            .insert(&file_id, serialized.as_str())
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
@@ -145,13 +200,15 @@ pub fn rename_file(file_id: String, new_name: String, state: State<'_, AppState>
 /// and stores in redb.
 #[tauri::command]
 pub fn duplicate_file_context(file_id: String, state: State<'_, AppState>) -> Result<FileNode, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.write().map_err(|e| e.to_string())?;
 
     // Read the original file node
     let tx_read = db.begin_read().map_err(|e| e.to_string())?;
-    let table_read = tx_read.open_table(crate::db::Database::get_files_table())
+    let table_read = tx_read
+        .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
-    let value = table_read.get(&file_id)
+    let value = table_read
+        .get(&file_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
     let original: FileNode = serde_json::from_str(&value.value())
@@ -178,10 +235,19 @@ pub fn duplicate_file_context(file_id: String, state: State<'_, AppState>) -> Re
     });
 
     // Preserve context_data and augment with duplication metadata
-    let mut context_data = original.context_data.clone().unwrap_or(serde_json::Value::Null);
+    let mut context_data = original
+        .context_data
+        .clone()
+        .unwrap_or(serde_json::Value::Null);
     if let Some(obj) = context_data.as_object_mut() {
-        obj.insert("duplicated_from".to_string(), serde_json::json!(file_id));
-        obj.insert("duplicate_created_at".to_string(), serde_json::json!(now));
+        obj.insert(
+            "duplicated_from".to_string(),
+            serde_json::json!(file_id),
+        );
+        obj.insert(
+            "duplicate_created_at".to_string(),
+            serde_json::json!(now),
+        );
     }
 
     let mut duplicated = original;
@@ -199,12 +265,20 @@ pub fn duplicate_file_context(file_id: String, state: State<'_, AppState>) -> Re
     let serialized = serde_json::to_string(&duplicated).map_err(|e| e.to_string())?;
     let tx = db.begin_write().map_err(|e| e.to_string())?;
     {
-        let mut table = tx.open_table(crate::db::Database::get_files_table())
+        let mut table = tx
+            .open_table(crate::db::Database::get_files_table())
             .map_err(|e| e.to_string())?;
-        table.insert(&new_id, serialized.as_str())
+        table
+            .insert(&new_id, serialized.as_str())
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
+
+    // Update parent index for the duplicate
+    if let Some(ref parent) = duplicated.parent_id {
+        db.add_to_parent_index(&new_id, parent)
+            .map_err(|e| e.to_string())?;
+    }
 
     Ok(duplicated)
 }
@@ -212,31 +286,45 @@ pub fn duplicate_file_context(file_id: String, state: State<'_, AppState>) -> Re
 /// Move a file to a new parent.
 #[tauri::command]
 pub fn move_file(file_id: String, new_parent_id: String, state: State<'_, AppState>) -> Result<FileNode, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.write().map_err(|e| e.to_string())?;
 
     // Read existing
     let tx_read = db.begin_read().map_err(|e| e.to_string())?;
-    let table_read = tx_read.open_table(crate::db::Database::get_files_table())
+    let table_read = tx_read
+        .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
-    let value = table_read.get(&file_id)
+    let value = table_read
+        .get(&file_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
     let mut file_node: FileNode = serde_json::from_str(&value.value())
         .map_err(|e| e.to_string())?;
 
-    file_node.parent_id = new_parent_id;
+    // Update parent index: remove from old parent, add to new parent
+    let old_parent = file_node.parent_id.clone();
+    file_node.parent_id = Some(new_parent_id.clone());
     file_node.modified_at = Utc::now().to_rfc3339();
 
-    // Write back
+    // Write back the updated file node
     let serialized = serde_json::to_string(&file_node).map_err(|e| e.to_string())?;
     let tx = db.begin_write().map_err(|e| e.to_string())?;
     {
-        let mut table = tx.open_table(crate::db::Database::get_files_table())
+        let mut table = tx
+            .open_table(crate::db::Database::get_files_table())
             .map_err(|e| e.to_string())?;
-        table.insert(&file_id, serialized.as_str())
+        table
+            .insert(&file_id, serialized.as_str())
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
+
+    // Update parent index
+    if let Some(ref old) = old_parent {
+        db.remove_from_parent_index(&file_id, old)
+            .map_err(|e| e.to_string())?;
+    }
+    db.add_to_parent_index(&file_id, &new_parent_id)
+        .map_err(|e| e.to_string())?;
 
     Ok(file_node)
 }
@@ -244,9 +332,10 @@ pub fn move_file(file_id: String, new_parent_id: String, state: State<'_, AppSta
 /// Get preview metadata for a file.
 #[tauri::command]
 pub fn get_preview(file_id: String, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.read().map_err(|e| e.to_string())?;
     let tx = db.begin_read().map_err(|e| e.to_string())?;
-    let table = tx.open_table(crate::db::Database::get_files_table())
+    let table = tx
+        .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
 
     let value = table
@@ -289,13 +378,15 @@ pub fn create_loose_group(name: String, color: String, state: State<'_, AppState
         created_at: now,
     };
 
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.write().map_err(|e| e.to_string())?;
     let serialized = serde_json::to_string(&group).map_err(|e| e.to_string())?;
     let tx = db.begin_write().map_err(|e| e.to_string())?;
     {
-        let mut table = tx.open_table(crate::db::Database::get_loose_groups_table())
+        let mut table = tx
+            .open_table(crate::db::Database::get_loose_groups_table())
             .map_err(|e| e.to_string())?;
-        table.insert(&group_id, serialized.as_str())
+        table
+            .insert(&group_id, serialized.as_str())
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
@@ -306,13 +397,15 @@ pub fn create_loose_group(name: String, color: String, state: State<'_, AppState
 /// Add a file to a loose group. Also updates the file node's loose_group_ids.
 #[tauri::command]
 pub fn add_to_loose_group(group_id: String, file_id: String, state: State<'_, AppState>) -> Result<LooseGroup, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.write().map_err(|e| e.to_string())?;
 
     // Read the group
     let tx_read = db.begin_read().map_err(|e| e.to_string())?;
-    let group_table = tx_read.open_table(crate::db::Database::get_loose_groups_table())
+    let group_table = tx_read
+        .open_table(crate::db::Database::get_loose_groups_table())
         .map_err(|e| e.to_string())?;
-    let group_value = group_table.get(&group_id)
+    let group_value = group_table
+        .get(&group_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Loose group not found: {}", group_id))?;
     let mut group: LooseGroup = serde_json::from_str(&group_value.value())
@@ -323,9 +416,11 @@ pub fn add_to_loose_group(group_id: String, file_id: String, state: State<'_, Ap
     }
 
     // Read the file node
-    let file_table = tx_read.open_table(crate::db::Database::get_files_table())
+    let file_table = tx_read
+        .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
-    let file_value = file_table.get(&file_id)
+    let file_value = file_table
+        .get(&file_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
     let mut file_node: FileNode = serde_json::from_str(&file_value.value())
@@ -341,12 +436,14 @@ pub fn add_to_loose_group(group_id: String, file_id: String, state: State<'_, Ap
     let file_serialized = serde_json::to_string(&file_node).map_err(|e| e.to_string())?;
     let tx = db.begin_write().map_err(|e| e.to_string())?;
     {
-        let mut gt = tx.open_table(crate::db::Database::get_loose_groups_table())
+        let mut gt = tx
+            .open_table(crate::db::Database::get_loose_groups_table())
             .map_err(|e| e.to_string())?;
         gt.insert(&group_id, group_serialized.as_str())
             .map_err(|e| e.to_string())?;
 
-        let mut ft = tx.open_table(crate::db::Database::get_files_table())
+        let mut ft = tx
+            .open_table(crate::db::Database::get_files_table())
             .map_err(|e| e.to_string())?;
         ft.insert(&file_id, file_serialized.as_str())
             .map_err(|e| e.to_string())?;
@@ -359,9 +456,10 @@ pub fn add_to_loose_group(group_id: String, file_id: String, state: State<'_, Ap
 /// List all loose groups.
 #[tauri::command]
 pub fn list_loose_groups(state: State<'_, AppState>) -> Result<Vec<LooseGroup>, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.read().map_err(|e| e.to_string())?;
     let tx = db.begin_read().map_err(|e| e.to_string())?;
-    let table = tx.open_table(crate::db::Database::get_loose_groups_table())
+    let table = tx
+        .open_table(crate::db::Database::get_loose_groups_table())
         .map_err(|e| e.to_string())?;
 
     let mut results = Vec::new();

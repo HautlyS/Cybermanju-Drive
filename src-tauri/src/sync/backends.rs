@@ -1,6 +1,6 @@
 // Cybermanju Drive — Storage Sync Backends
 // Four backend implementations: Local, GitHub, Google Drive, Google Photos
-// All HTTP backends use `curl` subprocess to avoid external HTTP dependencies.
+// All HTTP backends use reqwest::blocking (no curl subprocess).
 
 use crate::sync::models::*;
 use log::info;
@@ -8,23 +8,61 @@ use std::fs;
 use std::path::Path;
 
 // ===========================================================================
-// Helper: run curl and return (stdout, stderr, exit_code)
+// Helper: safe path join (prevents path traversal)
 // ===========================================================================
 
-fn run_curl(args: &[&str]) -> Result<(String, String, i32), String> {
-    let mut cmd = std::process::Command::new("curl");
-    for arg in args {
-        cmd.arg(arg);
+/// Safely join a base path with a remote path, ensuring the result stays
+/// within the base directory. Rejects symlinks that resolve outside base.
+fn safe_join(base: &str, remote: &str) -> Result<String, String> {
+    let base = std::path::Path::new(base)
+        .canonicalize()
+        .map_err(|e| format!("Cannot canonicalize base path '{}': {}", base, e))?;
+    let joined = base.join(remote);
+    // canonicalize will fail if the target doesn't exist yet (e.g. during upload dest).
+    // For existing files it validates the real location; for new files we validate
+    // the parent directory.
+    match joined.canonicalize() {
+        Ok(canonical) => {
+            if !canonical.starts_with(&base) {
+                return Err("Path traversal detected".to_string());
+            }
+            // Also reject if the path itself is a symlink pointing outside
+            if joined.is_symlink() {
+                let link_target = std::fs::read_link(&joined)
+                    .map_err(|e| format!("Cannot read symlink: {}", e))?;
+                if !base.join(&link_target).starts_with(&base) {
+                    return Err("Symlink target outside base path".to_string());
+                }
+            }
+            Ok(canonical.to_string_lossy().to_string())
+        }
+        Err(_) => {
+            // File doesn't exist yet — validate the parent
+            if let Some(parent) = joined.parent() {
+                if parent.as_os_str().is_empty() {
+                    // parent is "/" or empty, just use base
+                    return Ok(base.to_string_lossy().to_string());
+                }
+                let parent_canonical = parent
+                    .canonicalize()
+                    .map_err(|e| format!("Cannot canonicalize parent directory: {}", e))?;
+                if !parent_canonical.starts_with(&base) {
+                    return Err("Path traversal detected in parent directory".to_string());
+                }
+            }
+            // Canonicalize the base and re-join to get a clean absolute path
+            let clean = base.join(remote);
+            let clean_str = clean.to_string_lossy().to_string();
+            // Final safety: ensure no ".." component in the resolved result
+            let resolved = std::path::Path::new(&clean_str);
+            for component in resolved.components() {
+                if let std::path::Component::ParentDir = component {
+                    return Err("Path traversal detected: parent directory component".to_string());
+                }
+            }
+            Ok(clean_str)
+        }
     }
-    cmd.stdout(std::process::Stdio::piped());
-    cmd.stderr(std::process::Stdio::piped());
-
-    let output = cmd.output().map_err(|e| format!("Failed to execute curl: {}", e))?;
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let code = output.status.code().unwrap_or(-1);
-
-    Ok((stdout, stderr, code))
 }
 
 // ===========================================================================
@@ -40,6 +78,17 @@ fn parse_repo(repo_name: &str) -> Result<(String, String), String> {
         ));
     }
     Ok((parts[0].to_string(), parts[1].to_string()))
+}
+
+// ===========================================================================
+// Helper: build a shared reqwest::blocking::Client
+// ===========================================================================
+
+fn http_client() -> Result<reqwest::blocking::Client, String> {
+    reqwest::blocking::Client::builder()
+        .user_agent("CybermanjuDrive/0.1")
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {}", e))
 }
 
 // ===========================================================================
@@ -68,18 +117,29 @@ impl StorageBackend for LocalBackend {
     }
 
     fn upload_file(&self, local_path: &str, remote_path: &str) -> Result<String, String> {
-        let dest = Path::new(&self.base_path).join(remote_path);
-        if let Some(parent) = dest.parent() {
+        let dest = safe_join(&self.base_path, remote_path)?;
+        if let Some(parent) = Path::new(&dest).parent() {
             fs::create_dir_all(parent)
                 .map_err(|e| format!("Failed to create directory: {}", e))?;
         }
         fs::copy(local_path, &dest)
             .map_err(|e| format!("Failed to copy file: {}", e))?;
-        Ok(dest.to_string_lossy().to_string())
+        Ok(dest)
     }
 
     fn download_file(&self, remote_path: &str, local_path: &str) -> Result<(), String> {
-        let src = Path::new(&self.base_path).join(remote_path);
+        let src = safe_join(&self.base_path, remote_path)?;
+        // Verify the source is not a symlink pointing outside
+        if Path::new(&src).is_symlink() {
+            let link_target = fs::read_link(&src)
+                .map_err(|e| format!("Cannot read symlink: {}", e))?;
+            let base = std::path::Path::new(&self.base_path)
+                .canonicalize()
+                .map_err(|e| e.to_string())?;
+            if !base.join(&link_target).starts_with(&base) {
+                return Err("Symlink target outside base path".to_string());
+            }
+        }
         if let Some(parent) = Path::new(local_path).parent() {
             fs::create_dir_all(parent)
                 .map_err(|e| format!("Failed to create directory: {}", e))?;
@@ -90,8 +150,8 @@ impl StorageBackend for LocalBackend {
     }
 
     fn delete_file(&self, remote_path: &str) -> Result<(), String> {
-        let path = Path::new(&self.base_path).join(remote_path);
-        if path.exists() {
+        let path = safe_join(&self.base_path, remote_path)?;
+        if Path::new(&path).exists() {
             fs::remove_file(&path)
                 .map_err(|e| format!("Failed to delete file: {}", e))?;
         }
@@ -99,17 +159,29 @@ impl StorageBackend for LocalBackend {
     }
 
     fn list_files(&self, prefix: &str) -> Result<Vec<RemoteFile>, String> {
-        let dir = Path::new(&self.base_path).join(prefix);
-        if !dir.exists() || !dir.is_dir() {
+        let dir = safe_join(&self.base_path, prefix)?;
+        if !Path::new(&dir).exists() || !Path::new(&dir).is_dir() {
             return Ok(Vec::new());
         }
 
+        let base = std::path::Path::new(&self.base_path)
+            .canonicalize()
+            .map_err(|e| e.to_string())?;
         let mut files = Vec::new();
         for entry in fs::read_dir(&dir)
             .map_err(|e| format!("Failed to read directory: {}", e))?
         {
             let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
             let path = entry.path();
+
+            // Skip symlinks that point outside base
+            if path.is_symlink() {
+                let target = fs::read_link(&path).unwrap_or_default();
+                if !base.join(&target).starts_with(&base) {
+                    continue;
+                }
+            }
+
             if path.is_file() {
                 let metadata = entry.metadata().ok();
                 let name = path
@@ -142,12 +214,12 @@ impl StorageBackend for LocalBackend {
     }
 
     fn get_file_url(&self, remote_path: &str) -> Result<String, String> {
-        let full = Path::new(&self.base_path).join(remote_path);
-        Ok(full.to_string_lossy().to_string())
+        let full = safe_join(&self.base_path, remote_path)?;
+        Ok(full)
     }
 
     fn test_connection(&self) -> Result<bool, String> {
-        let path = Path::new(&self.base_path);
+        let path = std::path::Path::new(&self.base_path);
         if !path.exists() {
             fs::create_dir_all(path)
                 .map_err(|e| format!("Cannot create base path '{}': {}", self.base_path, e))?;
@@ -187,6 +259,8 @@ impl GitHubBackend {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "upload".to_string());
 
+        let client = http_client()?;
+
         // 1. Create a release
         let tag = format!("sync-{}", chrono::Utc::now().format("%Y%m%d%H%M%S"));
         let release_body = serde_json::json!({
@@ -196,45 +270,31 @@ impl GitHubBackend {
             "draft": true,
             "prerelease": false
         });
-        let release_json = serde_json::to_string(&release_body)
-            .map_err(|e| format!("Failed to serialize release: {}", e))?;
 
-        let (out, _err, code) = run_curl(&[
-            "-s",
-            "-w",
-            "\n%{http_code}",
-            "-X",
-            "POST",
-            "-H",
-            &format!("Authorization: token {}", self.token),
-            "-H",
-            "Accept: application/vnd.github+json",
-            "-H",
-            "Content-Type: application/json",
-            "-d",
-            &release_json,
-            &format!(
+        let resp = client
+            .post(&format!(
                 "https://api.github.com/repos/{}/{}/releases",
                 owner, repo
-            ),
-        ])?;
+            ))
+            .header("Authorization", format!("token {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .json(&release_body)
+            .send()
+            .map_err(|e| format!("GitHub release request failed: {}", e))?;
 
-        // Parse HTTP status code from the last line
-        let parts: Vec<&str> = out.rsplitn(2, '\n').collect();
-        let status_code: i32 = parts
-            .first()
-            .and_then(|s| s.trim().parse().ok())
-            .unwrap_or(code);
-        let body = if parts.len() > 1 { parts[1] } else { "" };
+        let status = resp.status().as_u16();
+        let body = resp
+            .text()
+            .map_err(|e| format!("Failed to read release response: {}", e))?;
 
-        if status_code < 200 || status_code >= 300 {
+        if status < 200 || status >= 300 {
             return Err(format!(
                 "GitHub release creation failed ({}): {}",
-                status_code, body
+                status, body
             ));
         }
 
-        let release: serde_json::Value = serde_json::from_str(body)
+        let release: serde_json::Value = serde_json::from_str(&body)
             .map_err(|e| format!("Failed to parse release response: {}", e))?;
         let _release_id = release["id"]
             .as_u64()
@@ -245,33 +305,27 @@ impl GitHubBackend {
             .replace("{?name,label}", "");
 
         // 2. Upload the asset
-        let upload_endpoint = format!("{}?name={}", upload_url, file_name);
-        let (up_out, up_err, up_code) = run_curl(&[
-            "-s",
-            "-w",
-            "\n%{http_code}",
-            "-X",
-            "POST",
-            "-H",
-            &format!("Authorization: token {}", self.token),
-            "-H",
-            "Content-Type: application/octet-stream",
-            "--data-binary",
-            &format("@{}", local_path),
-            &upload_endpoint,
-        ])?;
+        let file_bytes = fs::read(local_path)
+            .map_err(|e| format!("Failed to read file for release upload: {}", e))?;
 
-        let up_parts: Vec<&str> = up_out.rsplitn(2, '\n').collect();
-        let up_status: i32 = up_parts
-            .first()
-            .and_then(|s| s.trim().parse().ok())
-            .unwrap_or(up_code);
+        let upload_endpoint = format!("{}?name={}", upload_url, file_name);
+        let up_resp = client
+            .post(&upload_endpoint)
+            .header("Authorization", format!("token {}", self.token))
+            .header("Content-Type", "application/octet-stream")
+            .body(file_bytes)
+            .send()
+            .map_err(|e| format!("GitHub release upload request failed: {}", e))?;
+
+        let up_status = up_resp.status().as_u16();
+        let up_body = up_resp
+            .text()
+            .unwrap_or_default();
 
         if up_status < 200 || up_status >= 300 {
             return Err(format!(
                 "GitHub release upload failed ({}): {}",
-                up_status,
-                if up_parts.len() > 1 { up_parts[1] } else { &up_err }
+                up_status, up_body
             ));
         }
 
@@ -316,48 +370,33 @@ impl StorageBackend for GitHubBackend {
             "content": b64,
             "branch": self.branch,
         });
-        let body_json = serde_json::to_string(&put_body)
-            .map_err(|e| format!("Failed to serialize: {}", e))?;
 
         let url = format!(
             "https://api.github.com/repos/{}/{}/contents/{}",
             owner, repo, remote_path
         );
 
-        let (out, _err, code) = run_curl(&[
-            "-s",
-            "-w",
-            "\n%{http_code}",
-            "-X",
-            "PUT",
-            "-H",
-            &format!("Authorization: token {}", self.token),
-            "-H",
-            "Accept: application/vnd.github+json",
-            "-H",
-            "Content-Type: application/json",
-            "-d",
-            &body_json,
-            &url,
-        ])?;
+        let client = http_client()?;
+        let resp = client
+            .put(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .json(&put_body)
+            .send()
+            .map_err(|e| format!("GitHub upload request failed: {}", e))?;
 
-        let parts: Vec<&str> = out.rsplitn(2, '\n').collect();
-        let status_code: i32 = parts
-            .first()
-            .and_then(|s| s.trim().parse().ok())
-            .unwrap_or(code);
-        let body = if parts.len() > 1 { parts[1] } else { "" };
+        let status = resp.status().as_u16();
+        let body = resp
+            .text()
+            .map_err(|e| format!("Failed to read upload response: {}", e))?;
 
-        if status_code < 200 || status_code >= 300 {
-            return Err(format!(
-                "GitHub upload failed ({}): {}",
-                status_code, body
-            ));
+        if status < 200 || status >= 300 {
+            return Err(format!("GitHub upload failed ({}): {}", status, body));
         }
 
-        let resp: serde_json::Value = serde_json::from_str(body)
+        let resp_json: serde_json::Value = serde_json::from_str(&body)
             .map_err(|e| format!("Failed to parse upload response: {}", e))?;
-        let download_url = resp["content"]["download_url"]
+        let download_url = resp_json["content"]["download_url"]
             .as_str()
             .unwrap_or("")
             .to_string();
@@ -372,34 +411,26 @@ impl StorageBackend for GitHubBackend {
             owner, repo, remote_path
         );
 
-        let (out, _err, code) = run_curl(&[
-            "-s",
-            "-w",
-            "\n%{http_code}",
-            "-H",
-            &format!("Authorization: token {}", self.token),
-            "-H",
-            "Accept: application/vnd.github+json",
-            &url,
-        ])?;
+        let client = http_client()?;
+        let resp = client
+            .get(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .map_err(|e| format!("GitHub download request failed: {}", e))?;
 
-        let parts: Vec<&str> = out.rsplitn(2, '\n').collect();
-        let status_code: i32 = parts
-            .first()
-            .and_then(|s| s.trim().parse().ok())
-            .unwrap_or(code);
-        let body = if parts.len() > 1 { parts[1] } else { "" };
-
-        if status_code < 200 || status_code >= 300 {
-            return Err(format!(
-                "GitHub download failed ({}): {}",
-                status_code, body
-            ));
+        let status = resp.status().as_u16();
+        if status < 200 || status >= 300 {
+            let body = resp.text().unwrap_or_default();
+            return Err(format!("GitHub download failed ({}): {}", status, body));
         }
 
-        let resp: serde_json::Value = serde_json::from_str(body)
+        let body = resp
+            .text()
+            .map_err(|e| format!("Failed to read download response: {}", e))?;
+        let resp_json: serde_json::Value = serde_json::from_str(&body)
             .map_err(|e| format!("Failed to parse response: {}", e))?;
-        let content_b64 = resp["content"]
+        let content_b64 = resp_json["content"]
             .as_str()
             .ok_or("No 'content' field in response")?;
 
@@ -423,46 +454,36 @@ impl StorageBackend for GitHubBackend {
 
     fn delete_file(&self, remote_path: &str) -> Result<(), String> {
         let (owner, repo) = parse_repo(&self.repo_name)?;
-
-        // First get the file's SHA
         let url = format!(
             "https://api.github.com/repos/{}/{}/contents/{}",
             owner, repo, remote_path
         );
 
-        let (out, _err, code) = run_curl(&[
-            "-s",
-            "-w",
-            "\n%{http_code}",
-            "-H",
-            &format!("Authorization: token {}", self.token),
-            "-H",
-            "Accept: application/vnd.github+json",
-            &url,
-        ])?;
+        let client = http_client()?;
 
-        let parts: Vec<&str> = out.rsplitn(2, '\n').collect();
-        let status_code: i32 = parts
-            .first()
-            .and_then(|s| s.trim().parse().ok())
-            .unwrap_or(code);
-        let body = if parts.len() > 1 { parts[1] } else { "" };
+        // First get the file's SHA
+        let get_resp = client
+            .get(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .map_err(|e| format!("GitHub get SHA request failed: {}", e))?;
 
-        if status_code == 404 {
-            // File already gone
+        let get_status = get_resp.status().as_u16();
+        if get_status == 404 {
             return Ok(());
         }
-
-        if status_code < 200 || status_code >= 300 {
-            return Err(format!(
-                "GitHub get SHA failed ({}): {}",
-                status_code, body
-            ));
+        if get_status < 200 || get_status >= 300 {
+            let body = get_resp.text().unwrap_or_default();
+            return Err(format!("GitHub get SHA failed ({}): {}", get_status, body));
         }
 
-        let resp: serde_json::Value = serde_json::from_str(body)
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
-        let sha = resp["sha"]
+        let get_body = get_resp
+            .text()
+            .map_err(|e| format!("Failed to read get response: {}", e))?;
+        let get_json: serde_json::Value = serde_json::from_str(&get_body)
+            .map_err(|e| format!("Failed to parse get response: {}", e))?;
+        let sha = get_json["sha"]
             .as_str()
             .ok_or("No 'sha' field in response")?;
 
@@ -471,38 +492,19 @@ impl StorageBackend for GitHubBackend {
             "sha": sha,
             "branch": self.branch,
         });
-        let delete_json = serde_json::to_string(&delete_body)
-            .map_err(|e| format!("Failed to serialize: {}", e))?;
 
-        let (del_out, del_err, del_code) = run_curl(&[
-            "-s",
-            "-w",
-            "\n%{http_code}",
-            "-X",
-            "DELETE",
-            "-H",
-            &format!("Authorization: token {}", self.token),
-            "-H",
-            "Accept: application/vnd.github+json",
-            "-H",
-            "Content-Type: application/json",
-            "-d",
-            &delete_json,
-            &url,
-        ])?;
+        let del_resp = client
+            .delete(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .json(&delete_body)
+            .send()
+            .map_err(|e| format!("GitHub delete request failed: {}", e))?;
 
-        let del_parts: Vec<&str> = del_out.rsplitn(2, '\n').collect();
-        let del_status: i32 = del_parts
-            .first()
-            .and_then(|s| s.trim().parse().ok())
-            .unwrap_or(del_code);
-
+        let del_status = del_resp.status().as_u16();
         if del_status < 200 || del_status >= 300 {
-            return Err(format!(
-                "GitHub delete failed ({}): {}",
-                del_status,
-                if del_parts.len() > 1 { del_parts[1] } else { &del_err }
-            ));
+            let del_body = del_resp.text().unwrap_or_default();
+            return Err(format!("GitHub delete failed ({}): {}", del_status, del_body));
         }
 
         Ok(())
@@ -515,32 +517,24 @@ impl StorageBackend for GitHubBackend {
             owner, repo, prefix
         );
 
-        let (out, _err, code) = run_curl(&[
-            "-s",
-            "-w",
-            "\n%{http_code}",
-            "-H",
-            &format!("Authorization: token {}", self.token),
-            "-H",
-            "Accept: application/vnd.github+json",
-            &url,
-        ])?;
+        let client = http_client()?;
+        let resp = client
+            .get(&url)
+            .header("Authorization", format!("token {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .map_err(|e| format!("GitHub list request failed: {}", e))?;
 
-        let parts: Vec<&str> = out.rsplitn(2, '\n').collect();
-        let status_code: i32 = parts
-            .first()
-            .and_then(|s| s.trim().parse().ok())
-            .unwrap_or(code);
-        let body = if parts.len() > 1 { parts[1] } else { "" };
+        let status = resp.status().as_u16();
+        let body = resp
+            .text()
+            .map_err(|e| format!("Failed to read list response: {}", e))?;
 
-        if status_code < 200 || status_code >= 300 {
-            return Err(format!(
-                "GitHub list failed ({}): {}",
-                status_code, body
-            ));
+        if status < 200 || status >= 300 {
+            return Err(format!("GitHub list failed ({}): {}", status, body));
         }
 
-        let items: Vec<serde_json::Value> = serde_json::from_str(body)
+        let items: Vec<serde_json::Value> = serde_json::from_str(&body)
             .map_err(|e| format!("Failed to parse listing: {}", e))?;
 
         let mut files = Vec::new();
@@ -558,7 +552,8 @@ impl StorageBackend for GitHubBackend {
                 .unwrap_or(&name)
                 .to_string();
             let size = item["size"].as_u64().unwrap_or(0);
-            let modified = item.get("created_at")
+            let modified = item
+                .get("created_at")
                 .or_else(|| item.get("updated_at"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
@@ -589,26 +584,20 @@ impl StorageBackend for GitHubBackend {
     }
 
     fn test_connection(&self) -> Result<bool, String> {
-        let (out, err, code) = run_curl(&[
-            "-s",
-            "-o",
-            "/dev/null",
-            "-w",
-            "%{http_code}",
-            "-H",
-            &format!("Authorization: token {}", self.token),
-            "-H",
-            "Accept: application/vnd.github+json",
-            "https://api.github.com/user",
-        ])?;
+        let client = http_client()?;
+        let resp = client
+            .get("https://api.github.com/user")
+            .header("Authorization", format!("token {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .send()
+            .map_err(|e| format!("GitHub connection test request failed: {}", e))?;
 
-        let status: i32 = out.trim().parse().unwrap_or(code);
-        if status == 200 {
+        if resp.status().as_u16() == 200 {
             Ok(true)
         } else {
             Err(format!(
-                "GitHub connection test failed (HTTP {}). {}",
-                status, err
+                "GitHub connection test failed (HTTP {})",
+                resp.status()
             ))
         }
     }
@@ -647,6 +636,9 @@ impl StorageBackend for GoogleDriveBackend {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "upload".to_string());
 
+        let file_data = fs::read(local_path)
+            .map_err(|e| format!("Failed to read file: {}", e))?;
+
         // Build the JSON metadata part
         let mut metadata = serde_json::json!({
             "name": file_name,
@@ -654,84 +646,57 @@ impl StorageBackend for GoogleDriveBackend {
         if let Some(ref folder_id) = self.folder_id {
             metadata["parents"] = serde_json::json!([folder_id]);
         }
-        let metadata_json = serde_json::to_string(&metadata)
-            .map_err(|e| format!("Failed to serialize metadata: {}", e))?;
 
-        // Build the multipart body manually for curl
-        let boundary = "cybermanju_drive_boundary";
-        let mut multipart_body = Vec::new();
-        multipart_body
-            .extend_from_slice(format!("--{}\r\n", boundary).as_bytes());
-        multipart_body.extend_from_slice(
-            b"Content-Type: application/json; charset=UTF-8\r\n\r\n",
-        );
-        multipart_body.extend_from_slice(metadata_json.as_bytes());
-        multipart_body.extend_from_slice(b"\r\n");
-        multipart_body
-            .extend_from_slice(format!("--{}\r\n", boundary).as_bytes());
-        multipart_body.extend_from_slice(
-            b"Content-Type: application/octet-stream\r\n\r\n",
-        );
-        let file_data = fs::read(local_path)
-            .map_err(|e| format!("Failed to read file: {}", e))?;
-        multipart_body.extend_from_slice(&file_data);
-        multipart_body
-            .extend_from_slice(format!("--{}--\r\n", boundary).as_bytes());
+        let client = http_client()?;
 
-        // Write multipart body to a temp file for curl --data-binary @file
-        let tmp_path = format!("/tmp/cybermanju_gdrive_upload_{}.tmp", uuid::Uuid::new_v4());
-        fs::write(&tmp_path, &multipart_body)
-            .map_err(|e| format!("Failed to write temp file: {}", e))?;
+        // Use reqwest multipart
+        let form = reqwest::blocking::multipart::Form::new()
+            .part(
+                "metadata",
+                reqwest::blocking::multipart::Part::text(
+                    serde_json::to_string(&metadata)
+                        .map_err(|e| format!("Failed to serialize metadata: {}", e))?,
+                )
+                .mime_str("application/json; charset=UTF-8")
+                .map_err(|e| format!("Invalid MIME: {}", e))?,
+            )
+            .part(
+                "file",
+                reqwest::blocking::multipart::Part::bytes(file_data)
+                    .file_name(file_name)
+                    .mime_str("application/octet-stream")
+                    .map_err(|e| format!("Invalid MIME: {}", e))?,
+            );
 
-        let content_type = format!("multipart/related; boundary={}", boundary);
+        let resp = client
+            .post("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart")
+            .header("Authorization", format!("Bearer {}", self.token))
+            .multipart(form)
+            .send()
+            .map_err(|e| format!("Google Drive upload request failed: {}", e))?;
 
-        let result: Result<String, String> = (|| {
-            let (out, _err, code) = run_curl(&[
-                "-s",
-                "-w",
-                "\n%{http_code}",
-                "-X",
-                "POST",
-                "-H",
-                &format!("Authorization: Bearer {}", self.token),
-                "-H",
-                &format!("Content-Type: {}", content_type),
-                "--data-binary",
-                &format!("@{}", tmp_path),
-                "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
-            ])?;
-            let _ = fs::remove_file(&tmp_path);
+        let status = resp.status().as_u16();
+        let body = resp
+            .text()
+            .map_err(|e| format!("Failed to read upload response: {}", e))?;
 
-            let parts: Vec<&str> = out.rsplitn(2, '\n').collect();
-            let status_code: i32 = parts
-                .first()
-                .and_then(|s| s.trim().parse().ok())
-                .unwrap_or(code);
-            let body = if parts.len() > 1 { parts[1] } else { "" };
+        if status < 200 || status >= 300 {
+            return Err(format!(
+                "Google Drive upload failed ({}): {}",
+                status, body
+            ));
+        }
 
-            if status_code < 200 || status_code >= 300 {
-                return Err(format!(
-                    "Google Drive upload failed ({}): {}",
-                    status_code, body
-                ));
-            }
+        let resp_json: serde_json::Value = serde_json::from_str(&body)
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+        let file_id = resp_json["id"]
+            .as_str()
+            .ok_or("No 'id' in upload response")?;
 
-            let resp: serde_json::Value = serde_json::from_str(body)
-                .map_err(|e| format!("Failed to parse response: {}", e))?;
-            let file_id = resp["id"]
-                .as_str()
-                .ok_or("No 'id' in upload response")?;
-
-            Ok(format!(
-                "https://drive.google.com/file/d/{}/view",
-                file_id
-            ))
-        })();
-
-        // Clean up temp file if it still exists
-        let _ = fs::remove_file(&tmp_path);
-
-        result
+        Ok(format!(
+            "https://drive.google.com/file/d/{}/view",
+            file_id
+        ))
     }
 
     fn download_file(&self, remote_path: &str, local_path: &str) -> Result<(), String> {
@@ -742,29 +707,32 @@ impl StorageBackend for GoogleDriveBackend {
             file_id
         );
 
-        let (out, err, code) = run_curl(&[
-            "-s",
-            "-w",
-            "\n%{http_code}",
-            "-H",
-            &format!("Authorization: Bearer {}", self.token),
-            "-o",
-            local_path,
-            &url,
-        ])?;
+        let client = http_client()?;
+        let resp = client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .send()
+            .map_err(|e| format!("Google Drive download request failed: {}", e))?;
 
-        let parts: Vec<&str> = out.rsplitn(2, '\n').collect();
-        let status_code: i32 = parts
-            .first()
-            .and_then(|s| s.trim().parse().ok())
-            .unwrap_or(code);
-
-        if status_code < 200 || status_code >= 300 {
+        let status = resp.status().as_u16();
+        if status < 200 || status >= 300 {
+            let body = resp.text().unwrap_or_default();
             return Err(format!(
                 "Google Drive download failed ({}): {}",
-                status_code, err
+                status, body
             ));
         }
+
+        let bytes = resp
+            .bytes()
+            .map_err(|e| format!("Failed to read download body: {}", e))?;
+
+        if let Some(parent) = Path::new(local_path).parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create directory: {}", e))?;
+        }
+        fs::write(local_path, &bytes)
+            .map_err(|e| format!("Failed to write file: {}", e))?;
 
         Ok(())
     }
@@ -776,29 +744,22 @@ impl StorageBackend for GoogleDriveBackend {
             file_id
         );
 
-        let (out, err, code) = run_curl(&[
-            "-s",
-            "-w",
-            "\n%{http_code}",
-            "-X",
-            "DELETE",
-            "-H",
-            &format!("Authorization: Bearer {}", self.token),
-            &url,
-        ])?;
+        let client = http_client()?;
+        let resp = client
+            .delete(&url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .send()
+            .map_err(|e| format!("Google Drive delete request failed: {}", e))?;
 
-        let status_code: i32 = out
-            .trim()
-            .parse()
-            .unwrap_or(code);
-
+        let status = resp.status().as_u16();
         // 204 No Content is success
-        if status_code == 204 || status_code == 200 {
+        if status == 204 || status == 200 {
             Ok(())
         } else {
+            let body = resp.text().unwrap_or_default();
             Err(format!(
                 "Google Drive delete failed ({}): {}",
-                status_code, err
+                status, body
             ))
         }
     }
@@ -814,32 +775,28 @@ impl StorageBackend for GoogleDriveBackend {
             urlencoding(&query)
         );
 
-        let (out, _err, code) = run_curl(&[
-            "-s",
-            "-w",
-            "\n%{http_code}",
-            "-H",
-            &format!("Authorization: Bearer {}", self.token),
-            &url,
-        ])?;
+        let client = http_client()?;
+        let resp = client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .send()
+            .map_err(|e| format!("Google Drive list request failed: {}", e))?;
 
-        let parts: Vec<&str> = out.rsplitn(2, '\n').collect();
-        let status_code: i32 = parts
-            .first()
-            .and_then(|s| s.trim().parse().ok())
-            .unwrap_or(code);
-        let body = if parts.len() > 1 { parts[1] } else { "" };
+        let status = resp.status().as_u16();
+        let body = resp
+            .text()
+            .map_err(|e| format!("Failed to read list response: {}", e))?;
 
-        if status_code < 200 || status_code >= 300 {
+        if status < 200 || status >= 300 {
             return Err(format!(
                 "Google Drive list failed ({}): {}",
-                status_code, body
+                status, body
             ));
         }
 
-        let resp: serde_json::Value = serde_json::from_str(body)
+        let resp_json: serde_json::Value = serde_json::from_str(&body)
             .map_err(|e| format!("Failed to parse response: {}", e))?;
-        let files_array = resp["files"]
+        let files_array = resp_json["files"]
             .as_array()
             .cloned()
             .unwrap_or_default();
@@ -887,27 +844,19 @@ impl StorageBackend for GoogleDriveBackend {
     }
 
     fn test_connection(&self) -> Result<bool, String> {
-        let (out, err, code) = run_curl(&[
-            "-s",
-            "-w",
-            "\n%{http_code}",
-            "-H",
-            &format!("Authorization: Bearer {}", self.token),
-            "https://www.googleapis.com/drive/v3/about?fields=user",
-        ])?;
+        let client = http_client()?;
+        let resp = client
+            .get("https://www.googleapis.com/drive/v3/about?fields=user")
+            .header("Authorization", format!("Bearer {}", self.token))
+            .send()
+            .map_err(|e| format!("Google Drive connection test request failed: {}", e))?;
 
-        let parts: Vec<&str> = out.rsplitn(2, '\n').collect();
-        let status_code: i32 = parts
-            .first()
-            .and_then(|s| s.trim().parse().ok())
-            .unwrap_or(code);
-
-        if status_code == 200 {
+        if resp.status().as_u16() == 200 {
             Ok(true)
         } else {
             Err(format!(
-                "Google Drive connection test failed (HTTP {}). {}",
-                status_code, err
+                "Google Drive connection test failed (HTTP {})",
+                resp.status()
             ))
         }
     }
@@ -944,47 +893,31 @@ impl StorageBackend for GooglePhotosBackend {
         let file_data = fs::read(local_path)
             .map_err(|e| format!("Failed to read file: {}", e))?;
 
+        let client = http_client()?;
+
         // Step 1: Upload the raw bytes to get an upload token
-        let tmp_path = format!("/tmp/cybermanju_gphotos_upload_{}.tmp", uuid::Uuid::new_v4());
-        fs::write(&tmp_path, &file_data)
-            .map_err(|e| format!("Failed to write temp file: {}", e))?;
+        let upload_resp = client
+            .post("https://photoslibrary.googleapis.com/v1/uploads")
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Content-Type", "application/octet-stream")
+            .header("X-Goog-Upload-Protocol", "raw")
+            .body(file_data)
+            .send()
+            .map_err(|e| format!("Google Photos upload token request failed: {}", e))?;
 
-        let upload_result: Result<String, String> = (|| {
-            let (out, _err, code) = run_curl(&[
-                "-s",
-                "-w",
-                "\n%{http_code}",
-                "-X",
-                "POST",
-                "-H",
-                &format!("Authorization: Bearer {}", self.token),
-                "-H",
-                "Content-Type: application/octet-stream",
-                "-H",
-                "X-Goog-Upload-Protocol: raw",
-                "--data-binary",
-                &format!("@{}", tmp_path),
-                "https://photoslibrary.googleapis.com/v1/uploads",
-            ])?;
-            let parts: Vec<&str> = out.rsplitn(2, '\n').collect();
-            let status_code: i32 = parts
-                .first()
-                .and_then(|s| s.trim().parse().ok())
-                .unwrap_or(code);
-            let body = if parts.len() > 1 { parts[1] } else { "" };
+        let up_status = upload_resp.status().as_u16();
+        let up_body = upload_resp
+            .text()
+            .map_err(|e| format!("Failed to read upload token response: {}", e))?;
 
-            if status_code < 200 || status_code >= 300 {
-                return Err(format!(
-                    "Google Photos upload token failed ({}): {}",
-                    status_code, body
-                ));
-            }
+        if up_status < 200 || up_status >= 300 {
+            return Err(format!(
+                "Google Photos upload token failed ({}): {}",
+                up_status, up_body
+            ));
+        }
 
-            Ok(body.trim().to_string())
-        })();
-
-        let _ = fs::remove_file(&tmp_path);
-        let upload_token = upload_result?;
+        let upload_token = up_body.trim().to_string();
 
         // Step 2: Create a media item with the upload token
         let mut create_body = serde_json::json!({
@@ -997,41 +930,30 @@ impl StorageBackend for GooglePhotosBackend {
         if let Some(ref album_id) = self.album_id {
             create_body["albumId"] = serde_json::json!(album_id);
         }
-        let create_json = serde_json::to_string(&create_body)
-            .map_err(|e| format!("Failed to serialize: {}", e))?;
 
-        let (out, _err, code) = run_curl(&[
-            "-s",
-            "-w",
-            "\n%{http_code}",
-            "-X",
-            "POST",
-            "-H",
-            &format!("Authorization: Bearer {}", self.token),
-            "-H",
-            "Content-Type: application/json",
-            "-d",
-            &create_json,
-            "https://photoslibrary.googleapis.com/v1/mediaItems:batchCreate",
-        ])?;
+        let create_resp = client
+            .post("https://photoslibrary.googleapis.com/v1/mediaItems:batchCreate")
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Content-Type", "application/json")
+            .json(&create_body)
+            .send()
+            .map_err(|e| format!("Google Photos batchCreate request failed: {}", e))?;
 
-        let parts: Vec<&str> = out.rsplitn(2, '\n').collect();
-        let status_code: i32 = parts
-            .first()
-            .and_then(|s| s.trim().parse().ok())
-            .unwrap_or(code);
-        let body = if parts.len() > 1 { parts[1] } else { "" };
+        let create_status = create_resp.status().as_u16();
+        let create_body = create_resp
+            .text()
+            .map_err(|e| format!("Failed to read batchCreate response: {}", e))?;
 
-        if status_code < 200 || status_code >= 300 {
+        if create_status < 200 || create_status >= 300 {
             return Err(format!(
                 "Google Photos media item creation failed ({}): {}",
-                status_code, body
+                create_status, create_body
             ));
         }
 
-        let resp: serde_json::Value = serde_json::from_str(body)
+        let resp_json: serde_json::Value = serde_json::from_str(&create_body)
             .map_err(|e| format!("Failed to parse response: {}", e))?;
-        let media_item = &resp["newMediaItemResults"][0]["mediaItem"];
+        let media_item = &resp_json["newMediaItemResults"][0]["mediaItem"];
         let base_url = media_item["baseUrl"]
             .as_str()
             .unwrap_or("")
@@ -1046,29 +968,32 @@ impl StorageBackend for GooglePhotosBackend {
             remote_path
         );
 
-        let (out, err, code) = run_curl(&[
-            "-s",
-            "-w",
-            "\n%{http_code}",
-            "-H",
-            &format!("Authorization: Bearer {}", self.token),
-            "-o",
-            local_path,
-            &url,
-        ])?;
+        let client = http_client()?;
+        let resp = client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .send()
+            .map_err(|e| format!("Google Photos download request failed: {}", e))?;
 
-        let parts: Vec<&str> = out.rsplitn(2, '\n').collect();
-        let status_code: i32 = parts
-            .first()
-            .and_then(|s| s.trim().parse().ok())
-            .unwrap_or(code);
-
-        if status_code < 200 || status_code >= 300 {
+        let status = resp.status().as_u16();
+        if status < 200 || status >= 300 {
+            let body = resp.text().unwrap_or_default();
             return Err(format!(
                 "Google Photos download failed ({}): {}",
-                status_code, err
+                status, body
             ));
         }
+
+        let bytes = resp
+            .bytes()
+            .map_err(|e| format!("Failed to read download body: {}", e))?;
+
+        if let Some(parent) = Path::new(local_path).parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create directory: {}", e))?;
+        }
+        fs::write(local_path, &bytes)
+            .map_err(|e| format!("Failed to write file: {}", e))?;
 
         Ok(())
     }
@@ -1079,25 +1004,21 @@ impl StorageBackend for GooglePhotosBackend {
             remote_path
         );
 
-        let (out, err, code) = run_curl(&[
-            "-s",
-            "-w",
-            "\n%{http_code}",
-            "-X",
-            "DELETE",
-            "-H",
-            &format!("Authorization: Bearer {}", self.token),
-            &url,
-        ])?;
+        let client = http_client()?;
+        let resp = client
+            .delete(&url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .send()
+            .map_err(|e| format!("Google Photos delete request failed: {}", e))?;
 
-        let status_code: i32 = out.trim().parse().unwrap_or(code);
-
-        if status_code == 200 || status_code == 204 {
+        let status = resp.status().as_u16();
+        if status == 200 || status == 204 {
             Ok(())
         } else {
+            let body = resp.text().unwrap_or_default();
             Err(format!(
                 "Google Photos delete failed ({}): {}",
-                status_code, err
+                status, body
             ))
         }
     }
@@ -1105,32 +1026,28 @@ impl StorageBackend for GooglePhotosBackend {
     fn list_files(&self, _prefix: &str) -> Result<Vec<RemoteFile>, String> {
         let url = "https://photoslibrary.googleapis.com/v1/mediaItems?pageSize=100";
 
-        let (out, _err, code) = run_curl(&[
-            "-s",
-            "-w",
-            "\n%{http_code}",
-            "-H",
-            &format!("Authorization: Bearer {}", self.token),
-            url,
-        ])?;
+        let client = http_client()?;
+        let resp = client
+            .get(url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .send()
+            .map_err(|e| format!("Google Photos list request failed: {}", e))?;
 
-        let parts: Vec<&str> = out.rsplitn(2, '\n').collect();
-        let status_code: i32 = parts
-            .first()
-            .and_then(|s| s.trim().parse().ok())
-            .unwrap_or(code);
-        let body = if parts.len() > 1 { parts[1] } else { "" };
+        let status = resp.status().as_u16();
+        let body = resp
+            .text()
+            .map_err(|e| format!("Failed to read list response: {}", e))?;
 
-        if status_code < 200 || status_code >= 300 {
+        if status < 200 || status >= 300 {
             return Err(format!(
                 "Google Photos list failed ({}): {}",
-                status_code, body
+                status, body
             ));
         }
 
-        let resp: serde_json::Value = serde_json::from_str(body)
+        let resp_json: serde_json::Value = serde_json::from_str(&body)
             .map_err(|e| format!("Failed to parse response: {}", e))?;
-        let items = resp["mediaItems"]
+        let items = resp_json["mediaItems"]
             .as_array()
             .cloned()
             .unwrap_or_default();
@@ -1167,38 +1084,33 @@ impl StorageBackend for GooglePhotosBackend {
     }
 
     fn get_file_url(&self, remote_path: &str) -> Result<String, String> {
-        // For Google Photos, return the baseUrl by fetching the media item
         let url = format!(
             "https://photoslibrary.googleapis.com/v1/mediaItems/{}",
             remote_path
         );
 
-        let (out, _err, code) = run_curl(&[
-            "-s",
-            "-w",
-            "\n%{http_code}",
-            "-H",
-            &format!("Authorization: Bearer {}", self.token),
-            &url,
-        ])?;
+        let client = http_client()?;
+        let resp = client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .send()
+            .map_err(|e| format!("Google Photos get URL request failed: {}", e))?;
 
-        let parts: Vec<&str> = out.rsplitn(2, '\n').collect();
-        let status_code: i32 = parts
-            .first()
-            .and_then(|s| s.trim().parse().ok())
-            .unwrap_or(code);
-        let body = if parts.len() > 1 { parts[1] } else { "" };
+        let status = resp.status().as_u16();
+        let body = resp
+            .text()
+            .map_err(|e| format!("Failed to read response: {}", e))?;
 
-        if status_code < 200 || status_code >= 300 {
+        if status < 200 || status >= 300 {
             return Err(format!(
                 "Google Photos get URL failed ({}): {}",
-                status_code, body
+                status, body
             ));
         }
 
-        let resp: serde_json::Value = serde_json::from_str(body)
+        let resp_json: serde_json::Value = serde_json::from_str(&body)
             .map_err(|e| format!("Failed to parse response: {}", e))?;
-        let base_url = resp["baseUrl"]
+        let base_url = resp_json["baseUrl"]
             .as_str()
             .unwrap_or("")
             .to_string();
@@ -1207,27 +1119,19 @@ impl StorageBackend for GooglePhotosBackend {
     }
 
     fn test_connection(&self) -> Result<bool, String> {
-        let (out, err, code) = run_curl(&[
-            "-s",
-            "-w",
-            "\n%{http_code}",
-            "-H",
-            &format!("Authorization: Bearer {}", self.token),
-            "https://photoslibrary.googleapis.com/v1/albums?pageSize=1",
-        ])?;
+        let client = http_client()?;
+        let resp = client
+            .get("https://photoslibrary.googleapis.com/v1/albums?pageSize=1")
+            .header("Authorization", format!("Bearer {}", self.token))
+            .send()
+            .map_err(|e| format!("Google Photos connection test request failed: {}", e))?;
 
-        let parts: Vec<&str> = out.rsplitn(2, '\n').collect();
-        let status_code: i32 = parts
-            .first()
-            .and_then(|s| s.trim().parse().ok())
-            .unwrap_or(code);
-
-        if status_code == 200 {
+        if resp.status().as_u16() == 200 {
             Ok(true)
         } else {
             Err(format!(
-                "Google Photos connection test failed (HTTP {}). {}",
-                status_code, err
+                "Google Photos connection test failed (HTTP {})",
+                resp.status()
             ))
         }
     }

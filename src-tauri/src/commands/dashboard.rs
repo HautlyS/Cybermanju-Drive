@@ -46,11 +46,11 @@ pub fn start_dashboard() -> Result<DashboardStatus, String> {
         });
     }
 
-    // Start in a background thread — the main dashboard is already started in lib.rs,
-    // so this provides a restart capability.
+    // Start in a background thread with proper Arc wrapping.
+    // WebDashboard handles its own shutdown via Drop (signal channel + thread join).
     let db_path = "cybermanju.db".to_string();
     std::thread::spawn(move || {
-        let dashboard = crate::web_dashboard::WebDashboard::new(port, &db_path);
+        let dashboard = std::sync::Arc::new(crate::web_dashboard::WebDashboard::new(port, &db_path));
         let _ = dashboard.start();
     });
 

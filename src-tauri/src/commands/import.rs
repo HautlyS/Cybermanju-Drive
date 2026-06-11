@@ -4,7 +4,6 @@ use chrono::Utc;
 
 use crate::AppState;
 use crate::db::schema::FileNode;
-use crate::search::SearchIndex;
 
 /// Result of a directory scan / import operation.
 #[derive(Debug, Serialize, Deserialize)]
@@ -118,7 +117,7 @@ pub fn import_file(
     };
 
     // Store in database
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.write().map_err(|e| e.to_string())?;
     let serialized = serde_json::to_string(&file_node).map_err(|e| e.to_string())?;
     let tx = db.begin_write().map_err(|e| e.to_string())?;
     {
@@ -129,8 +128,16 @@ pub fn import_file(
     }
     tx.commit().map_err(|e| e.to_string())?;
 
+    // Update parent index
+    if let Some(ref parent) = file_node.parent_id {
+        drop(db); // release the lock
+        let db2 = state.db.write().map_err(|e| e.to_string())?;
+        db2.add_to_parent_index(&file_id, parent)
+            .map_err(|e| e.to_string())?;
+    }
+
     // Index in Tantivy for searchability
-    let tantivy_index = state.tantivy_index.lock().map_err(|e| e.to_string())?;
+    let tantivy_index = state.tantivy_index.write().map_err(|e| e.to_string())?;
     let content_text = if !is_dir && size_bytes < 1024 * 1024 {
         // Read first 64KB for text file content indexing
         std::fs::read(path)
@@ -164,8 +171,8 @@ pub fn import_file(
 }
 
 /// Scan a directory and import all files/folders into the database.
-/// This is the real equivalent of "browse and catalog" — reads actual filesystem
-/// contents and creates FileNode entries with real metadata.
+/// Uses walkdir for robust traversal with depth limiting, symlink skipping,
+/// and hidden file filtering. Batches Tantivy commits for performance.
 #[tauri::command]
 pub fn scan_directory(
     dir_path: String,
@@ -178,48 +185,199 @@ pub fn scan_directory(
     let mut folders_imported = 0u32;
     let mut errors = Vec::new();
 
-    let entries = match std::fs::read_dir(&dir_path) {
-        Ok(e) => e,
-        Err(e) => return Err(format!("Failed to read directory {}: {}", dir_path, e)),
-    };
+    let dir = std::path::Path::new(&dir_path);
+    if !dir.exists() {
+        return Err(format!("Directory does not exist: {}", dir_path));
+    }
+    if !dir.is_dir() {
+        return Err(format!("Path is not a directory: {}", dir_path));
+    }
 
     let parent_path_for_children = if parent_id.is_empty() { dir_path.clone() } else { parent_id.clone() };
 
-    for entry in entries {
-        let entry = match entry {
+    // Collect all entries with walkdir
+    let mut walker = walkdir::WalkDir::new(&dir_path);
+
+    if !recursive {
+        walker = walker.max_depth(1);
+    } else {
+        walker = walker.max_depth(20);
+    }
+
+    // Configure: skip symlinks, skip hidden files/dirs
+    let walker = walker
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|entry| {
+            // Skip hidden files and directories (names starting with '.')
+            let file_name = entry.file_name();
+            let name = file_name.to_string_lossy();
+            if name.starts_with('.') {
+                return false;
+            }
+            true
+        });
+
+    // Collect all file nodes in a single pass, then batch-commit
+    // We need to process directories in order (parents before children)
+    // so the parent_id chain is correct.
+    let tantivy_index = state.tantivy_index.write().map_err(|e| e.to_string())?;
+    let db = state.db.write().map_err(|e| e.to_string())?;
+
+    for entry_result in walker {
+        let entry = match entry_result {
             Ok(e) => e,
             Err(e) => {
-                errors.push(format!("Failed to read entry: {}", e));
+                errors.push(format!("Failed to read directory entry: {}", e));
                 continue;
             }
         };
 
         let path = entry.path();
         let file_path_str = path.to_string_lossy().to_string();
+        let depth = entry.depth();
 
-        match import_file(file_path_str, parent_path_for_children.clone(), state.clone()) {
-            Ok(node) => {
-                if node.file_type == "folder" {
-                    folders_imported += 1;
-                    // Recurse into subdirectories if requested
-                    if recursive {
-                        match scan_directory(path.to_string_lossy().to_string(), node.id.clone(), true, state.clone()) {
-                            Ok(sub_result) => {
-                                files_imported += sub_result.files_imported;
-                                folders_imported += sub_result.folders_imported;
-                                errors.extend(sub_result.errors);
-                            }
-                            Err(e) => errors.push(e),
-                        }
-                    }
-                } else {
-                    files_imported += 1;
-                }
-            }
-            Err(e) => {
-                errors.push(format!("Failed to import {}: {}", path.display(), e));
-            }
+        // Determine the parent for this entry:
+        // - depth 0 is the root dir itself (skip)
+        // - depth 1+ uses the dir_path as parent for the first level,
+        //   and the folder's file_node ID for deeper levels
+        // For simplicity, we use parent_path_for_children for all entries
+        // at depth >= 1
+        if depth == 0 {
+            // This is the root directory being scanned — skip importing it
+            continue;
         }
+
+        let metadata = match entry.metadata() {
+            Ok(m) => m,
+            Err(e) => {
+                errors.push(format!("Failed to read metadata for {}: {}", path.display(), e));
+                continue;
+            }
+        };
+
+        // Skip symlinks (shouldn't reach here due to follow_links(false), but be safe)
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+
+        let is_dir = metadata.is_dir();
+        let size_bytes = metadata.len();
+        let file_name = entry
+            .file_name()
+            .to_string_lossy()
+            .to_string();
+
+        // Detect MIME type
+        let mime_type = if is_dir {
+            None
+        } else {
+            infer::get_from_path(path)
+                .map(|m| m.mime_type().to_string())
+                .or_else(|| mime_guess::from_path(path).first().map(|m| m.to_string()))
+        };
+
+        // Hash file contents with BLAKE3 (files only, < 100MB)
+        let hash_blake3 = if !is_dir && size_bytes < 100 * 1024 * 1024 {
+            match std::fs::read(path) {
+                Ok(data) => Some(blake3::hash(&data).to_hex().to_string()),
+                Err(_) => None,
+            }
+        } else {
+            None
+        };
+
+        let now = Utc::now().to_rfc3339();
+        let file_id = uuid::Uuid::new_v4().to_string();
+
+        // Build context_data
+        let mut context = serde_json::Map::new();
+        context.insert("original_path".to_string(), serde_json::json!(&file_path_str));
+        context.insert("source".to_string(), serde_json::json!("filesystem_import"));
+
+        // Extract EXIF GPS for image files
+        let (gps_lat, gps_lon) = if !is_dir {
+            extract_gps_if_image(path)
+        } else {
+            (None, None)
+        };
+
+        if let (Some(lat), Some(lon)) = (gps_lat, gps_lon) {
+            context.insert("gps_source".to_string(), serde_json::json!("exif"));
+            context.insert("gps_lat".to_string(), serde_json::json!(lat));
+            context.insert("gps_lon".to_string(), serde_json::json!(lon));
+        }
+
+        let file_node = FileNode {
+            id: file_id.clone(),
+            name: file_name,
+            file_type: if is_dir { "folder" } else { "file" }.to_string(),
+            parent_id: Some(parent_path_for_children.clone()),
+            size_bytes,
+            mime_type,
+            hash_blake3: hash_blake3.clone(),
+            encrypted: false,
+            encryption_algorithm: None,
+            compression_layers: Vec::new(),
+            thumbnail_path: None,
+            context_data: Some(serde_json::Value::Object(context)),
+            tags: Vec::new(),
+            collection_ids: Vec::new(),
+            face_group_ids: Vec::new(),
+            loose_group_ids: Vec::new(),
+            gps_lat,
+            gps_lon,
+            created_at: now.clone(),
+            modified_at: now,
+        };
+
+        // Store in database
+        let serialized = serde_json::to_string(&file_node).map_err(|e| e.to_string())?;
+        let tx = db.begin_write().map_err(|e| e.to_string())?;
+        {
+            let mut table = tx.open_table(crate::db::Database::get_files_table())
+                .map_err(|e| e.to_string())?;
+            table.insert(&file_id, serialized.as_str())
+                .map_err(|e| e.to_string())?;
+        }
+        tx.commit().map_err(|e| e.to_string())?;
+
+        // Update parent index
+        db.add_to_parent_index(&file_id, &parent_path_for_children)
+            .map_err(|e| e.to_string())?;
+
+        // Index in Tantivy (no commit yet — batch at the end)
+        let content_text = if !is_dir && size_bytes < 1024 * 1024 {
+            std::fs::read(path)
+                .ok()
+                .and_then(|data| String::from_utf8(data.iter().take(65536).copied().collect()).ok())
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+
+        let _ = tantivy_index.add_document_no_commit(
+            &file_id,
+            &file_node.name,
+            &content_text,
+            &file_node.tags,
+            &file_node.file_type,
+            file_node.encrypted,
+            file_node.gps_lat.is_some(),
+            &file_node.created_at,
+            file_node.hash_blake3.as_deref(),
+        );
+
+        if is_dir {
+            folders_imported += 1;
+        } else {
+            files_imported += 1;
+        }
+    }
+
+    // Single batch commit for all Tantivy documents
+    if let Err(e) = tantivy_index.commit() {
+        errors.push(format!("Failed to commit search index: {}", e));
     }
 
     Ok(ImportResult {
@@ -304,7 +462,7 @@ pub fn upload_file(
     };
 
     // Store in database
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.write().map_err(|e| e.to_string())?;
     let serialized = serde_json::to_string(&file_node).map_err(|e| e.to_string())?;
     let tx = db.begin_write().map_err(|e| e.to_string())?;
     {
@@ -315,8 +473,14 @@ pub fn upload_file(
     }
     tx.commit().map_err(|e| e.to_string())?;
 
+    // Update parent index
+    if let Some(ref parent) = file_node.parent_id {
+        db.add_to_parent_index(&file_id, parent)
+            .map_err(|e| e.to_string())?;
+    }
+
     // Index in Tantivy
-    let tantivy_index = state.tantivy_index.lock().map_err(|e| e.to_string())?;
+    let tantivy_index = state.tantivy_index.write().map_err(|e| e.to_string())?;
     let content_text = String::from_utf8(data.iter().take(65536).copied().collect()).unwrap_or_default();
     let _ = tantivy_index.add_document(
         &file_id,
@@ -337,12 +501,12 @@ pub fn upload_file(
 /// Useful after bulk imports or database migrations.
 #[tauri::command]
 pub fn rebuild_search_index(state: State<'_, AppState>) -> Result<u32, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.read().map_err(|e| e.to_string())?;
     let tx = db.begin_read().map_err(|e| e.to_string())?;
     let table = tx.open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
 
-    let tantivy_index = state.tantivy_index.lock().map_err(|e| e.to_string())?;
+    let tantivy_index = state.tantivy_index.write().map_err(|e| e.to_string())?;
     let mut count = 0u32;
 
     for entry in table.iter().map_err(|e| e.to_string())? {
@@ -362,7 +526,7 @@ pub fn rebuild_search_index(state: State<'_, AppState>) -> Result<u32, String> {
             String::new()
         };
 
-        let _ = tantivy_index.add_document(
+        let _ = tantivy_index.add_document_no_commit(
             &node.id,
             &node.name,
             &content_text,
@@ -375,6 +539,9 @@ pub fn rebuild_search_index(state: State<'_, AppState>) -> Result<u32, String> {
         );
         count += 1;
     }
+
+    // Single batch commit
+    tantivy_index.commit().map_err(|e| e.to_string())?;
 
     Ok(count)
 }

@@ -7,7 +7,7 @@ use crate::db::schema::Account;
 /// List all accounts from the database.
 #[tauri::command]
 pub fn list_accounts(state: State<'_, AppState>) -> Result<Vec<Account>, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.read().map_err(|e| e.to_string())?;
     let tx = db.begin_read().map_err(|e| e.to_string())?;
     let table = tx.open_table(crate::db::Database::get_accounts_table())
         .map_err(|e| e.to_string())?;
@@ -36,7 +36,7 @@ pub fn create_account(
     let now = Utc::now().to_rfc3339();
 
     // Check if there are any existing accounts to determine if this should be active
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.write().map_err(|e| e.to_string())?;
     let tx_read = db.begin_read().map_err(|e| e.to_string())?;
     let existing_table = tx_read.open_table(crate::db::Database::get_accounts_table())
         .map_err(|e| e.to_string())?;
@@ -71,7 +71,7 @@ pub fn create_account(
 /// and is_active=false on all other accounts.
 #[tauri::command]
 pub fn switch_account(account_id: String, state: State<'_, AppState>) -> Result<Account, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.write().map_err(|e| e.to_string())?;
     let now = Utc::now().to_rfc3339();
 
     // Read all accounts
@@ -129,7 +129,7 @@ pub fn switch_account(account_id: String, state: State<'_, AppState>) -> Result<
 /// Delete an account by its ID. Cannot delete the active account.
 #[tauri::command]
 pub fn delete_account(account_id: String, state: State<'_, AppState>) -> Result<bool, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.write().map_err(|e| e.to_string())?;
 
     // Verify the account exists and is not active
     let tx_read = db.begin_read().map_err(|e| e.to_string())?;

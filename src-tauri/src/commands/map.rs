@@ -18,7 +18,7 @@ pub struct GeoFile {
 /// Get all files that have GPS coordinates stored in their metadata.
 #[tauri::command]
 pub fn get_geo_files(state: State<'_, AppState>) -> Result<Vec<GeoFile>, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.read().map_err(|e| e.to_string())?;
     let tx = db.begin_read().map_err(|e| e.to_string())?;
     let table = tx.open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
@@ -56,7 +56,7 @@ pub struct GpsCoordinates {
 /// Returns the extracted coordinates and updates the file node in the database.
 #[tauri::command]
 pub fn extract_exif_gps(file_id: String, state: State<'_, AppState>) -> Result<GpsCoordinates, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.write().map_err(|e| e.to_string())?;
 
     // Read the file node to get the file path
     let tx_read = db.begin_read().map_err(|e| e.to_string())?;

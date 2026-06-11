@@ -1,12 +1,15 @@
 // Cybermanju Drive — Tantivy Full-Text Search Index
 // BM25 ranking, faceted search, fuzzy matching, real term completions
 // Indexes: filename, content_text, tags, metadata
+//
+// NOTE: This struct does NOT use internal synchronization (no Mutex/RwLock).
+// Callers are expected to hold the AppState RwLock before calling any method.
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use tantivy::{
     collector::TopDocs,
-    query::{QueryParser},
+    query::{Query, QueryParser},
     schema::*,
     Index, IndexReader, IndexWriter, ReloadPolicy, DocAddress,
 };
@@ -49,7 +52,26 @@ pub struct SearchSuggestion {
     pub r#type: String, // "completion"
 }
 
+/// Parameters for adding a single document to the index.
+/// Used by `add_document` and `add_document_batch`.
+pub struct DocumentParams<'a> {
+    pub file_id: &'a str,
+    pub file_name: &'a str,
+    pub content_text: &'a str,
+    pub tags: &'a [String],
+    pub file_type: &'a str,
+    pub is_encrypted: bool,
+    pub has_geo: bool,
+    pub created_at: &'a str,
+    pub blake3_hash: Option<&'a str>,
+}
+
 /// The Tantivy search index — holds schema field handles, writer, and reader.
+///
+/// # Synchronization
+/// This struct is NOT internally synchronized. The caller must hold the
+/// `AppState.tantivy_index` RwLock (write lock for mutations, read lock for
+/// search/suggest) before invoking any method.
 pub struct SearchIndex {
     index: Index,
     reader: IndexReader,
@@ -125,9 +147,46 @@ impl SearchIndex {
         })
     }
 
-    /// Add or update a document in the search index.
+    // -----------------------------------------------------------------------
+    // Document mutation methods
+    // -----------------------------------------------------------------------
+
+    /// Build a Tantivy `Document` from the given parameters.
+    /// Shared logic between `add_document` and `add_document_batch`.
+    fn build_document(&self, params: &DocumentParams<'_>) -> Document {
+        let mut doc = Document::new();
+
+        doc.add_text(self.file_id_field, params.file_id);
+        doc.add_text(self.file_name_field, params.file_name);
+        if !params.content_text.is_empty() {
+            doc.add_text(self.content_text_field, params.content_text);
+        }
+        for tag in params.tags {
+            doc.add_text(self.tags_field, tag);
+        }
+        doc.add_text(self.file_type_field, params.file_type);
+        doc.add_bool(self.is_encrypted_field, params.is_encrypted);
+        doc.add_bool(self.has_geo_field, params.has_geo);
+
+        // Parse the ISO 8601 timestamp into a tantivy DateTime
+        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(params.created_at) {
+            let tantivy_dt = tantivy::DateTime::from_timestamp_micros(dt.timestamp_micros());
+            doc.add_date(self.timestamp_field, tantivy_dt);
+        }
+
+        if let Some(hash) = params.blake3_hash {
+            doc.add_text(self.blake3_field, hash);
+        }
+
+        doc
+    }
+
+    /// Add or update a single document in the search index and commit immediately.
     ///
-    /// This should be called whenever a file node is created or modified.
+    /// NOTE: For bulk indexing (e.g. `rebuild_search_index`), prefer
+    /// `add_document_batch` which commits once after all documents are added,
+    /// avoiding the high overhead of per-document commits.
+    ///
     /// The index is committed after each add for immediate searchability.
     pub fn add_document(
         &self,
@@ -141,45 +200,103 @@ impl SearchIndex {
         created_at: &str,
         blake3_hash: Option<&str>,
     ) -> Result<()> {
-        let mut doc = Document::new();
-
-        doc.add_text(self.file_id_field, file_id);
-        doc.add_text(self.file_name_field, file_name);
-        if !content_text.is_empty() {
-            doc.add_text(self.content_text_field, content_text);
-        }
-        for tag in tags {
-            doc.add_text(self.tags_field, tag);
-        }
-        doc.add_text(self.file_type_field, file_type);
-        doc.add_bool(self.is_encrypted_field, is_encrypted);
-        doc.add_bool(self.has_geo_field, has_geo);
-
-        // Parse the ISO 8601 timestamp into a tantivy DateTime
-        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(created_at) {
-            let tantivy_dt = tantivy::DateTime::from_timestamp_micros(dt.timestamp_micros());
-            doc.add_date(self.timestamp_field, tantivy_dt);
-        }
-
-        if let Some(hash) = blake3_hash {
-            doc.add_text(self.blake3_field, hash);
-        }
+        let params = DocumentParams {
+            file_id,
+            file_name,
+            content_text,
+            tags,
+            file_type,
+            is_encrypted,
+            has_geo,
+            created_at,
+            blake3_hash,
+        };
 
         // Delete any existing document with this file_id before adding
         // (Tantivy doesn't have update — delete + add)
         self.writer.delete_term(Term::from_field_text(self.file_id_field, file_id));
+        let doc = self.build_document(&params);
         self.writer.add_document(doc)?;
         self.writer.commit()?;
 
         Ok(())
     }
 
-    /// Remove a document from the index by file_id.
+    /// Add or update multiple documents in the search index, committing once.
+    ///
+    /// This is significantly faster than calling `add_document` in a loop
+    /// because Tantivy commits are expensive (they flush segments to disk
+    /// and trigger reader reloads).
+    pub fn add_document_batch(&self, docs: Vec<DocumentParams<'_>>) -> Result<()> {
+        for params in &docs {
+            self.writer.delete_term(Term::from_field_text(self.file_id_field, params.file_id));
+            let doc = self.build_document(params);
+            self.writer.add_document(doc)?;
+        }
+        self.writer.commit()?;
+        Ok(())
+    }
+
+    /// Add a document without committing. Useful for bulk imports where the
+    /// caller wants to add many documents and commit once at the end.
+    ///
+    /// The caller MUST call `commit()` afterward to make documents searchable.
+    pub fn add_document_no_commit(
+        &self,
+        file_id: &str,
+        file_name: &str,
+        content_text: &str,
+        tags: &[String],
+        file_type: &str,
+        is_encrypted: bool,
+        has_geo: bool,
+        created_at: &str,
+        blake3_hash: Option<&str>,
+    ) -> Result<()> {
+        let params = DocumentParams {
+            file_id,
+            file_name,
+            content_text,
+            tags,
+            file_type,
+            is_encrypted,
+            has_geo,
+            created_at,
+            blake3_hash,
+        };
+        self.writer.delete_term(Term::from_field_text(self.file_id_field, file_id));
+        let doc = self.build_document(&params);
+        self.writer.add_document(doc)?;
+        Ok(())
+    }
+
+    /// Explicitly commit pending index changes.
+    ///
+    /// Call this after one or more `add_document_no_commit` / `delete_term`
+    /// calls to flush changes to disk and make them searchable.
+    pub fn commit(&self) -> Result<()> {
+        self.writer.commit()?;
+        Ok(())
+    }
+
+    /// Delete a document by a specific term without committing.
+    ///
+    /// Useful for batch operations where the caller wants to delete multiple
+    /// documents and commit once via a subsequent explicit commit or batch add.
+    pub fn delete_term(&self, field: Field, term_text: &str) {
+        self.writer.delete_term(Term::from_field_text(field, term_text));
+    }
+
+    /// Remove a document from the index by file_id and commit.
     pub fn remove_document(&self, file_id: &str) -> Result<()> {
         self.writer.delete_term(Term::from_field_text(self.file_id_field, file_id));
         self.writer.commit()?;
         Ok(())
     }
+
+    // -----------------------------------------------------------------------
+    // Read-only query methods
+    // -----------------------------------------------------------------------
 
     /// Search files with BM25 ranking across filename and content.
     ///

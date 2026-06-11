@@ -2,13 +2,24 @@
 // Role-based access control: admin | user | viewer
 // Per-file permissions: read | write | admin
 // Password hashing: argon2id (cryptographically secure, salted, key-stretched)
+// Session tokens: HMAC-SHA256 with 24-hour expiry (not forgeable)
 
 use tauri::State;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::AppState;
 use crate::db::schema::{User, UserFilePermission};
+
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
+
+type HmacSha256 = Hmac<Sha256>;
+
+/// Token validity window: 24 hours in milliseconds
+const TOKEN_EXPIRY_MS: u64 = 24 * 60 * 60 * 1000;
 
 /// Auth result matching the frontend AuthResult type.
 #[derive(Debug, Serialize, Deserialize)]
@@ -50,16 +61,142 @@ fn argon2_verify_password(password: &str, hash: &str) -> Result<bool, String> {
     }
 }
 
-/// Generate a simple session token.
-fn generate_session_token(username: &str) -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
+// ---------------------------------------------------------------------------
+// Session token: HMAC-SHA256 with expiry
+// ---------------------------------------------------------------------------
+
+/// Generate a cryptographically secure session token.
+///
+/// Token format (binary, base64-encoded):
+///   [username_len: u16 BE] [username: bytes] [timestamp: u64 BE]
+///   [nonce: 16 bytes] [hmac: 32 bytes]
+///
+/// The HMAC is computed over: username_bytes || timestamp_bytes || nonce_bytes
+/// using the server's HMAC_SECRET. Without the secret, the token cannot be
+/// forged even if the format is known.
+///
+/// Tokens expire after 24 hours.
+fn generate_session_token(username: &str, hmac_secret: &[u8]) -> String {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
+        .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
-    let input = format!("{}|{}", username, timestamp);
-    blake3::hash(input.as_bytes()).to_hex().to_string()
+
+    // 16-byte cryptographic nonce — prevents token reuse / precomputation attacks
+    let mut nonce = [0u8; 16];
+    use rand_core::RngCore;
+    let mut rng = rand_core::OsRng;
+    rng.fill_bytes(&mut nonce);
+
+    let username_bytes = username.as_bytes();
+    let username_len = username_bytes.len() as u16;
+
+    // HMAC input: username || timestamp || nonce
+    let mut hmac_input = Vec::with_capacity(username_bytes.len() + 8 + 16);
+    hmac_input.extend_from_slice(username_bytes);
+    hmac_input.extend_from_slice(&timestamp.to_be_bytes());
+    hmac_input.extend_from_slice(&nonce);
+
+    let mut mac = HmacSha256::new_from_slice(hmac_secret)
+        .expect("HMAC-SHA256 accepts any key length");
+    mac.update(&hmac_input);
+    let hmac_bytes = mac.finalize().into_bytes();
+
+    // Assemble token: [u16 len] [username] [u64 timestamp] [16 nonce] [32 hmac]
+    let mut token_bytes = Vec::with_capacity(2 + username_bytes.len() + 8 + 16 + 32);
+    token_bytes.extend_from_slice(&username_len.to_be_bytes());
+    token_bytes.extend_from_slice(username_bytes);
+    token_bytes.extend_from_slice(&timestamp.to_be_bytes());
+    token_bytes.extend_from_slice(&nonce);
+    token_bytes.extend_from_slice(&hmac_bytes);
+
+    BASE64.encode(&token_bytes)
 }
+
+/// Verify a session token and extract the username.
+///
+/// Returns `Ok((username, timestamp_ms))` if the token is valid and not expired.
+/// Returns `Err` with a descriptive message if:
+///   - The token is malformed (bad base64, wrong length)
+///   - The HMAC signature doesn't match (forged token)
+///   - The token has expired (>24 hours old)
+pub fn verify_session_token(
+    token: &str,
+    hmac_secret: &[u8],
+) -> Result<(String, u64), String> {
+    let token_bytes = BASE64
+        .decode(token)
+        .map_err(|_| "Invalid token: bad base64 encoding".to_string())?;
+
+    // Minimum: 2 (len) + 0 (username) + 8 (timestamp) + 16 (nonce) + 32 (hmac) = 58
+    if token_bytes.len() < 58 {
+        return Err("Invalid token: too short".to_string());
+    }
+
+    let username_len = u16::from_be_bytes(
+        token_bytes[0..2]
+            .try_into()
+            .map_err(|_| "Invalid token: malformed header".to_string())?,
+    ) as usize;
+
+    let expected_len = 2 + username_len + 8 + 16 + 32;
+    if token_bytes.len() != expected_len {
+        return Err(format!(
+            "Invalid token: length mismatch (expected {}, got {})",
+            expected_len,
+            token_bytes.len()
+        ));
+    }
+
+    // Extract fields
+    let username = String::from_utf8(token_bytes[2..2 + username_len].to_vec())
+        .map_err(|_| "Invalid token: username is not valid UTF-8".to_string())?;
+
+    let timestamp = u64::from_be_bytes(
+        token_bytes[2 + username_len..2 + username_len + 8]
+            .try_into()
+            .map_err(|_| "Invalid token: malformed timestamp".to_string())?,
+    );
+
+    let nonce = &token_bytes[2 + username_len + 8..2 + username_len + 8 + 16];
+    let stored_hmac = &token_bytes[2 + username_len + 8 + 16..];
+
+    // Check expiry (24 hours)
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+
+    if now > timestamp.saturating_add(TOKEN_EXPIRY_MS) {
+        return Err(format!(
+            "Token expired (issued {} ms ago, max {} ms)",
+            now.saturating_sub(timestamp),
+            TOKEN_EXPIRY_MS
+        ));
+    }
+
+    // Recompute HMAC over the same input and verify in constant time
+    // Using Mac::verify_slice which computes HMAC and compares without
+    // leaking timing information.
+    let mut hmac_input = Vec::with_capacity(username_len + 8 + 16);
+    hmac_input.extend_from_slice(&token_bytes[2..2 + username_len]);
+    hmac_input.extend_from_slice(&timestamp.to_be_bytes());
+    hmac_input.extend_from_slice(nonce);
+
+    let mut mac = HmacSha256::new_from_slice(hmac_secret)
+        .expect("HMAC-SHA256 accepts any key length");
+    mac.update(&hmac_input);
+
+    // verify_slice performs constant-time comparison internally
+    mac.verify_slice(stored_hmac)
+        .map_err(|_| "Invalid token: signature verification failed".to_string())?;
+
+    Ok((username, timestamp))
+}
+
+// ---------------------------------------------------------------------------
+// Tauri commands
+// ---------------------------------------------------------------------------
 
 /// Register a new user with argon2id password hashing.
 #[tauri::command]
@@ -73,7 +210,10 @@ pub fn register_user(
     // Validate role BEFORE constructing user
     let role = role.unwrap_or_else(|| "user".to_string());
     if !["admin", "user", "viewer"].contains(&role.as_str()) {
-        return Err(format!("Invalid role: {}. Must be admin, user, or viewer", role));
+        return Err(format!(
+            "Invalid role: {}. Must be admin, user, or viewer",
+            role
+        ));
     }
 
     if username.is_empty() || password.is_empty() {
@@ -81,14 +221,14 @@ pub fn register_user(
     }
 
     // Validate username uniqueness
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.write().map_err(|e| e.to_string())?;
     let tx_check = db.begin_read().map_err(|e| e.to_string())?;
-    let users_table = tx_check.open_table(crate::db::Database::get_users_table())
+    let users_table = tx_check
+        .open_table(crate::db::Database::get_users_table())
         .map_err(|e| e.to_string())?;
     for entry in users_table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
-        let existing: User = serde_json::from_str(&value.value())
-            .map_err(|e| e.to_string())?;
+        let existing: User = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
         if existing.username == username {
             return Err(format!("Username '{}' already exists", username));
         }
@@ -115,9 +255,11 @@ pub fn register_user(
     let serialized = serde_json::to_string(&user).map_err(|e| e.to_string())?;
     let tx = db.begin_write().map_err(|e| e.to_string())?;
     {
-        let mut table = tx.open_table(crate::db::Database::get_users_table())
+        let mut table = tx
+            .open_table(crate::db::Database::get_users_table())
             .map_err(|e| e.to_string())?;
-        table.insert(&user_id, serialized.as_str())
+        table
+            .insert(&user_id, serialized.as_str())
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
@@ -125,22 +267,26 @@ pub fn register_user(
     Ok(user)
 }
 
-/// Authenticate a user — returns AuthResult matching frontend expectations.
+/// Authenticate a user — returns AuthResult with a cryptographically secure token.
+///
+/// The session token uses HMAC-SHA256 with the server's random secret, includes
+/// a 16-byte nonce and timestamp, and expires after 24 hours.
+/// Unlike the previous blake3 hash, this token cannot be forged without the secret.
 #[tauri::command]
 pub fn authenticate_user(
     username: String,
     password: String,
     state: State<'_, AppState>,
 ) -> Result<AuthResult, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.read().map_err(|e| e.to_string())?;
     let tx = db.begin_read().map_err(|e| e.to_string())?;
-    let table = tx.open_table(crate::db::Database::get_users_table())
+    let table = tx
+        .open_table(crate::db::Database::get_users_table())
         .map_err(|e| e.to_string())?;
 
     for entry in table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
-        let user: User = serde_json::from_str(&value.value())
-            .map_err(|e| e.to_string())?;
+        let user: User = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
         if user.username == username {
             if !user.is_active {
                 return Err("User account is disabled".to_string());
@@ -157,7 +303,8 @@ pub fn authenticate_user(
             };
 
             if valid {
-                let token = generate_session_token(&username);
+                // Generate HMAC-signed, non-forgeable session token
+                let token = generate_session_token(&username, &state.hmac_secret);
                 return Ok(AuthResult {
                     user_id: user.id,
                     username: user.username,
@@ -174,19 +321,42 @@ pub fn authenticate_user(
     Err("Invalid username or password".to_string())
 }
 
+/// Verify a session token — returns the username and timestamp if valid.
+///
+/// This is a separate command so the frontend (or any caller) can validate
+/// tokens without performing a full authentication.
+#[tauri::command]
+pub fn verify_token(
+    token: String,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    match verify_session_token(&token, &state.hmac_secret) {
+        Ok((username, timestamp)) => Ok(serde_json::json!({
+            "valid": true,
+            "username": username,
+            "issued_at": timestamp,
+            "expires_at": timestamp + TOKEN_EXPIRY_MS,
+        })),
+        Err(e) => Ok(serde_json::json!({
+            "valid": false,
+            "error": e,
+        })),
+    }
+}
+
 /// List all registered users.
 #[tauri::command]
 pub fn list_users(state: State<'_, AppState>) -> Result<Vec<User>, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.read().map_err(|e| e.to_string())?;
     let tx = db.begin_read().map_err(|e| e.to_string())?;
-    let table = tx.open_table(crate::db::Database::get_users_table())
+    let table = tx
+        .open_table(crate::db::Database::get_users_table())
         .map_err(|e| e.to_string())?;
 
     let mut results = Vec::new();
     for entry in table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
-        let user: User = serde_json::from_str(&value.value())
-            .map_err(|e| e.to_string())?;
+        let user: User = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
         results.push(user);
     }
 
@@ -215,22 +385,26 @@ pub fn set_file_permission(
     state: State<'_, AppState>,
 ) -> Result<UserFilePermission, String> {
     if !["read", "write", "admin"].contains(&access.as_str()) {
-        return Err(format!("Invalid access level: {}. Must be read, write, or admin", access));
+        return Err(format!(
+            "Invalid access level: {}. Must be read, write, or admin",
+            access
+        ));
     }
 
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.write().map_err(|e| e.to_string())?;
     let now = Utc::now().to_rfc3339();
     let perm_id = uuid::Uuid::new_v4().to_string();
 
     // Check if a permission already exists for this user+file
     let tx_read = db.begin_read().map_err(|e| e.to_string())?;
-    let perms_table = tx_read.open_table(crate::db::Database::get_user_file_perms_table())
+    let perms_table = tx_read
+        .open_table(crate::db::Database::get_user_file_perms_table())
         .map_err(|e| e.to_string())?;
     let mut existing_id: Option<String> = None;
     for entry in perms_table.iter().map_err(|e| e.to_string())? {
         let (key, value) = entry.map_err(|e| e.to_string())?;
-        let perm: UserFilePermission = serde_json::from_str(&value.value())
-            .map_err(|e| e.to_string())?;
+        let perm: UserFilePermission =
+            serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
         if perm.user_id == user_id && perm.file_id == file_id {
             existing_id = Some(key.value().to_string());
             break;
@@ -250,12 +424,14 @@ pub fn set_file_permission(
     let serialized = serde_json::to_string(&permission).map_err(|e| e.to_string())?;
     let tx = db.begin_write().map_err(|e| e.to_string())?;
     {
-        let mut table = tx.open_table(crate::db::Database::get_user_file_perms_table())
+        let mut table = tx
+            .open_table(crate::db::Database::get_user_file_perms_table())
             .map_err(|e| e.to_string())?;
         if let Some(ref eid) = existing_id {
             table.remove(eid.as_str()).map_err(|e| e.to_string())?;
         }
-        table.insert(&perm_id, serialized.as_str())
+        table
+            .insert(&perm_id, serialized.as_str())
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
@@ -269,12 +445,14 @@ pub fn revoke_file_permission(
     permission_id: String,
     state: State<'_, AppState>,
 ) -> Result<bool, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.write().map_err(|e| e.to_string())?;
     let tx = db.begin_write().map_err(|e| e.to_string())?;
     {
-        let mut table = tx.open_table(crate::db::Database::get_user_file_perms_table())
+        let mut table = tx
+            .open_table(crate::db::Database::get_user_file_perms_table())
             .map_err(|e| e.to_string())?;
-        let removed = table.remove(&permission_id)
+        let removed = table
+            .remove(&permission_id)
             .map_err(|e| e.to_string())?
             .is_some();
         if !removed {
@@ -293,9 +471,10 @@ pub fn verify_file_access(
     required_access: String,
     state: State<'_, AppState>,
 ) -> Result<bool, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.read().map_err(|e| e.to_string())?;
     let tx = db.begin_read().map_err(|e| e.to_string())?;
-    let table = tx.open_table(crate::db::Database::get_user_file_perms_table())
+    let table = tx
+        .open_table(crate::db::Database::get_user_file_perms_table())
         .map_err(|e| e.to_string())?;
 
     let level = |a: &str| match a {
@@ -308,8 +487,8 @@ pub fn verify_file_access(
 
     for entry in table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
-        let perm: UserFilePermission = serde_json::from_str(&value.value())
-            .map_err(|e| e.to_string())?;
+        let perm: UserFilePermission =
+            serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
         if perm.user_id == user_id && perm.file_id == file_id {
             if level(&perm.access) >= required {
                 return Ok(true);
@@ -318,12 +497,12 @@ pub fn verify_file_access(
     }
 
     // Check if user is admin (admins have global access)
-    let users_table = tx.open_table(crate::db::Database::get_users_table())
+    let users_table = tx
+        .open_table(crate::db::Database::get_users_table())
         .map_err(|e| e.to_string())?;
     for entry in users_table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
-        let user: User = serde_json::from_str(&value.value())
-            .map_err(|e| e.to_string())?;
+        let user: User = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
         if user.id == user_id && user.role == "admin" && user.is_active {
             return Ok(true);
         }
@@ -338,16 +517,17 @@ pub fn get_file_permissions(
     file_id: String,
     state: State<'_, AppState>,
 ) -> Result<Vec<UserFilePermission>, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.read().map_err(|e| e.to_string())?;
     let tx = db.begin_read().map_err(|e| e.to_string())?;
-    let table = tx.open_table(crate::db::Database::get_user_file_perms_table())
+    let table = tx
+        .open_table(crate::db::Database::get_user_file_perms_table())
         .map_err(|e| e.to_string())?;
 
     let mut results = Vec::new();
     for entry in table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
-        let perm: UserFilePermission = serde_json::from_str(&value.value())
-            .map_err(|e| e.to_string())?;
+        let perm: UserFilePermission =
+            serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
         if perm.file_id == file_id {
             results.push(perm);
         }

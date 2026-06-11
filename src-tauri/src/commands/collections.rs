@@ -7,7 +7,7 @@ use crate::db::schema::{Collection, CollectionItem, FileNode};
 /// List all collections from the database.
 #[tauri::command]
 pub fn list_collections(state: State<'_, AppState>) -> Result<Vec<Collection>, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.read().map_err(|e| e.to_string())?;
     let tx = db.begin_read().map_err(|e| e.to_string())?;
     let table = tx.open_table(crate::db::Database::get_collections_table())
         .map_err(|e| e.to_string())?;
@@ -46,7 +46,7 @@ pub fn create_collection(
         updated_at: now,
     };
 
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.write().map_err(|e| e.to_string())?;
     let serialized = serde_json::to_string(&collection).map_err(|e| e.to_string())?;
     let tx = db.begin_write().map_err(|e| e.to_string())?;
     {
@@ -69,7 +69,7 @@ pub fn add_to_collection(
     note: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<CollectionItem, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.write().map_err(|e| e.to_string())?;
 
     // Verify the collection exists
     let tx_read = db.begin_read().map_err(|e| e.to_string())?;
@@ -153,7 +153,7 @@ pub fn remove_from_collection(
     file_id: String,
     state: State<'_, AppState>,
 ) -> Result<bool, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.write().map_err(|e| e.to_string())?;
 
     // Read collection and file
     let tx_read = db.begin_read().map_err(|e| e.to_string())?;

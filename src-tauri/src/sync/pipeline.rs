@@ -8,6 +8,7 @@ use crate::sync::models::*;
 use crate::AppState;
 use chrono::Utc;
 use log::{error, info, warn};
+use rayon::prelude::*;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -16,6 +17,14 @@ use std::sync::{Arc, Mutex};
 // ===========================================================================
 // SyncPipeline
 // ===========================================================================
+
+/// Per-file sync result returned by the parallel inner worker.
+struct FileSyncResult {
+    file_id: String,
+    bytes_uploaded: u64,
+    bytes_saved: u64,
+    error: Option<String>,
+}
 
 /// The main sync orchestrator. Holds configuration and progress state.
 pub struct SyncPipeline {
@@ -75,7 +84,13 @@ impl SyncPipeline {
     pub fn get_progress(&self) -> SyncProgress {
         let processed = self.progress.processed_files.load(Ordering::SeqCst);
         let total = self.progress.total_files.load(Ordering::SeqCst);
-        let started = self.progress.started_at.lock().unwrap().clone();
+        let started = self
+            .progress
+            .started_at
+            .lock()
+            .map_err(|e| e.to_string())
+            .ok()
+            .and_then(|g| g.clone());
         let elapsed = started
             .as_ref()
             .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
@@ -92,10 +107,30 @@ impl SyncPipeline {
         SyncProgress {
             total_files: total,
             processed_files: processed,
-            current_file: self.progress.current_file.lock().unwrap().clone(),
-            status: self.progress.status.lock().unwrap().clone(),
+            current_file: self
+                .progress
+                .current_file
+                .lock()
+                .map_err(|e| e.to_string())
+                .ok()
+                .and_then(|g| g.clone()),
+            status: self
+                .progress
+                .status
+                .lock()
+                .map_err(|e| e.to_string())
+                .ok()
+                .map(|g| g.clone())
+                .unwrap_or(SyncStatus::Idle),
             bytes_uploaded: self.progress.bytes_uploaded.load(Ordering::SeqCst),
-            errors: self.progress.errors.lock().unwrap().clone(),
+            errors: self
+                .progress
+                .errors
+                .lock()
+                .map_err(|e| e.to_string())
+                .ok()
+                .map(|g| g.clone())
+                .unwrap_or_default(),
             started_at: started,
             estimated_remaining_seconds: estimated_remaining,
         }
@@ -106,30 +141,49 @@ impl SyncPipeline {
     // -----------------------------------------------------------------------
 
     /// Sync all the given file IDs to the configured backend.
+    /// Uses rayon parallel iterators when `max_concurrent_uploads > 1`,
+    /// otherwise falls back to sequential processing.
     pub fn sync_all(
         &self,
         file_ids: Vec<String>,
         state: &AppState,
     ) -> Result<SyncResult, String> {
-        self.reset_progress(file_ids.len() as u32);
-        *self.progress.started_at.lock().unwrap() = Some(Utc::now().to_rfc3339());
+        self.reset_progress(file_ids.len() as u32)?;
+        *self
+            .progress
+            .started_at
+            .lock()
+            .map_err(|e| e.to_string())? = Some(Utc::now().to_rfc3339());
 
         let backend = create_backend(&self.config)?;
+
+        if self.config.max_concurrent_uploads > 1 {
+            self.sync_all_parallel(&file_ids, &backend, state)
+        } else {
+            self.sync_all_sequential(&file_ids, &backend, state)
+        }
+    }
+
+    /// Sequential sync — one file at a time (fallback).
+    fn sync_all_sequential(
+        &self,
+        file_ids: &[String],
+        backend: &Box<dyn StorageBackend>,
+        state: &AppState,
+    ) -> Result<SyncResult, String> {
         let compressor = &state.compression;
         let mut total_bytes_uploaded: u64 = 0;
         let mut bytes_saved: u64 = 0;
         let mut files_synced: u32 = 0;
         let start = std::time::Instant::now();
 
-        for file_id in &file_ids {
+        for file_id in file_ids {
             if self.is_cancelled() {
                 warn!("Sync cancelled by user");
                 break;
             }
 
-            let result = self.sync_single_file_inner(file_id, &backend, compressor, state);
-
-            match result {
+            match self.sync_single_file_inner(file_id, backend, compressor, state) {
                 Ok((uploaded, saved)) => {
                     total_bytes_uploaded += uploaded;
                     bytes_saved += saved;
@@ -137,7 +191,9 @@ impl SyncPipeline {
                 }
                 Err(e) => {
                     error!("Failed to sync file {}: {}", file_id, e);
-                    self.progress.errors.lock().unwrap().push(e);
+                    if let Ok(mut errors) = self.progress.errors.lock().map_err(|e| e.to_string()) {
+                        errors.push(e);
+                    }
                 }
             }
 
@@ -151,13 +207,115 @@ impl SyncPipeline {
         } else {
             SyncStatus::Done
         };
-        *self.progress.status.lock().unwrap() = final_status;
+        if let Ok(mut status) = self.progress.status.lock().map_err(|e| e.to_string()) {
+            *status = final_status;
+        }
 
         Ok(SyncResult {
             files_synced,
             bytes_uploaded: total_bytes_uploaded,
             bytes_saved_by_compression: bytes_saved,
-            errors: self.progress.errors.lock().unwrap().clone(),
+            errors: self
+                .progress
+                .errors
+                .lock()
+                .map_err(|e| e.to_string())
+                .ok()
+                .map(|g| g.clone())
+                .unwrap_or_default(),
+            duration_ms: start.elapsed().as_millis() as u64,
+        })
+    }
+
+    /// Parallel sync using rayon — each file is independent.
+    fn sync_all_parallel(
+        &self,
+        file_ids: &[String],
+        backend: &Box<dyn StorageBackend>,
+        state: &AppState,
+    ) -> Result<SyncResult, String> {
+        let start = std::time::Instant::now();
+
+        // Configure the rayon thread pool
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(self.config.max_concurrent_uploads as usize)
+            .build()
+            .map_err(|e| format!("Failed to create thread pool: {}", e))?;
+
+        let results: Vec<FileSyncResult> = pool.install(|| {
+            file_ids
+                .par_iter()
+                .filter(|_| !self.is_cancelled())
+                .map(|file_id| {
+                    let compressor = &state.compression;
+                    match self.sync_single_file_inner(file_id, backend, compressor, state) {
+                        Ok((uploaded, saved)) => {
+                            self.progress
+                                .processed_files
+                                .fetch_add(1, Ordering::SeqCst);
+                            self.progress
+                                .bytes_uploaded
+                                .fetch_add(uploaded, Ordering::SeqCst);
+                            FileSyncResult {
+                                file_id: file_id.clone(),
+                                bytes_uploaded: uploaded,
+                                bytes_saved: saved,
+                                error: None,
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to sync file {}: {}", file_id, e);
+                            self.progress
+                                .processed_files
+                                .fetch_add(1, Ordering::SeqCst);
+                            FileSyncResult {
+                                file_id: file_id.clone(),
+                                bytes_uploaded: 0,
+                                bytes_saved: 0,
+                                error: Some(e),
+                            }
+                        }
+                    }
+                })
+                .collect()
+        });
+
+        // Aggregate results
+        let mut total_bytes_uploaded: u64 = 0;
+        let mut bytes_saved: u64 = 0;
+        let mut files_synced: u32 = 0;
+
+        for r in &results {
+            if let Some(ref err) = r.error {
+                if let Ok(mut errors) = self.progress.errors.lock() {
+                    errors.push(format!("{}: {}", r.file_id, err));
+                }
+            } else {
+                total_bytes_uploaded += r.bytes_uploaded;
+                bytes_saved += r.bytes_saved;
+                files_synced += 1;
+            }
+        }
+
+        let final_status = if self.is_cancelled() {
+            SyncStatus::Error
+        } else {
+            SyncStatus::Done
+        };
+        if let Ok(mut status) = self.progress.status.lock() {
+            *status = final_status;
+        }
+
+        Ok(SyncResult {
+            files_synced,
+            bytes_uploaded: total_bytes_uploaded,
+            bytes_saved_by_compression: bytes_saved,
+            errors: self
+                .progress
+                .errors
+                .lock()
+                .map(|g| g.clone())
+                .unwrap_or_default(),
             duration_ms: start.elapsed().as_millis() as u64,
         })
     }
@@ -168,8 +326,12 @@ impl SyncPipeline {
         file_id: String,
         state: &AppState,
     ) -> Result<SyncResult, String> {
-        self.reset_progress(1);
-        *self.progress.started_at.lock().unwrap() = Some(Utc::now().to_rfc3339());
+        self.reset_progress(1)?;
+        *self
+            .progress
+            .started_at
+            .lock()
+            .map_err(|e| e.to_string())? = Some(Utc::now().to_rfc3339());
 
         let backend = create_backend(&self.config)?;
         let compressor = &state.compression;
@@ -181,13 +343,20 @@ impl SyncPipeline {
         self.progress
             .processed_files
             .fetch_add(1, Ordering::SeqCst);
-        *self.progress.status.lock().unwrap() = SyncStatus::Done;
+        if let Ok(mut status) = self.progress.status.lock().map_err(|e| e.to_string()) {
+            *status = SyncStatus::Done;
+        }
 
         Ok(SyncResult {
             files_synced: 1,
             bytes_uploaded,
             bytes_saved_by_compression: bytes_saved,
-            errors: self.progress.errors.lock().unwrap().clone(),
+            errors: self
+                .progress
+                .errors
+                .lock()
+                .map(|g| g.clone())
+                .unwrap_or_default(),
             duration_ms: start.elapsed().as_millis() as u64,
         })
     }
@@ -219,12 +388,16 @@ impl SyncPipeline {
             return Err(format!("File not found on disk: {}", original_path));
         }
 
-        *self.progress.current_file.lock().unwrap() = Some(original_path.clone());
+        if let Ok(mut current) = self.progress.current_file.lock() {
+            *current = Some(original_path.clone());
+        }
 
         // 2. Compress (if configured)
         let (upload_path, _original_size, compressed_size, bytes_saved) =
             if self.config.compress_before_upload {
-                *self.progress.status.lock().unwrap() = SyncStatus::Compressing;
+                if let Ok(mut status) = self.progress.status.lock() {
+                    *status = SyncStatus::Compressing;
+                }
                 let (comp_path, orig_sz, comp_sz) = self.compress_file(&original_path, compressor)?;
                 (comp_path, orig_sz, comp_sz, orig_sz.saturating_sub(comp_sz))
             } else {
@@ -235,12 +408,16 @@ impl SyncPipeline {
 
         // 3. Create preview (if configured)
         if self.config.create_previews {
-            *self.progress.status.lock().unwrap() = SyncStatus::Linking;
+            if let Ok(mut status) = self.progress.status.lock() {
+                *status = SyncStatus::Linking;
+            }
             let _preview_path = self.create_preview(&original_path).ok();
         }
 
         // 4. Upload
-        *self.progress.status.lock().unwrap() = SyncStatus::Uploading;
+        if let Ok(mut status) = self.progress.status.lock() {
+            *status = SyncStatus::Uploading;
+        }
         let remote_name = format!(
             "cybermanju_sync/{}",
             Path::new(&original_path)
@@ -255,16 +432,22 @@ impl SyncPipeline {
             .fetch_add(compressed_size, Ordering::SeqCst);
 
         // 5. Create link in FileNode's context_data
-        *self.progress.status.lock().unwrap() = SyncStatus::Linking;
+        if let Ok(mut status) = self.progress.status.lock() {
+            *status = SyncStatus::Linking;
+        }
         self.create_link(file_id, &remote_url, state)?;
 
         // 6. Delete raw if configured
         if self.config.delete_raw_after_sync {
-            *self.progress.status.lock().unwrap() = SyncStatus::Cleaning;
+            if let Ok(mut status) = self.progress.status.lock() {
+                *status = SyncStatus::Cleaning;
+            }
             let _deleted = self.delete_raw_uncompressed(&original_path, &upload_path)?;
         }
 
-        *self.progress.current_file.lock().unwrap() = None;
+        if let Ok(mut current) = self.progress.current_file.lock() {
+            *current = None;
+        }
 
         Ok((compressed_size, bytes_saved))
     }
@@ -349,7 +532,7 @@ impl SyncPipeline {
         remote_url: &str,
         state: &AppState,
     ) -> Result<(), String> {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let db = state.db.write().map_err(|e| e.to_string())?;
 
         // Read current file node
         let tx_read = db.begin_read().map_err(|e| e.to_string())?;
@@ -442,20 +625,27 @@ impl SyncPipeline {
     // Helpers
     // -----------------------------------------------------------------------
 
-    fn reset_progress(&self, total: u32) {
+    fn reset_progress(&self, total: u32) -> Result<(), String> {
         self.progress.total_files.store(total, Ordering::SeqCst);
         self.progress
             .processed_files
             .store(0, Ordering::SeqCst);
-        *self.progress.current_file.lock().unwrap() = None;
-        *self.progress.status.lock().unwrap() = SyncStatus::Scanning;
+        if let Ok(mut current) = self.progress.current_file.lock() {
+            *current = None;
+        }
+        if let Ok(mut status) = self.progress.status.lock() {
+            *status = SyncStatus::Scanning;
+        }
         self.progress.bytes_uploaded.store(0, Ordering::SeqCst);
-        self.progress.errors.lock().unwrap().clear();
+        if let Ok(mut errors) = self.progress.errors.lock() {
+            errors.clear();
+        }
         self.cancelled.store(false, Ordering::SeqCst);
+        Ok(())
     }
 
     fn get_file_node(&self, file_id: &str, state: &AppState) -> Result<FileNode, String> {
-        let db = state.db.lock().map_err(|e| e.to_string())?;
+        let db = state.db.read().map_err(|e| e.to_string())?;
         let tx = db.begin_read().map_err(|e| e.to_string())?;
         let table = tx
             .open_table(crate::db::Database::get_files_table())

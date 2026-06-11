@@ -17,7 +17,7 @@ pub struct FaceDetectionResult {
 /// This delegates to the crate::faces module for the actual ML inference.
 #[tauri::command]
 pub fn detect_faces(file_id: String, state: State<'_, AppState>) -> Result<FaceDetectionResult, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.write().map_err(|e| e.to_string())?;
 
     // Verify file exists
     let tx_read = db.begin_read().map_err(|e| e.to_string())?;
@@ -143,7 +143,7 @@ pub fn detect_faces(file_id: String, state: State<'_, AppState>) -> Result<FaceD
 /// List all face groups from the database.
 #[tauri::command]
 pub fn list_face_groups(state: State<'_, AppState>) -> Result<Vec<FaceGroup>, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.read().map_err(|e| e.to_string())?;
     let tx = db.begin_read().map_err(|e| e.to_string())?;
     let table = tx.open_table(crate::db::Database::get_face_groups_table())
         .map_err(|e| e.to_string())?;
@@ -162,7 +162,7 @@ pub fn list_face_groups(state: State<'_, AppState>) -> Result<Vec<FaceGroup>, St
 /// Get all files that belong to a specific face group.
 #[tauri::command]
 pub fn get_group_files(group_id: String, state: State<'_, AppState>) -> Result<Vec<FileNode>, String> {
-    let db = state.db.lock().map_err(|e| e.to_string())?;
+    let db = state.db.read().map_err(|e| e.to_string())?;
 
     // Read the face group to get file IDs
     let tx_read = db.begin_read().map_err(|e| e.to_string())?;

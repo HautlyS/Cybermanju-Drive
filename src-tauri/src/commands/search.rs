@@ -21,7 +21,7 @@ pub fn search_files(
     state: State<'_, AppState>,
 ) -> Result<Vec<SearchResult>, String> {
     let limit = limit.unwrap_or(50);
-    let tantivy_index = state.tantivy_index.lock().map_err(|e| e.to_string())?;
+    let tantivy_index = state.tantivy_index.read().map_err(|e| e.to_string())?;
 
     let request = SearchRequest {
         query: query.clone(),
@@ -53,7 +53,7 @@ pub fn suggest(
     limit: usize,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    let tantivy_index = state.tantivy_index.lock().map_err(|e| e.to_string())?;
+    let tantivy_index = state.tantivy_index.read().map_err(|e| e.to_string())?;
 
     let suggestions = tantivy_index
         .suggest(&prefix, limit)
