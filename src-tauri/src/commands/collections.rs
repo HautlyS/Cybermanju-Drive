@@ -85,7 +85,7 @@ pub fn add_to_collection(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Collection not found: {}", collection_id))?;
     let mut collection: Collection =
-        serde_json::from_str(&coll_value.value()).map_err(|e| e.to_string())?;
+        serde_json::from_str(coll_value.value()).map_err(|e| e.to_string())?;
 
     // Verify the file exists
     let file_table = tx_read
@@ -96,7 +96,7 @@ pub fn add_to_collection(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
     let mut file_node: FileNode =
-        serde_json::from_str(&file_value.value()).map_err(|e| e.to_string())?;
+        serde_json::from_str(file_value.value()).map_err(|e| e.to_string())?;
     drop(tx_read);
 
     let now = Utc::now().to_rfc3339();
@@ -176,7 +176,7 @@ pub fn remove_from_collection(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Collection not found: {}", collection_id))?;
     let mut collection: Collection =
-        serde_json::from_str(&coll_value.value()).map_err(|e| e.to_string())?;
+        serde_json::from_str(coll_value.value()).map_err(|e| e.to_string())?;
 
     // Find the collection item that matches
     let items_table = tx_read
@@ -206,9 +206,9 @@ pub fn remove_from_collection(
 
     // Update collection
     collection.item_ids.retain(|id| {
-        !item_id_to_remove
+        item_id_to_remove
             .as_ref()
-            .is_some_and(|to_remove| id == to_remove)
+            .is_none_or(|to_remove| id != to_remove)
     });
     collection.updated_at = now.clone();
 
@@ -234,7 +234,7 @@ pub fn remove_from_collection(
         // Update file node if it exists
         if let Some(fv) = file_value {
             let mut file_node: FileNode =
-                serde_json::from_str(&fv.value()).map_err(|e| e.to_string())?;
+                serde_json::from_str(fv.value()).map_err(|e| e.to_string())?;
             file_node.collection_ids.retain(|id| id != &collection_id);
             file_node.modified_at = now;
             let file_serialized = serde_json::to_string(&file_node).map_err(|e| e.to_string())?;
