@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 pub struct FileNode {
     pub id: String,
     pub name: String,
-    pub file_type: String,                    // "file" | "folder"
+    pub file_type: String, // "file" | "folder"
     pub parent_id: Option<String>,
     pub size_bytes: u64,
     pub mime_type: Option<String>,
@@ -33,7 +33,7 @@ pub struct FileNode {
     pub gps_lat: Option<f64>,
     pub gps_lon: Option<f64>,
     pub created_at: String,
-    pub modified_at: String,                  // used by commands for mutation timestamps
+    pub modified_at: String, // used by commands for mutation timestamps
 }
 
 // ---------------------------------------------------------------------------
@@ -45,7 +45,7 @@ pub struct FileNode {
 pub struct Account {
     pub id: String,
     pub name: String,
-    pub account_type: String,                 // "local" | "cloud" | "network"
+    pub account_type: String, // "local" | "cloud" | "network"
     pub path: Option<String>,
     pub color: String,
     pub is_active: bool,
@@ -62,7 +62,7 @@ pub struct Account {
 pub struct Collection {
     pub id: String,
     pub name: String,
-    pub collection_type: String,              // "highlights" | "best_moments" | "custom"
+    pub collection_type: String, // "highlights" | "best_moments" | "custom"
     pub color: String,
     pub description: Option<String>,
     pub item_ids: Vec<String>,
@@ -146,7 +146,7 @@ pub struct User {
     pub username: String,
     pub password_hash: String,
     pub display_name: Option<String>,
-    pub role: String,                         // "admin" | "user" | "viewer"
+    pub role: String, // "admin" | "user" | "viewer"
     pub is_active: bool,
     pub created_at: String,
     pub updated_at: String,
@@ -162,7 +162,7 @@ pub struct UserFilePermission {
     pub id: String,
     pub user_id: String,
     pub file_id: String,
-    pub access: String,                       // "read" | "write" | "admin"
+    pub access: String, // "read" | "write" | "admin"
     pub granted_by: String,
     pub granted_at: String,
 }

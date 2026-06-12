@@ -1,8 +1,8 @@
-use tauri::State;
 use serde::{Deserialize, Serialize};
+use tauri::State;
 
-use crate::AppState;
 use crate::db::schema::FileNode;
+use crate::AppState;
 
 /// A file with GPS coordinates for map display.
 #[derive(Debug, Serialize, Deserialize)]
@@ -20,14 +20,15 @@ pub struct GeoFile {
 pub fn get_geo_files(state: State<'_, AppState>) -> Result<Vec<GeoFile>, String> {
     let db = state.db.read().map_err(|e| e.to_string())?;
     let tx = db.begin_read().map_err(|e| e.to_string())?;
-    let table = tx.open_table(crate::db::Database::get_files_table())
+    let table = tx
+        .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
 
     let mut results = Vec::new();
     for entry in table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
-        let file_node: FileNode = serde_json::from_str(&value.value())
-            .map_err(|e| e.to_string())?;
+        let file_node: FileNode =
+            serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
 
         if let (Some(lat), Some(lon)) = (file_node.gps_lat, file_node.gps_lon) {
             results.push(GeoFile {
@@ -55,18 +56,23 @@ pub struct GpsCoordinates {
 /// Extract GPS coordinates from a file's EXIF data using kamadak-exif.
 /// Returns the extracted coordinates and updates the file node in the database.
 #[tauri::command]
-pub fn extract_exif_gps(file_id: String, state: State<'_, AppState>) -> Result<GpsCoordinates, String> {
+pub fn extract_exif_gps(
+    file_id: String,
+    state: State<'_, AppState>,
+) -> Result<GpsCoordinates, String> {
     let db = state.db.write().map_err(|e| e.to_string())?;
 
     // Read the file node to get the file path
     let tx_read = db.begin_read().map_err(|e| e.to_string())?;
-    let table_read = tx_read.open_table(crate::db::Database::get_files_table())
+    let table_read = tx_read
+        .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
-    let value = table_read.get(&file_id)
+    let value = table_read
+        .get(&file_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
-    let mut file_node: FileNode = serde_json::from_str(&value.value())
-        .map_err(|e| e.to_string())?;
+    let mut file_node: FileNode =
+        serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
     drop(tx_read);
 
     // Get the actual file path from the file node's context_data or name
@@ -186,7 +192,10 @@ pub fn extract_exif_gps(file_id: String, state: State<'_, AppState>) -> Result<G
     file_node.modified_at = chrono::Utc::now().to_rfc3339();
 
     // Store updated GPS in context_data as well
-    let mut ctx = file_node.context_data.clone().unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+    let mut ctx = file_node
+        .context_data
+        .clone()
+        .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
     if let Some(obj) = ctx.as_object_mut() {
         obj.insert("gps_source".to_string(), serde_json::json!("exif"));
         obj.insert("gps_altitude".to_string(), serde_json::json!(altitude));
@@ -197,9 +206,11 @@ pub fn extract_exif_gps(file_id: String, state: State<'_, AppState>) -> Result<G
     let serialized = serde_json::to_string(&file_node).map_err(|e| e.to_string())?;
     let tx = db.begin_write().map_err(|e| e.to_string())?;
     {
-        let mut table = tx.open_table(crate::db::Database::get_files_table())
+        let mut table = tx
+            .open_table(crate::db::Database::get_files_table())
             .map_err(|e| e.to_string())?;
-        table.insert(&file_id, serialized.as_str())
+        table
+            .insert(&file_id, serialized.as_str())
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;

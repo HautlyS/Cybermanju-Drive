@@ -2,9 +2,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::State;
 
-use crate::AppState;
 use crate::sync::backends::create_backend;
 use crate::sync::models::*;
+use crate::AppState;
 
 /// Shared sync progress state for tracking active sync operations.
 pub struct SyncState {
@@ -46,8 +46,7 @@ pub fn list_sync_configs(state: State<'_, AppState>) -> Result<Vec<SyncConfig>, 
     let mut configs = Vec::new();
     for entry in table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
-        let config: SyncConfig = serde_json::from_str(&value.value())
-            .map_err(|e| e.to_string())?;
+        let config: SyncConfig = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
         configs.push(config);
     }
 
@@ -89,10 +88,7 @@ pub fn create_sync_config(
 
 /// Delete a sync configuration by ID.
 #[tauri::command]
-pub fn delete_sync_config(
-    config_id: String,
-    state: State<'_, AppState>,
-) -> Result<bool, String> {
+pub fn delete_sync_config(config_id: String, state: State<'_, AppState>) -> Result<bool, String> {
     let db = state.db.write().map_err(|e| e.to_string())?;
     let tx = db.begin_write().map_err(|e| e.to_string())?;
     {
@@ -129,8 +125,7 @@ pub fn start_sync(
         .get(config_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Sync config not found: {}", config_id))?;
-    let config: SyncConfig = serde_json::from_str(&value.value())
-        .map_err(|e| e.to_string())?;
+    let config: SyncConfig = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
     drop(tx_read);
 
     if !config.enabled {
@@ -199,10 +194,7 @@ pub fn cancel_sync(sync_state: State<'_, Arc<SyncState>>) -> Result<bool, String
 
 /// List files on the remote backend.
 #[tauri::command]
-pub fn list_remote_files(
-    config: SyncConfig,
-    prefix: String,
-) -> Result<Vec<RemoteFile>, String> {
+pub fn list_remote_files(config: SyncConfig, prefix: String) -> Result<Vec<RemoteFile>, String> {
     let backend = create_backend(&config)?;
     backend.list_files(&prefix)
 }

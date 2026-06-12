@@ -5,18 +5,19 @@ pub mod commands;
 pub mod compression;
 pub mod crypto;
 pub mod db;
-pub mod faces;       // ML module: detect_faces_in_file, embedding_distance, cluster_embeddings
+pub mod faces; // ML module: detect_faces_in_file, embedding_distance, cluster_embeddings
 pub mod preview;
 pub mod search;
 pub mod sync;
 pub mod tree_sitter; // parse_file, get_symbols (tauri commands)
 pub mod web_dashboard;
 
-use commands::{
-    accounts, collections, dashboard, encryption, files, import as import_cmd, map, search_cmd, users,
-};
 use commands::faces as face_cmd;
 use commands::sync as sync_cmd;
+use commands::{
+    accounts, collections, dashboard, encryption, files, import as import_cmd, map, search_cmd,
+    users,
+};
 use db::Database;
 use std::sync::{Arc, RwLock};
 use tauri::Manager;
@@ -62,7 +63,7 @@ pub fn run() {
 
     // Initialize HMAC secret for secure session tokens
     let mut hmac_secret = [0u8; 32];
-    use rand_core::{RngCore, OsRng};
+    use rand_core::{OsRng, RngCore};
     OsRng.fill_bytes(&mut hmac_secret);
 
     let state = AppState {
@@ -79,11 +80,15 @@ pub fn run() {
     let sync_state = Arc::new(sync_cmd::SyncState::new());
 
     // ─── Start Web Dashboard (localhost-only, JWT-authenticated) ────────
-    let dashboard = std::sync::Arc::new(
-        web_dashboard::WebDashboard::new(web_dashboard::DEFAULT_PORT, "cybermanju.db")
-    );
+    let dashboard = std::sync::Arc::new(web_dashboard::WebDashboard::new(
+        web_dashboard::DEFAULT_PORT,
+        "cybermanju.db",
+    ));
     match dashboard.start() {
-        Ok(()) => tracing::info!("Web Dashboard started on port {} (localhost only, JWT auth)", web_dashboard::DEFAULT_PORT),
+        Ok(()) => tracing::info!(
+            "Web Dashboard started on port {} (localhost only, JWT auth)",
+            web_dashboard::DEFAULT_PORT
+        ),
         Err(e) => tracing::error!("Failed to start Web Dashboard: {}", e),
     }
     // dashboard.stop() is called explicitly below after Tauri exits,

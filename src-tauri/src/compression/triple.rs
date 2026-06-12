@@ -116,7 +116,8 @@ impl TripleCompressor {
     /// Layer 3: Brotli compression — maximum ratio for archival
     pub fn compress_brotli(&self, data: &[u8]) -> Result<Vec<u8>> {
         let mut compressed = Vec::new();
-        let mut encoder = brotli::CompressorWriter::new(&mut compressed, 4096, self.brotli_level, 22);
+        let mut encoder =
+            brotli::CompressorWriter::new(&mut compressed, 4096, self.brotli_level, 22);
         encoder.write_all(data)?;
         drop(encoder);
         Ok(compressed)
@@ -200,28 +201,35 @@ impl TripleCompressor {
 
         // Layer 1: LZ4 as entropy probe
         let lz4_out = self.compress_lz4(data)?;
-        let lz4_ratio = if original_size > 0 { lz4_out.len() as f64 / original_size as f64 } else { 1.0 };
+        let lz4_ratio = if original_size > 0 {
+            lz4_out.len() as f64 / original_size as f64
+        } else {
+            1.0
+        };
 
         // Early abort: if LZ4 doesn't help, the data is incompressible
         if lz4_ratio > 0.98 {
             let hash = blake3::hash(data);
             let duration_ms = start.elapsed().as_millis() as u64;
-            return Ok((data.to_vec(), CompressionStats {
-                original_size,
-                compressed_size: original_size,
-                ratio: 1.0,
-                layer: "skipped (incompressible)".into(),
-                layer_details: vec![LayerDetail {
-                    name: "LZ4 probe".into(),
-                    algorithm: "lz4_flex".into(),
-                    input_size: original_size,
-                    output_size: lz4_out.len() as u64,
-                    ratio: lz4_ratio,
-                    color: "#6B7280".into(),
-                }],
-                blake3_hash: hash.to_hex().to_string(),
-                duration_ms,
-            }));
+            return Ok((
+                data.to_vec(),
+                CompressionStats {
+                    original_size,
+                    compressed_size: original_size,
+                    ratio: 1.0,
+                    layer: "skipped (incompressible)".into(),
+                    layer_details: vec![LayerDetail {
+                        name: "LZ4 probe".into(),
+                        algorithm: "lz4_flex".into(),
+                        input_size: original_size,
+                        output_size: lz4_out.len() as u64,
+                        ratio: lz4_ratio,
+                        color: "#6B7280".into(),
+                    }],
+                    blake3_hash: hash.to_hex().to_string(),
+                    duration_ms,
+                },
+            ));
         }
 
         // Proceed with ZSTD → Brotli only for compressible data
@@ -230,7 +238,11 @@ impl TripleCompressor {
             algorithm: "lz4_flex".into(),
             input_size: original_size,
             output_size: lz4_out.len() as u64,
-            ratio: if original_size > 0 { lz4_out.len() as f64 / original_size as f64 } else { 1.0 },
+            ratio: if original_size > 0 {
+                lz4_out.len() as f64 / original_size as f64
+            } else {
+                1.0
+            },
             color: "#00D4FF".into(),
         };
 
@@ -241,7 +253,11 @@ impl TripleCompressor {
             algorithm: format!("zstd level {}", self.zstd_level),
             input_size: lz4_out.len() as u64,
             output_size: zstd_out.len() as u64,
-            ratio: if lz4_out.len() > 0 { zstd_out.len() as f64 / lz4_out.len() as f64 } else { 1.0 },
+            ratio: if lz4_out.len() > 0 {
+                zstd_out.len() as f64 / lz4_out.len() as f64
+            } else {
+                1.0
+            },
             color: "#00FF41".into(),
         };
 
@@ -252,7 +268,11 @@ impl TripleCompressor {
             algorithm: format!("brotli level {}", self.brotli_level),
             input_size: zstd_out.len() as u64,
             output_size: brotli_out.len() as u64,
-            ratio: if zstd_out.len() > 0 { brotli_out.len() as f64 / zstd_out.len() as f64 } else { 1.0 },
+            ratio: if zstd_out.len() > 0 {
+                brotli_out.len() as f64 / zstd_out.len() as f64
+            } else {
+                1.0
+            },
             color: "#FFB800".into(),
         };
 
@@ -264,7 +284,11 @@ impl TripleCompressor {
         let stats = CompressionStats {
             original_size,
             compressed_size: brotli_out.len() as u64,
-            ratio: if original_size > 0 { brotli_out.len() as f64 / original_size as f64 } else { 1.0 },
+            ratio: if original_size > 0 {
+                brotli_out.len() as f64 / original_size as f64
+            } else {
+                1.0
+            },
             layer: "triple".into(),
             layer_details,
             blake3_hash: hash.to_hex().to_string(),

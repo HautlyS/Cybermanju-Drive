@@ -143,17 +143,10 @@ impl SyncPipeline {
     /// Sync all the given file IDs to the configured backend.
     /// Uses rayon parallel iterators when `max_concurrent_uploads > 1`,
     /// otherwise falls back to sequential processing.
-    pub fn sync_all(
-        &self,
-        file_ids: Vec<String>,
-        state: &AppState,
-    ) -> Result<SyncResult, String> {
+    pub fn sync_all(&self, file_ids: Vec<String>, state: &AppState) -> Result<SyncResult, String> {
         self.reset_progress(file_ids.len() as u32)?;
-        *self
-            .progress
-            .started_at
-            .lock()
-            .map_err(|e| e.to_string())? = Some(Utc::now().to_rfc3339());
+        *self.progress.started_at.lock().map_err(|e| e.to_string())? =
+            Some(Utc::now().to_rfc3339());
 
         let backend = create_backend(&self.config)?;
 
@@ -197,9 +190,7 @@ impl SyncPipeline {
                 }
             }
 
-            self.progress
-                .processed_files
-                .fetch_add(1, Ordering::SeqCst);
+            self.progress.processed_files.fetch_add(1, Ordering::SeqCst);
         }
 
         let final_status = if self.is_cancelled() {
@@ -250,9 +241,7 @@ impl SyncPipeline {
                     let compressor = &state.compression;
                     match self.sync_single_file_inner(file_id, backend, compressor, state) {
                         Ok((uploaded, saved)) => {
-                            self.progress
-                                .processed_files
-                                .fetch_add(1, Ordering::SeqCst);
+                            self.progress.processed_files.fetch_add(1, Ordering::SeqCst);
                             self.progress
                                 .bytes_uploaded
                                 .fetch_add(uploaded, Ordering::SeqCst);
@@ -265,9 +254,7 @@ impl SyncPipeline {
                         }
                         Err(e) => {
                             error!("Failed to sync file {}: {}", file_id, e);
-                            self.progress
-                                .processed_files
-                                .fetch_add(1, Ordering::SeqCst);
+                            self.progress.processed_files.fetch_add(1, Ordering::SeqCst);
                             FileSyncResult {
                                 file_id: file_id.clone(),
                                 bytes_uploaded: 0,
@@ -327,11 +314,8 @@ impl SyncPipeline {
         state: &AppState,
     ) -> Result<SyncResult, String> {
         self.reset_progress(1)?;
-        *self
-            .progress
-            .started_at
-            .lock()
-            .map_err(|e| e.to_string())? = Some(Utc::now().to_rfc3339());
+        *self.progress.started_at.lock().map_err(|e| e.to_string())? =
+            Some(Utc::now().to_rfc3339());
 
         let backend = create_backend(&self.config)?;
         let compressor = &state.compression;
@@ -340,9 +324,7 @@ impl SyncPipeline {
         let (bytes_uploaded, bytes_saved) =
             self.sync_single_file_inner(&file_id, &backend, compressor, state)?;
 
-        self.progress
-            .processed_files
-            .fetch_add(1, Ordering::SeqCst);
+        self.progress.processed_files.fetch_add(1, Ordering::SeqCst);
         if let Ok(mut status) = self.progress.status.lock().map_err(|e| e.to_string()) {
             *status = SyncStatus::Done;
         }
@@ -398,7 +380,8 @@ impl SyncPipeline {
                 if let Ok(mut status) = self.progress.status.lock() {
                     *status = SyncStatus::Compressing;
                 }
-                let (comp_path, orig_sz, comp_sz) = self.compress_file(&original_path, compressor)?;
+                let (comp_path, orig_sz, comp_sz) =
+                    self.compress_file(&original_path, compressor)?;
                 (comp_path, orig_sz, comp_sz, orig_sz.saturating_sub(comp_sz))
             } else {
                 let metadata = fs::metadata(&original_path)
@@ -492,8 +475,8 @@ impl SyncPipeline {
     /// Generate a thumbnail preview for an image file.
     /// Returns the path to the generated preview.
     pub fn create_preview(&self, file_path: &str) -> Result<String, String> {
-        let data = fs::read(file_path)
-            .map_err(|e| format!("Failed to read file for preview: {}", e))?;
+        let data =
+            fs::read(file_path).map_err(|e| format!("Failed to read file for preview: {}", e))?;
 
         let img = image::load_from_memory(&data)
             .map_err(|e| format!("Failed to decode image for preview: {}", e))?;
@@ -543,8 +526,8 @@ impl SyncPipeline {
             .get(file_id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("File not found: {}", file_id))?;
-        let mut file_node: FileNode = serde_json::from_str(&value.value())
-            .map_err(|e| e.to_string())?;
+        let mut file_node: FileNode =
+            serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
         drop(tx_read);
 
         // Update context_data with sync link
@@ -553,10 +536,7 @@ impl SyncPipeline {
             .clone()
             .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
         if let Some(obj) = context.as_object_mut() {
-            obj.insert(
-                "sync_url".to_string(),
-                serde_json::json!(remote_url),
-            );
+            obj.insert("sync_url".to_string(), serde_json::json!(remote_url));
             obj.insert(
                 "sync_backend".to_string(),
                 serde_json::json!(self.config.backend_type.clone()),
@@ -627,9 +607,7 @@ impl SyncPipeline {
 
     fn reset_progress(&self, total: u32) -> Result<(), String> {
         self.progress.total_files.store(total, Ordering::SeqCst);
-        self.progress
-            .processed_files
-            .store(0, Ordering::SeqCst);
+        self.progress.processed_files.store(0, Ordering::SeqCst);
         if let Ok(mut current) = self.progress.current_file.lock() {
             *current = None;
         }
@@ -654,8 +632,7 @@ impl SyncPipeline {
             .get(file_id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("File not found in DB: {}", file_id))?;
-        let node: FileNode = serde_json::from_str(&value.value())
-            .map_err(|e| e.to_string())?;
+        let node: FileNode = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
         Ok(node)
     }
 }

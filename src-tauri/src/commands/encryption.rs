@@ -1,12 +1,12 @@
-use tauri::State;
-use serde::{Deserialize, Serialize};
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use tauri::State;
 
-use crate::AppState;
 use crate::crypto::pqc::{
-    self, EncryptionAlgo, FileEncryptedData, KeyPair, PqcEngine,
-    EncryptedFileMeta, algorithm_from_str,
+    self, algorithm_from_str, EncryptedFileMeta, EncryptionAlgo, FileEncryptedData, KeyPair,
+    PqcEngine,
 };
+use crate::AppState;
 
 /// Status returned when encrypting/decrypting a file.
 #[derive(Debug, Serialize, Deserialize)]
@@ -57,11 +57,9 @@ fn algorithm_info(algo: &str) -> (&'static str, u8, &'static str) {
         "ml_dsa87" | "ml-dsa87" | "ml-dsa-87" | "dilithium5" => {
             ("ML-DSA-87 — FIPS 204 (NIST Level 5)", 5, "#FF2D6F")
         }
-        "classical_sign" | "hmac" | "sphincsplus" | "sphincs+" => (
-            "HMAC-SHA512 (Classical — NOT post-quantum)",
-            0,
-            "#6B7280",
-        ),
+        "classical_sign" | "hmac" | "sphincsplus" | "sphincs+" => {
+            ("HMAC-SHA512 (Classical — NOT post-quantum)", 0, "#6B7280")
+        }
         "aes256" | "chacha20" => ("ChaCha20Poly1305 (Classical)", 0, "#FF6B2B"),
         _ => ("Unknown", 0, "#6B7280"),
     }
@@ -213,13 +211,12 @@ pub fn encrypt_file(
     drop(tx_read);
 
     // Find the latest key matching this algorithm
-    let stored_key = find_latest_key(&db, &algorithm)?
-        .ok_or_else(|| {
-            format!(
-                "No {} keypair found. Generate one first using generate_keypair.",
-                algorithm
-            )
-        })?;
+    let stored_key = find_latest_key(&db, &algorithm)?.ok_or_else(|| {
+        format!(
+            "No {} keypair found. Generate one first using generate_keypair.",
+            algorithm
+        )
+    })?;
 
     // Reconstruct the PQC keypair from stored bytes
     let keypair = reconstruct_keypair(&stored_key)?;
@@ -247,7 +244,11 @@ pub fn encrypt_file(
                             .and_then(|mj| {
                                 std::fs::write(&meta_path, mj)
                                     .map_err(|e| {
-                                        log::error!("Failed to write encryption metadata {}: {}", meta_path, e);
+                                        log::error!(
+                                            "Failed to write encryption metadata {}: {}",
+                                            meta_path,
+                                            e
+                                        );
                                         e
                                     })
                                     .ok()
@@ -265,10 +266,7 @@ pub fn encrypt_file(
                         }
                     }
                     Err(e) => {
-                        log::error!(
-                            "PQC encryption failed (metadata still updated): {}",
-                            e
-                        );
+                        log::error!("PQC encryption failed (metadata still updated): {}", e);
                         None
                     }
                 }
@@ -350,40 +348,31 @@ pub fn decrypt_file(
             let meta_path = format!("{}.enc.meta.json", original_path);
 
             // Read encryption metadata
-            let meta_json = std::fs::read_to_string(&meta_path).map_err(|e| {
-                format!("Cannot read encryption metadata {}: {}", meta_path, e)
-            })?;
-            let meta: EncryptedFileMeta =
-                serde_json::from_str(&meta_json).map_err(|e| {
-                    format!("Failed to parse encryption metadata: {}", e)
-                })?;
+            let meta_json = std::fs::read_to_string(&meta_path)
+                .map_err(|e| format!("Cannot read encryption metadata {}: {}", meta_path, e))?;
+            let meta: EncryptedFileMeta = serde_json::from_str(&meta_json)
+                .map_err(|e| format!("Failed to parse encryption metadata: {}", e))?;
 
             // Load the key used for encryption
-            let stored_key = find_key_by_id(&db, &meta.key_id)?
-                .ok_or_else(|| {
-                    format!(
-                        "Encryption key {} not found — cannot decrypt",
-                        meta.key_id
-                    )
-                })?;
+            let stored_key = find_key_by_id(&db, &meta.key_id)?.ok_or_else(|| {
+                format!("Encryption key {} not found — cannot decrypt", meta.key_id)
+            })?;
             let keypair = reconstruct_keypair(&stored_key)?;
 
             // Read ciphertext
-            let ciphertext = std::fs::read(&enc_path).map_err(|e| {
-                format!("Cannot read encrypted file {}: {}", enc_path, e)
-            })?;
+            let ciphertext = std::fs::read(&enc_path)
+                .map_err(|e| format!("Cannot read encrypted file {}: {}", enc_path, e))?;
 
             // Reconstruct FileEncryptedData and decrypt
-            let encrypted = meta.to_encrypted_data(ciphertext).map_err(|e| {
-                format!("Failed to reconstruct encrypted data: {}", e)
-            })?;
+            let encrypted = meta
+                .to_encrypted_data(ciphertext)
+                .map_err(|e| format!("Failed to reconstruct encrypted data: {}", e))?;
 
             match pqc::decrypt_data(&encrypted, &keypair) {
                 Ok(plaintext) => {
                     // Write decrypted file back to original path
-                    std::fs::write(original_path, &plaintext).map_err(|e| {
-                        format!("Failed to write decrypted file: {}", e)
-                    })?;
+                    std::fs::write(original_path, &plaintext)
+                        .map_err(|e| format!("Failed to write decrypted file: {}", e))?;
 
                     // Clean up .enc and .enc.meta.json
                     let _ = std::fs::remove_file(&enc_path);
@@ -572,10 +561,8 @@ pub fn list_keys(state: State<'_, AppState>) -> Result<Vec<FrontendKeyInfo>, Str
         ) {
             Ok(bytes) => {
                 let truncated = &bytes[..16.min(bytes.len())];
-                let encoded = base64::Engine::encode(
-                    &base64::engine::general_purpose::STANDARD,
-                    truncated,
-                );
+                let encoded =
+                    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, truncated);
                 format!("{}...", encoded)
             }
             Err(_) => {

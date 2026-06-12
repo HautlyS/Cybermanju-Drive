@@ -1,20 +1,21 @@
-use tauri::State;
 use chrono::Utc;
+use tauri::State;
 
-use crate::AppState;
 use crate::db::schema::FileNode;
 use crate::db::schema::LooseGroup;
+use crate::AppState;
 
 /// List all file nodes whose parent_id matches the given parent_path.
 /// Uses the parent_index secondary index for O(1) lookup instead of O(N) full scan.
 #[tauri::command]
-pub fn list_files(parent_path: String, state: State<'_, AppState>) -> Result<Vec<FileNode>, String> {
+pub fn list_files(
+    parent_path: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<FileNode>, String> {
     let db = state.db.read().map_err(|e| e.to_string())?;
 
     // Use the parent index for O(1) lookup
-    let file_ids = db
-        .list_by_parent(&parent_path)
-        .map_err(|e| e.to_string())?;
+    let file_ids = db.list_by_parent(&parent_path).map_err(|e| e.to_string())?;
 
     if file_ids.is_empty() {
         // No entries in the parent index — return empty
@@ -28,7 +29,10 @@ pub fn list_files(parent_path: String, state: State<'_, AppState>) -> Result<Vec
 
     let mut results = Vec::new();
     for file_id in &file_ids {
-        match read_table.get(file_id.as_str()).map_err(|e| e.to_string())? {
+        match read_table
+            .get(file_id.as_str())
+            .map_err(|e| e.to_string())?
+        {
             Some(value) => {
                 match serde_json::from_str::<FileNode>(&value.value()) {
                     Ok(node) => results.push(node),
@@ -63,14 +67,17 @@ pub fn get_file(file_id: String, state: State<'_, AppState>) -> Result<FileNode,
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
 
-    let file_node: FileNode = serde_json::from_str(&value.value())
-        .map_err(|e| e.to_string())?;
+    let file_node: FileNode = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
     Ok(file_node)
 }
 
 /// Create a new folder entry in the database.
 #[tauri::command]
-pub fn create_folder(name: String, parent_id: String, state: State<'_, AppState>) -> Result<FileNode, String> {
+pub fn create_folder(
+    name: String,
+    parent_id: String,
+    state: State<'_, AppState>,
+) -> Result<FileNode, String> {
     let folder_id = uuid::Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
 
@@ -117,13 +124,15 @@ pub fn delete_file(file_id: String, state: State<'_, AppState>) -> Result<bool, 
         .map_err(|e| e.to_string())?;
     let value = table_read.get(&file_id).map_err(|e| e.to_string())?;
     let parent_id = value.and_then(|val| {
-        serde_json::from_str::<FileNode>(val.value()).ok()
+        serde_json::from_str::<FileNode>(val.value())
+            .ok()
             .and_then(|node| node.parent_id)
     });
     drop(tx_read);
 
     // Atomically remove from both files table and parent index
-    let removed = db.remove_file_with_index(&file_id, parent_id.as_deref())
+    let removed = db
+        .remove_file_with_index(&file_id, parent_id.as_deref())
         .map_err(|e| e.to_string())?;
     if !removed {
         return Err(format!("File not found: {}", file_id));
@@ -134,7 +143,11 @@ pub fn delete_file(file_id: String, state: State<'_, AppState>) -> Result<bool, 
 
 /// Rename a file or folder.
 #[tauri::command]
-pub fn rename_file(file_id: String, new_name: String, state: State<'_, AppState>) -> Result<FileNode, String> {
+pub fn rename_file(
+    file_id: String,
+    new_name: String,
+    state: State<'_, AppState>,
+) -> Result<FileNode, String> {
     let db = state.db.write().map_err(|e| e.to_string())?;
 
     // Read existing
@@ -146,8 +159,8 @@ pub fn rename_file(file_id: String, new_name: String, state: State<'_, AppState>
         .get(&file_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
-    let mut file_node: FileNode = serde_json::from_str(&value.value())
-        .map_err(|e| e.to_string())?;
+    let mut file_node: FileNode =
+        serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
 
     file_node.name = new_name;
     file_node.modified_at = Utc::now().to_rfc3339();
@@ -172,7 +185,10 @@ pub fn rename_file(file_id: String, new_name: String, state: State<'_, AppState>
 /// generates a new blake3 hash placeholder, creates a link-style preview reference,
 /// and stores in redb.
 #[tauri::command]
-pub fn duplicate_file_context(file_id: String, state: State<'_, AppState>) -> Result<FileNode, String> {
+pub fn duplicate_file_context(
+    file_id: String,
+    state: State<'_, AppState>,
+) -> Result<FileNode, String> {
     let db = state.db.write().map_err(|e| e.to_string())?;
 
     // Read the original file node
@@ -184,8 +200,7 @@ pub fn duplicate_file_context(file_id: String, state: State<'_, AppState>) -> Re
         .get(&file_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
-    let original: FileNode = serde_json::from_str(&value.value())
-        .map_err(|e| e.to_string())?;
+    let original: FileNode = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
 
     let new_id = uuid::Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
@@ -209,14 +224,8 @@ pub fn duplicate_file_context(file_id: String, state: State<'_, AppState>) -> Re
         .clone()
         .unwrap_or(serde_json::Value::Null);
     if let Some(obj) = context_data.as_object_mut() {
-        obj.insert(
-            "duplicated_from".to_string(),
-            serde_json::json!(file_id),
-        );
-        obj.insert(
-            "duplicate_created_at".to_string(),
-            serde_json::json!(now),
-        );
+        obj.insert("duplicated_from".to_string(), serde_json::json!(file_id));
+        obj.insert("duplicate_created_at".to_string(), serde_json::json!(now));
     }
 
     // Clone fields needed after the move BEFORE moving
@@ -239,14 +248,19 @@ pub fn duplicate_file_context(file_id: String, state: State<'_, AppState>) -> Re
         &new_id,
         serialized.as_str(),
         duplicated.parent_id.as_deref(),
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     Ok(duplicated)
 }
 
 /// Move a file to a new parent.
 #[tauri::command]
-pub fn move_file(file_id: String, new_parent_id: String, state: State<'_, AppState>) -> Result<FileNode, String> {
+pub fn move_file(
+    file_id: String,
+    new_parent_id: String,
+    state: State<'_, AppState>,
+) -> Result<FileNode, String> {
     let db = state.db.write().map_err(|e| e.to_string())?;
 
     // Read existing
@@ -258,8 +272,8 @@ pub fn move_file(file_id: String, new_parent_id: String, state: State<'_, AppSta
         .get(&file_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
-    let mut file_node: FileNode = serde_json::from_str(&value.value())
-        .map_err(|e| e.to_string())?;
+    let mut file_node: FileNode =
+        serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
 
     // Update parent index: remove from old parent, add to new parent
     let old_parent = file_node.parent_id.clone();
@@ -268,15 +282,23 @@ pub fn move_file(file_id: String, new_parent_id: String, state: State<'_, AppSta
 
     // Write back the updated file node + update indices atomically
     let serialized = serde_json::to_string(&file_node).map_err(|e| e.to_string())?;
-    db.move_file_with_index(&file_id, serialized.as_str(), old_parent.as_deref(), &new_parent_id)
-        .map_err(|e| e.to_string())?;
+    db.move_file_with_index(
+        &file_id,
+        serialized.as_str(),
+        old_parent.as_deref(),
+        &new_parent_id,
+    )
+    .map_err(|e| e.to_string())?;
 
     Ok(file_node)
 }
 
 /// Get preview metadata for a file.
 #[tauri::command]
-pub fn get_preview(file_id: String, state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+pub fn get_preview(
+    file_id: String,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
     let db = state.db.read().map_err(|e| e.to_string())?;
     let tx = db.begin_read().map_err(|e| e.to_string())?;
     let table = tx
@@ -288,8 +310,7 @@ pub fn get_preview(file_id: String, state: State<'_, AppState>) -> Result<serde_
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
 
-    let file_node: FileNode = serde_json::from_str(&value.value())
-        .map_err(|e| e.to_string())?;
+    let file_node: FileNode = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
 
     let preview = serde_json::json!({
         "file_id": file_node.id,
@@ -311,7 +332,11 @@ pub fn get_preview(file_id: String, state: State<'_, AppState>) -> Result<serde_
 
 /// Create a new loose file group.
 #[tauri::command]
-pub fn create_loose_group(name: String, color: String, state: State<'_, AppState>) -> Result<LooseGroup, String> {
+pub fn create_loose_group(
+    name: String,
+    color: String,
+    state: State<'_, AppState>,
+) -> Result<LooseGroup, String> {
     let group_id = uuid::Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
 
@@ -341,7 +366,11 @@ pub fn create_loose_group(name: String, color: String, state: State<'_, AppState
 
 /// Add a file to a loose group. Also updates the file node's loose_group_ids.
 #[tauri::command]
-pub fn add_to_loose_group(group_id: String, file_id: String, state: State<'_, AppState>) -> Result<LooseGroup, String> {
+pub fn add_to_loose_group(
+    group_id: String,
+    file_id: String,
+    state: State<'_, AppState>,
+) -> Result<LooseGroup, String> {
     let db = state.db.write().map_err(|e| e.to_string())?;
 
     // Read the group
@@ -353,8 +382,8 @@ pub fn add_to_loose_group(group_id: String, file_id: String, state: State<'_, Ap
         .get(&group_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Loose group not found: {}", group_id))?;
-    let mut group: LooseGroup = serde_json::from_str(&group_value.value())
-        .map_err(|e| e.to_string())?;
+    let mut group: LooseGroup =
+        serde_json::from_str(&group_value.value()).map_err(|e| e.to_string())?;
 
     if !group.file_ids.contains(&file_id) {
         group.file_ids.push(file_id.clone());
@@ -368,8 +397,8 @@ pub fn add_to_loose_group(group_id: String, file_id: String, state: State<'_, Ap
         .get(&file_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
-    let mut file_node: FileNode = serde_json::from_str(&file_value.value())
-        .map_err(|e| e.to_string())?;
+    let mut file_node: FileNode =
+        serde_json::from_str(&file_value.value()).map_err(|e| e.to_string())?;
 
     if !file_node.loose_group_ids.contains(&group_id) {
         file_node.loose_group_ids.push(group_id.clone());
@@ -410,8 +439,7 @@ pub fn list_loose_groups(state: State<'_, AppState>) -> Result<Vec<LooseGroup>, 
     let mut results = Vec::new();
     for entry in table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
-        let group: LooseGroup = serde_json::from_str(&value.value())
-            .map_err(|e| e.to_string())?;
+        let group: LooseGroup = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
         results.push(group);
     }
 

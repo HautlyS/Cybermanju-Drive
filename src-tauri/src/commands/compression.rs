@@ -1,18 +1,30 @@
-use tauri::State;
-use serde::{Deserialize, Serialize};
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use tauri::State;
 
 use crate::AppState;
 
 /// MIME types that are already compressed — skipping triple compression avoids
 /// wasting CPU and disk space (compressed files typically expand by 0.5–5%).
 const INCOMPRESSIBLE_MIME_TYPES: &[&str] = &[
-    "image/jpeg", "image/png", "image/webp", "image/gif",
-    "image/heic", "image/avif",
-    "video/mp4", "video/webm", "video/quicktime", "video/x-matroska",
-    "audio/mpeg", "audio/aac", "audio/ogg", "audio/flac",
-    "application/zip", "application/x-7z-compressed",
-    "application/x-rar-compressed", "application/gzip",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "image/heic",
+    "image/avif",
+    "video/mp4",
+    "video/webm",
+    "video/quicktime",
+    "video/x-matroska",
+    "audio/mpeg",
+    "audio/aac",
+    "audio/ogg",
+    "audio/flac",
+    "application/zip",
+    "application/x-7z-compressed",
+    "application/x-rar-compressed",
+    "application/gzip",
     "application/zstd",
 ];
 
@@ -60,13 +72,15 @@ pub fn compress_file(
     let db = state.db.write().map_err(|e| e.to_string())?;
 
     let tx_read = db.begin_read().map_err(|e| e.to_string())?;
-    let table_read = tx_read.open_table(crate::db::Database::get_files_table())
+    let table_read = tx_read
+        .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
-    let value = table_read.get(&file_id)
+    let value = table_read
+        .get(&file_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
-    let mut file_node: crate::db::schema::FileNode = serde_json::from_str(&value.value())
-        .map_err(|e| e.to_string())?;
+    let mut file_node: crate::db::schema::FileNode =
+        serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
     drop(tx_read);
 
     // Skip compression for already-compressed MIME types
@@ -85,7 +99,8 @@ pub fn compress_file(
     }
 
     // Try to read actual file data for real compression
-    let file_data: Option<Vec<u8>> = file_node.context_data
+    let file_data: Option<Vec<u8>> = file_node
+        .context_data
         .as_ref()
         .and_then(|ctx| ctx.get("original_path").and_then(|v| v.as_str()))
         .and_then(|path| std::fs::read(path).ok());
@@ -97,17 +112,26 @@ pub fn compress_file(
         if layer == "all" {
             match state.compression.compress_triple(&data) {
                 Ok((_compressed, stats)) => {
-                    let layer_details: Vec<FrontendLayerDetail> = stats.layer_details.into_iter().map(|ld| {
-                        FrontendLayerDetail {
+                    let layer_details: Vec<FrontendLayerDetail> = stats
+                        .layer_details
+                        .into_iter()
+                        .map(|ld| FrontendLayerDetail {
                             name: ld.name,
                             algorithm: ld.algorithm,
                             input_size: ld.input_size,
                             output_size: ld.output_size,
                             ratio: ld.ratio,
                             color: ld.color,
-                        }
-                    }).collect();
-                    Some((stats.original_size, stats.compressed_size, stats.ratio, "triple".to_string(), layer_details, stats.blake3_hash))
+                        })
+                        .collect();
+                    Some((
+                        stats.original_size,
+                        stats.compressed_size,
+                        stats.ratio,
+                        "triple".to_string(),
+                        layer_details,
+                        stats.blake3_hash,
+                    ))
                 }
                 Err(e) => return Err(format!("Triple compression failed: {}", e)),
             }
@@ -123,7 +147,14 @@ pub fn compress_file(
                         color: detail.color,
                     }];
                     let ratio = detail.ratio;
-                    Some((detail.input_size, detail.output_size, ratio, layer.clone(), layer_details, blake3::hash(&data).to_hex().to_string()))
+                    Some((
+                        detail.input_size,
+                        detail.output_size,
+                        ratio,
+                        layer.clone(),
+                        layer_details,
+                        blake3::hash(&data).to_hex().to_string(),
+                    ))
                 }
                 Err(e) => return Err(format!("Compression failed: {}", e)),
             }
@@ -143,17 +174,26 @@ pub fn compress_file(
                 if layer == "all" {
                     match state.compression.compress_triple(&data) {
                         Ok((_compressed, stats)) => {
-                            let layer_details: Vec<FrontendLayerDetail> = stats.layer_details.into_iter().map(|ld| {
-                                FrontendLayerDetail {
+                            let layer_details: Vec<FrontendLayerDetail> = stats
+                                .layer_details
+                                .into_iter()
+                                .map(|ld| FrontendLayerDetail {
                                     name: ld.name,
                                     algorithm: ld.algorithm,
                                     input_size: ld.input_size,
                                     output_size: ld.output_size,
                                     ratio: ld.ratio,
                                     color: ld.color,
-                                }
-                            }).collect();
-                            Some((stats.original_size, stats.compressed_size, stats.ratio, "triple".to_string(), layer_details, stats.blake3_hash))
+                                })
+                                .collect();
+                            Some((
+                                stats.original_size,
+                                stats.compressed_size,
+                                stats.ratio,
+                                "triple".to_string(),
+                                layer_details,
+                                stats.blake3_hash,
+                            ))
                         }
                         Err(e) => return Err(format!("Triple compression failed: {}", e)),
                     }
@@ -169,7 +209,14 @@ pub fn compress_file(
                                 color: detail.color,
                             }];
                             let ratio = detail.ratio;
-                            Some((detail.input_size, detail.output_size, ratio, layer.clone(), layer_details, blake3::hash(&data).to_hex().to_string()))
+                            Some((
+                                detail.input_size,
+                                detail.output_size,
+                                ratio,
+                                layer.clone(),
+                                layer_details,
+                                blake3::hash(&data).to_hex().to_string(),
+                            ))
                         }
                         Err(e) => return Err(format!("Compression failed: {}", e)),
                     }
@@ -197,9 +244,11 @@ pub fn compress_file(
     let serialized = serde_json::to_string(&file_node).map_err(|e| e.to_string())?;
     let tx = db.begin_write().map_err(|e| e.to_string())?;
     {
-        let mut table = tx.open_table(crate::db::Database::get_files_table())
+        let mut table = tx
+            .open_table(crate::db::Database::get_files_table())
             .map_err(|e| e.to_string())?;
-        table.insert(&file_id, serialized.as_str())
+        table
+            .insert(&file_id, serialized.as_str())
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
@@ -217,21 +266,29 @@ pub fn compress_file(
 
 /// Decompress a file by removing all compression layers.
 #[tauri::command]
-pub fn decompress_file(file_id: String, state: State<'_, AppState>) -> Result<FrontendCompressionStats, String> {
+pub fn decompress_file(
+    file_id: String,
+    state: State<'_, AppState>,
+) -> Result<FrontendCompressionStats, String> {
     let db = state.db.write().map_err(|e| e.to_string())?;
 
     let tx_read = db.begin_read().map_err(|e| e.to_string())?;
-    let table_read = tx_read.open_table(crate::db::Database::get_files_table())
+    let table_read = tx_read
+        .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
-    let value = table_read.get(&file_id)
+    let value = table_read
+        .get(&file_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
-    let mut file_node: crate::db::schema::FileNode = serde_json::from_str(&value.value())
-        .map_err(|e| e.to_string())?;
+    let mut file_node: crate::db::schema::FileNode =
+        serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
     drop(tx_read);
 
     if file_node.compression_layers.is_empty() {
-        return Err(format!("File {} has no compression layers to remove", file_id));
+        return Err(format!(
+            "File {} has no compression layers to remove",
+            file_id
+        ));
     }
 
     let start = std::time::Instant::now();
@@ -246,7 +303,8 @@ pub fn decompress_file(file_id: String, state: State<'_, AppState>) -> Result<Fr
         .filter(|p| std::path::Path::new(p).exists())
         .or_else(|| {
             // Check for compressed .cyb3 file
-            file_node.context_data
+            file_node
+                .context_data
                 .as_ref()
                 .and_then(|ctx| ctx.get("original_path").and_then(|v| v.as_str()))
                 .map(|p| format!("{}.cyb3", p))
@@ -257,9 +315,10 @@ pub fn decompress_file(file_id: String, state: State<'_, AppState>) -> Result<Fr
         match std::fs::read(&data_path) {
             Ok(data) => {
                 match state.compression.decompress_triple(&data) {
-                    Ok((decompressed, _dur)) => {
-                        (decompressed.len() as u64, blake3::hash(&decompressed).to_hex().to_string())
-                    }
+                    Ok((decompressed, _dur)) => (
+                        decompressed.len() as u64,
+                        blake3::hash(&decompressed).to_hex().to_string(),
+                    ),
                     Err(e) => {
                         // If triple decompression fails, try single-layer based on compression_layers
                         let mut result_data = data.clone();
@@ -279,7 +338,10 @@ pub fn decompress_file(file_id: String, state: State<'_, AppState>) -> Result<Fr
                                 Err(_) => continue,
                             }
                         }
-                        (current_size, blake3::hash(&result_data).to_hex().to_string())
+                        (
+                            current_size,
+                            blake3::hash(&result_data).to_hex().to_string(),
+                        )
                     }
                 }
             }
@@ -299,29 +361,38 @@ pub fn decompress_file(file_id: String, state: State<'_, AppState>) -> Result<Fr
     file_node.modified_at = now.clone();
     let duration_ms = start.elapsed().as_millis() as u64;
 
-    let layer_details: Vec<FrontendLayerDetail> = removed_layers.iter().map(|l| {
-        let color = match l.as_str() {
-            "lz4" => "#00D4FF",
-            "zstd" => "#00FF41",
-            "brotli" => "#FFB800",
-            _ => "#6B7280",
-        };
-        FrontendLayerDetail {
-            name: format!("Removed: {}", l.to_uppercase()),
-            algorithm: l.clone(),
-            input_size: compressed_size,
-            output_size: original_size,
-            ratio: if compressed_size > 0 { original_size as f64 / compressed_size as f64 } else { 1.0 },
-            color: color.to_string(),
-        }
-    }).collect();
+    let layer_details: Vec<FrontendLayerDetail> = removed_layers
+        .iter()
+        .map(|l| {
+            let color = match l.as_str() {
+                "lz4" => "#00D4FF",
+                "zstd" => "#00FF41",
+                "brotli" => "#FFB800",
+                _ => "#6B7280",
+            };
+            FrontendLayerDetail {
+                name: format!("Removed: {}", l.to_uppercase()),
+                algorithm: l.clone(),
+                input_size: compressed_size,
+                output_size: original_size,
+                ratio: if compressed_size > 0 {
+                    original_size as f64 / compressed_size as f64
+                } else {
+                    1.0
+                },
+                color: color.to_string(),
+            }
+        })
+        .collect();
 
     let serialized = serde_json::to_string(&file_node).map_err(|e| e.to_string())?;
     let tx = db.begin_write().map_err(|e| e.to_string())?;
     {
-        let mut table = tx.open_table(crate::db::Database::get_files_table())
+        let mut table = tx
+            .open_table(crate::db::Database::get_files_table())
             .map_err(|e| e.to_string())?;
-        table.insert(&file_id, serialized.as_str())
+        table
+            .insert(&file_id, serialized.as_str())
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
@@ -329,7 +400,11 @@ pub fn decompress_file(file_id: String, state: State<'_, AppState>) -> Result<Fr
     Ok(FrontendCompressionStats {
         original_size: compressed_size,
         compressed_size: original_size,
-        ratio: if compressed_size > 0 { original_size as f64 / compressed_size as f64 } else { 1.0 },
+        ratio: if compressed_size > 0 {
+            original_size as f64 / compressed_size as f64
+        } else {
+            1.0
+        },
         layer: "decompressed".to_string(),
         layer_details,
         blake3_hash: hash,
@@ -345,7 +420,8 @@ pub fn get_compression_stats(
 ) -> Result<FrontendCompressionStats, String> {
     let db = state.db.read().map_err(|e| e.to_string())?;
     let tx = db.begin_read().map_err(|e| e.to_string())?;
-    let table = tx.open_table(crate::db::Database::get_files_table())
+    let table = tx
+        .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
 
     let value = table
@@ -353,33 +429,42 @@ pub fn get_compression_stats(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
 
-    let file_node: crate::db::schema::FileNode = serde_json::from_str(&value.value())
-        .map_err(|e| e.to_string())?;
+    let file_node: crate::db::schema::FileNode =
+        serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
 
     let layer_name = if file_node.compression_layers.is_empty() {
         "none".to_string()
     } else if file_node.compression_layers.len() == 3 {
         "triple".to_string()
     } else {
-        file_node.compression_layers.last().cloned().unwrap_or_else(|| "none".to_string())
+        file_node
+            .compression_layers
+            .last()
+            .cloned()
+            .unwrap_or_else(|| "none".to_string())
     };
 
-    let layer_details: Vec<FrontendLayerDetail> = file_node.compression_layers.iter().enumerate().map(|(i, l)| {
-        let (name, color) = match l.as_str() {
-            "lz4" => (format!("Layer {}: LZ4", i + 1), "#00D4FF"),
-            "zstd" => (format!("Layer {}: Zstandard", i + 1), "#00FF41"),
-            "brotli" => (format!("Layer {}: Brotli", i + 1), "#FFB800"),
-            _ => (format!("Layer {}: {}", i + 1, l), "#6B7280"),
-        };
-        FrontendLayerDetail {
-            name,
-            algorithm: l.clone(),
-            input_size: file_node.size_bytes,
-            output_size: file_node.size_bytes, // stats tracked at compress time
-            ratio: 1.0,
-            color: color.to_string(),
-        }
-    }).collect();
+    let layer_details: Vec<FrontendLayerDetail> = file_node
+        .compression_layers
+        .iter()
+        .enumerate()
+        .map(|(i, l)| {
+            let (name, color) = match l.as_str() {
+                "lz4" => (format!("Layer {}: LZ4", i + 1), "#00D4FF"),
+                "zstd" => (format!("Layer {}: Zstandard", i + 1), "#00FF41"),
+                "brotli" => (format!("Layer {}: Brotli", i + 1), "#FFB800"),
+                _ => (format!("Layer {}: {}", i + 1, l), "#6B7280"),
+            };
+            FrontendLayerDetail {
+                name,
+                algorithm: l.clone(),
+                input_size: file_node.size_bytes,
+                output_size: file_node.size_bytes, // stats tracked at compress time
+                ratio: 1.0,
+                color: color.to_string(),
+            }
+        })
+        .collect();
 
     Ok(FrontendCompressionStats {
         original_size: file_node.size_bytes,

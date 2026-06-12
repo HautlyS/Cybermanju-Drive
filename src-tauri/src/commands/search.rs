@@ -1,8 +1,8 @@
-use tauri::State;
 use serde::{Deserialize, Serialize};
+use tauri::State;
 
-use crate::AppState;
 use crate::search::tantivy_index::{SearchRequest, SearchResult as TantivyResult};
+use crate::AppState;
 
 /// Search result returned to the frontend.
 #[derive(Debug, Serialize, Deserialize)]
@@ -29,9 +29,7 @@ pub fn search_files(
         limit: Some(limit),
     };
 
-    let results = tantivy_index
-        .search(&request)
-        .map_err(|e| e.to_string())?;
+    let results = tantivy_index.search(&request).map_err(|e| e.to_string())?;
 
     let mapped: Vec<SearchResult> = results
         .into_iter()
@@ -39,7 +37,11 @@ pub fn search_files(
             file_id: r.file_id,
             file_name: r.file_name,
             score: r.score,
-            snippet: if r.snippet.is_empty() { None } else { Some(r.snippet) },
+            snippet: if r.snippet.is_empty() {
+                None
+            } else {
+                Some(r.snippet)
+            },
         })
         .collect();
 

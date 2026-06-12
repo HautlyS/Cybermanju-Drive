@@ -78,15 +78,54 @@ fn extract_symbols_heuristic(content: &str, language: &str) -> Vec<Value> {
 
     // Language-aware keyword sets
     let fn_keywords = match language {
-        "rust" => vec!["fn ", "pub fn ", "pub(crate) fn ", "pub(super) fn ", "async fn ", "pub async fn "],
+        "rust" => vec![
+            "fn ",
+            "pub fn ",
+            "pub(crate) fn ",
+            "pub(super) fn ",
+            "async fn ",
+            "pub async fn ",
+        ],
         "python" => vec!["def "],
-        "javascript" | "typescript" => vec!["function ", "const ", "let ", "var ", "class ", "async function ", "export function ", "export default function "],
+        "javascript" | "typescript" => vec![
+            "function ",
+            "const ",
+            "let ",
+            "var ",
+            "class ",
+            "async function ",
+            "export function ",
+            "export default function ",
+        ],
         "go" => vec!["func "],
-        "java" | "kotlin" | "csharp" => vec!["public ", "private ", "protected ", "static ", "class ", "interface ", "enum ", "void "],
-        "c" | "cpp" => vec!["void ", "int ", "float ", "double ", "char ", "bool ", "auto ", "class ", "struct ", "enum ", "typedef "],
+        "java" | "kotlin" | "csharp" => vec![
+            "public ",
+            "private ",
+            "protected ",
+            "static ",
+            "class ",
+            "interface ",
+            "enum ",
+            "void ",
+        ],
+        "c" | "cpp" => vec![
+            "void ", "int ", "float ", "double ", "char ", "bool ", "auto ", "class ", "struct ",
+            "enum ", "typedef ",
+        ],
         "ruby" => vec!["def ", "class ", "module "],
         "swift" => vec!["func ", "class ", "struct ", "enum ", "protocol "],
-        _ => vec!["fn ", "function ", "def ", "class ", "struct ", "interface ", "trait ", "impl ", "enum ", "type "],
+        _ => vec![
+            "fn ",
+            "function ",
+            "def ",
+            "class ",
+            "struct ",
+            "interface ",
+            "trait ",
+            "impl ",
+            "enum ",
+            "type ",
+        ],
     };
 
     for line in content.lines() {
@@ -94,7 +133,11 @@ fn extract_symbols_heuristic(content: &str, language: &str) -> Vec<Value> {
         let trimmed = line.trim();
 
         // Skip comments and empty lines
-        if trimmed.is_empty() || trimmed.starts_with("//") || trimmed.starts_with('#') || trimmed.starts_with("/*") {
+        if trimmed.is_empty()
+            || trimmed.starts_with("//")
+            || trimmed.starts_with('#')
+            || trimmed.starts_with("/*")
+        {
             continue;
         }
 
@@ -110,9 +153,12 @@ fn extract_symbols_heuristic(content: &str, language: &str) -> Vec<Value> {
 
                 if !name.is_empty() {
                     // Determine if this is a function, class, etc.
-                    let kind = if trimmed.contains("class ") || trimmed.contains("struct ")
-                        || trimmed.contains("enum ") || trimmed.contains("interface ")
-                        || trimmed.contains("trait ") || trimmed.contains("protocol ")
+                    let kind = if trimmed.contains("class ")
+                        || trimmed.contains("struct ")
+                        || trimmed.contains("enum ")
+                        || trimmed.contains("interface ")
+                        || trimmed.contains("trait ")
+                        || trimmed.contains("protocol ")
                         || trimmed.contains("module ")
                     {
                         "class"
@@ -140,10 +186,16 @@ fn extract_symbols_heuristic(content: &str, language: &str) -> Vec<Value> {
             if trimmed.starts_with("pub trait ") || trimmed.starts_with("trait ") {
                 let name = trimmed
                     .split_whitespace()
-                    .nth(if trimmed.starts_with("pub trait ") { 2 } else { 1 })
+                    .nth(if trimmed.starts_with("pub trait ") {
+                        2
+                    } else {
+                        1
+                    })
                     .and_then(|n| n.split('<').next())
                     .unwrap_or("anonymous")
-                    .split('{').next().unwrap_or("anonymous")
+                    .split('{')
+                    .next()
+                    .unwrap_or("anonymous")
                     .trim();
                 symbols.push(json!({
                     "name": name,

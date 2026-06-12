@@ -122,11 +122,9 @@ impl StorageBackend for LocalBackend {
     fn upload_file(&self, local_path: &str, remote_path: &str) -> Result<String, String> {
         let dest = safe_join(&self.base_path, remote_path)?;
         if let Some(parent) = Path::new(&dest).parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create directory: {}", e))?;
+            fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
         }
-        fs::copy(local_path, &dest)
-            .map_err(|e| format!("Failed to copy file: {}", e))?;
+        fs::copy(local_path, &dest).map_err(|e| format!("Failed to copy file: {}", e))?;
         Ok(dest)
     }
 
@@ -134,8 +132,8 @@ impl StorageBackend for LocalBackend {
         let src = safe_join(&self.base_path, remote_path)?;
         // Verify the source is not a symlink pointing outside
         if Path::new(&src).is_symlink() {
-            let link_target = fs::read_link(&src)
-                .map_err(|e| format!("Cannot read symlink: {}", e))?;
+            let link_target =
+                fs::read_link(&src).map_err(|e| format!("Cannot read symlink: {}", e))?;
             let base = std::path::Path::new(&self.base_path)
                 .canonicalize()
                 .map_err(|e| e.to_string())?;
@@ -144,19 +142,16 @@ impl StorageBackend for LocalBackend {
             }
         }
         if let Some(parent) = Path::new(local_path).parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create directory: {}", e))?;
+            fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
         }
-        fs::copy(&src, local_path)
-            .map_err(|e| format!("Failed to copy file: {}", e))?;
+        fs::copy(&src, local_path).map_err(|e| format!("Failed to copy file: {}", e))?;
         Ok(())
     }
 
     fn delete_file(&self, remote_path: &str) -> Result<(), String> {
         let path = safe_join(&self.base_path, remote_path)?;
         if Path::new(&path).exists() {
-            fs::remove_file(&path)
-                .map_err(|e| format!("Failed to delete file: {}", e))?;
+            fs::remove_file(&path).map_err(|e| format!("Failed to delete file: {}", e))?;
         }
         Ok(())
     }
@@ -171,9 +166,7 @@ impl StorageBackend for LocalBackend {
             .canonicalize()
             .map_err(|e| e.to_string())?;
         let mut files = Vec::new();
-        for entry in fs::read_dir(&dir)
-            .map_err(|e| format!("Failed to read directory: {}", e))?
-        {
+        for entry in fs::read_dir(&dir).map_err(|e| format!("Failed to read directory: {}", e))? {
             let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
             let path = entry.path();
 
@@ -251,11 +244,7 @@ impl GitHubBackend {
     }
 
     /// Upload via GitHub Releases API for files > 100 MB.
-    fn upload_via_release(
-        &self,
-        local_path: &str,
-        remote_path: &str,
-    ) -> Result<String, String> {
+    fn upload_via_release(&self, local_path: &str, remote_path: &str) -> Result<String, String> {
         let (owner, repo) = parse_repo(&self.repo_name)?;
         let file_name = Path::new(remote_path)
             .file_name()
@@ -299,9 +288,7 @@ impl GitHubBackend {
 
         let release: serde_json::Value = serde_json::from_str(&body)
             .map_err(|e| format!("Failed to parse release response: {}", e))?;
-        let _release_id = release["id"]
-            .as_u64()
-            .ok_or("No release ID in response")?;
+        let _release_id = release["id"].as_u64().ok_or("No release ID in response")?;
         let upload_url = release["upload_url"]
             .as_str()
             .unwrap_or("")
@@ -321,9 +308,7 @@ impl GitHubBackend {
             .map_err(|e| format!("GitHub release upload request failed: {}", e))?;
 
         let up_status = up_resp.status().as_u16();
-        let up_body = up_resp
-            .text()
-            .unwrap_or_default();
+        let up_body = up_resp.text().unwrap_or_default();
 
         if up_status < 200 || up_status >= 300 {
             return Err(format!(
@@ -332,10 +317,7 @@ impl GitHubBackend {
             ));
         }
 
-        let release_url = format!(
-            "https://github.com/{}/{}/releases/tag/{}",
-            owner, repo, tag
-        );
+        let release_url = format!("https://github.com/{}/{}/releases/tag/{}", owner, repo, tag);
         Ok(release_url)
     }
 }
@@ -350,9 +332,7 @@ impl StorageBackend for GitHubBackend {
     }
 
     fn upload_file(&self, local_path: &str, remote_path: &str) -> Result<String, String> {
-        let file_size = fs::metadata(local_path)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let file_size = fs::metadata(local_path).map(|m| m.len()).unwrap_or(0);
         const LARGE_FILE_THRESHOLD: u64 = 100 * 1024 * 1024; // 100 MB
 
         if file_size > LARGE_FILE_THRESHOLD {
@@ -363,10 +343,7 @@ impl StorageBackend for GitHubBackend {
         let (owner, repo) = parse_repo(&self.repo_name)?;
         let data = fs::read(local_path)
             .map_err(|e| format!("Failed to read file '{}': {}", local_path, e))?;
-        let b64 = base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            &data,
-        );
+        let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data);
 
         let put_body = serde_json::json!({
             "message": format!("Sync upload: {}", remote_path),
@@ -431,8 +408,8 @@ impl StorageBackend for GitHubBackend {
         let body = resp
             .text()
             .map_err(|e| format!("Failed to read download response: {}", e))?;
-        let resp_json: serde_json::Value = serde_json::from_str(&body)
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
+        let resp_json: serde_json::Value =
+            serde_json::from_str(&body).map_err(|e| format!("Failed to parse response: {}", e))?;
         let content_b64 = resp_json["content"]
             .as_str()
             .ok_or("No 'content' field in response")?;
@@ -446,11 +423,9 @@ impl StorageBackend for GitHubBackend {
         .map_err(|e| format!("Failed to decode base64: {}", e))?;
 
         if let Some(parent) = Path::new(local_path).parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create directory: {}", e))?;
+            fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
         }
-        fs::write(local_path, &data)
-            .map_err(|e| format!("Failed to write file: {}", e))?;
+        fs::write(local_path, &data).map_err(|e| format!("Failed to write file: {}", e))?;
 
         Ok(())
     }
@@ -507,7 +482,10 @@ impl StorageBackend for GitHubBackend {
         let del_status = del_resp.status().as_u16();
         if del_status < 200 || del_status >= 300 {
             let del_body = del_resp.text().unwrap_or_default();
-            return Err(format!("GitHub delete failed ({}): {}", del_status, del_body));
+            return Err(format!(
+                "GitHub delete failed ({}): {}",
+                del_status, del_body
+            ));
         }
 
         Ok(())
@@ -537,8 +515,8 @@ impl StorageBackend for GitHubBackend {
             return Err(format!("GitHub list failed ({}): {}", status, body));
         }
 
-        let items: Vec<serde_json::Value> = serde_json::from_str(&body)
-            .map_err(|e| format!("Failed to parse listing: {}", e))?;
+        let items: Vec<serde_json::Value> =
+            serde_json::from_str(&body).map_err(|e| format!("Failed to parse listing: {}", e))?;
 
         let mut files = Vec::new();
         for item in &items {
@@ -546,14 +524,8 @@ impl StorageBackend for GitHubBackend {
             if item["type"].as_str() == Some("dir") {
                 continue;
             }
-            let name = item["name"]
-                .as_str()
-                .unwrap_or("unknown")
-                .to_string();
-            let path = item["path"]
-                .as_str()
-                .unwrap_or(&name)
-                .to_string();
+            let name = item["name"].as_str().unwrap_or("unknown").to_string();
+            let path = item["path"].as_str().unwrap_or(&name).to_string();
             let size = item["size"].as_u64().unwrap_or(0);
             let modified = item
                 .get("created_at")
@@ -561,10 +533,7 @@ impl StorageBackend for GitHubBackend {
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            let url_str = item["download_url"]
-                .as_str()
-                .unwrap_or("")
-                .to_string();
+            let url_str = item["download_url"].as_str().unwrap_or("").to_string();
 
             files.push(RemoteFile {
                 name,
@@ -602,10 +571,7 @@ impl StorageBackend for GitHubBackend {
         if status == 200 {
             Ok(true)
         } else {
-            Err(format!(
-                "GitHub connection test failed (HTTP {})",
-                status
-            ))
+            Err(format!("GitHub connection test failed (HTTP {})", status))
         }
     }
 }
@@ -635,7 +601,10 @@ impl GitLabBackend {
     }
 
     fn api_url(&self, endpoint: &str) -> String {
-        format!("{}/api/v4/projects/{}/{}", self.base_url, self.project_id, endpoint)
+        format!(
+            "{}/api/v4/projects/{}/{}",
+            self.base_url, self.project_id, endpoint
+        )
     }
 }
 
@@ -656,10 +625,7 @@ impl StorageBackend for GitLabBackend {
 
         let data = fs::read(local_path)
             .map_err(|e| format!("Failed to read file '{}': {}", local_path, e))?;
-        let b64 = base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            &data,
-        );
+        let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data);
 
         let encoded_path = urlencoding(remote_path);
         let url = format!(
@@ -762,11 +728,9 @@ impl StorageBackend for GitLabBackend {
             .map_err(|e| format!("Failed to read download body: {}", e))?;
 
         if let Some(parent) = Path::new(local_path).parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create directory: {}", e))?;
+            fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
         }
-        fs::write(local_path, &bytes)
-            .map_err(|e| format!("Failed to write file: {}", e))?;
+        fs::write(local_path, &bytes).map_err(|e| format!("Failed to write file: {}", e))?;
 
         Ok(())
     }
@@ -834,8 +798,8 @@ impl StorageBackend for GitLabBackend {
             return Err(format!("GitLab list failed ({}): {}", status, body));
         }
 
-        let items: Vec<serde_json::Value> = serde_json::from_str(&body)
-            .map_err(|e| format!("Failed to parse listing: {}", e))?;
+        let items: Vec<serde_json::Value> =
+            serde_json::from_str(&body).map_err(|e| format!("Failed to parse listing: {}", e))?;
 
         let mut files = Vec::new();
         for item in &items {
@@ -843,14 +807,8 @@ impl StorageBackend for GitLabBackend {
             if item["type"].as_str() == Some("tree") {
                 continue;
             }
-            let name = item["name"]
-                .as_str()
-                .unwrap_or("unknown")
-                .to_string();
-            let path = item["path"]
-                .as_str()
-                .unwrap_or(&name)
-                .to_string();
+            let name = item["name"].as_str().unwrap_or("unknown").to_string();
+            let path = item["path"].as_str().unwrap_or(&name).to_string();
 
             files.push(RemoteFile {
                 name,
@@ -873,10 +831,7 @@ impl StorageBackend for GitLabBackend {
 
     fn test_connection(&self) -> Result<bool, String> {
         let client = http_client()?;
-        let url = format!(
-            "{}/api/v4/projects/{}",
-            self.base_url, self.project_id
-        );
+        let url = format!("{}/api/v4/projects/{}", self.base_url, self.project_id);
         let resp = client
             .get(&url)
             .header("PRIVATE-TOKEN", &self.token)
@@ -890,10 +845,7 @@ impl StorageBackend for GitLabBackend {
         if status == 200 {
             Ok(true)
         } else {
-            Err(format!(
-                "GitLab connection test failed (HTTP {})",
-                status
-            ))
+            Err(format!("GitLab connection test failed (HTTP {})", status))
         }
     }
 }
@@ -957,8 +909,7 @@ impl StorageBackend for GoogleDriveBackend {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "upload".to_string());
 
-        let file_data = fs::read(local_path)
-            .map_err(|e| format!("Failed to read file: {}", e))?;
+        let file_data = fs::read(local_path).map_err(|e| format!("Failed to read file: {}", e))?;
 
         // Build the JSON metadata part
         let mut metadata = serde_json::json!({
@@ -1002,22 +953,16 @@ impl StorageBackend for GoogleDriveBackend {
             .map_err(|e| format!("Failed to read upload response: {}", e))?;
 
         if status < 200 || status >= 300 {
-            return Err(format!(
-                "Google Drive upload failed ({}): {}",
-                status, body
-            ));
+            return Err(format!("Google Drive upload failed ({}): {}", status, body));
         }
 
-        let resp_json: serde_json::Value = serde_json::from_str(&body)
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
+        let resp_json: serde_json::Value =
+            serde_json::from_str(&body).map_err(|e| format!("Failed to parse response: {}", e))?;
         let file_id = resp_json["id"]
             .as_str()
             .ok_or("No 'id' in upload response")?;
 
-        Ok(format!(
-            "https://drive.google.com/file/d/{}/view",
-            file_id
-        ))
+        Ok(format!("https://drive.google.com/file/d/{}/view", file_id))
     }
 
     fn download_file(&self, remote_path: &str, local_path: &str) -> Result<(), String> {
@@ -1049,21 +994,16 @@ impl StorageBackend for GoogleDriveBackend {
             .map_err(|e| format!("Failed to read download body: {}", e))?;
 
         if let Some(parent) = Path::new(local_path).parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create directory: {}", e))?;
+            fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
         }
-        fs::write(local_path, &bytes)
-            .map_err(|e| format!("Failed to write file: {}", e))?;
+        fs::write(local_path, &bytes).map_err(|e| format!("Failed to write file: {}", e))?;
 
         Ok(())
     }
 
     fn delete_file(&self, remote_path: &str) -> Result<(), String> {
         let file_id = remote_path;
-        let url = format!(
-            "https://www.googleapis.com/drive/v3/files/{}",
-            file_id
-        );
+        let url = format!("https://www.googleapis.com/drive/v3/files/{}", file_id);
 
         let client = http_client()?;
         let resp = client
@@ -1078,10 +1018,7 @@ impl StorageBackend for GoogleDriveBackend {
             Ok(())
         } else {
             let body = resp.text().unwrap_or_default();
-            Err(format!(
-                "Google Drive delete failed ({}): {}",
-                status, body
-            ))
+            Err(format!("Google Drive delete failed ({}): {}", status, body))
         }
     }
 
@@ -1109,42 +1046,24 @@ impl StorageBackend for GoogleDriveBackend {
             .map_err(|e| format!("Failed to read list response: {}", e))?;
 
         if status < 200 || status >= 300 {
-            return Err(format!(
-                "Google Drive list failed ({}): {}",
-                status, body
-            ));
+            return Err(format!("Google Drive list failed ({}): {}", status, body));
         }
 
-        let resp_json: serde_json::Value = serde_json::from_str(&body)
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
-        let files_array = resp_json["files"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
+        let resp_json: serde_json::Value =
+            serde_json::from_str(&body).map_err(|e| format!("Failed to parse response: {}", e))?;
+        let files_array = resp_json["files"].as_array().cloned().unwrap_or_default();
 
         let mut files = Vec::new();
         for item in &files_array {
-            let name = item["name"]
-                .as_str()
-                .unwrap_or("unknown")
-                .to_string();
-            let file_id = item["id"]
-                .as_str()
-                .unwrap_or("")
-                .to_string();
+            let name = item["name"].as_str().unwrap_or("unknown").to_string();
+            let file_id = item["id"].as_str().unwrap_or("").to_string();
             // size can be a number or string depending on the API response
             let size = item["size"]
                 .as_u64()
                 .or_else(|| item["size"].as_str().and_then(|s| s.parse().ok()))
                 .unwrap_or(0);
-            let modified = item["modifiedTime"]
-                .as_str()
-                .unwrap_or("")
-                .to_string();
-            let url_str = format!(
-                "https://drive.google.com/file/d/{}/view",
-                file_id
-            );
+            let modified = item["modifiedTime"].as_str().unwrap_or("").to_string();
+            let url_str = format!("https://drive.google.com/file/d/{}/view", file_id);
 
             files.push(RemoteFile {
                 name,
@@ -1230,8 +1149,7 @@ impl StorageBackend for GooglePhotosBackend {
     }
 
     fn upload_file(&self, local_path: &str, _remote_path: &str) -> Result<String, String> {
-        let file_data = fs::read(local_path)
-            .map_err(|e| format!("Failed to read file: {}", e))?;
+        let file_data = fs::read(local_path).map_err(|e| format!("Failed to read file: {}", e))?;
 
         let client = http_client()?;
 
@@ -1294,10 +1212,7 @@ impl StorageBackend for GooglePhotosBackend {
         let resp_json: serde_json::Value = serde_json::from_str(&create_body)
             .map_err(|e| format!("Failed to parse response: {}", e))?;
         let media_item = &resp_json["newMediaItemResults"][0]["mediaItem"];
-        let base_url = media_item["baseUrl"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        let base_url = media_item["baseUrl"].as_str().unwrap_or("").to_string();
 
         Ok(base_url)
     }
@@ -1329,11 +1244,9 @@ impl StorageBackend for GooglePhotosBackend {
             .map_err(|e| format!("Failed to read download body: {}", e))?;
 
         if let Some(parent) = Path::new(local_path).parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create directory: {}", e))?;
+            fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
         }
-        fs::write(local_path, &bytes)
-            .map_err(|e| format!("Failed to write file: {}", e))?;
+        fs::write(local_path, &bytes).map_err(|e| format!("Failed to write file: {}", e))?;
 
         Ok(())
     }
@@ -1379,14 +1292,11 @@ impl StorageBackend for GooglePhotosBackend {
             .map_err(|e| format!("Failed to read list response: {}", e))?;
 
         if status < 200 || status >= 300 {
-            return Err(format!(
-                "Google Photos list failed ({}): {}",
-                status, body
-            ));
+            return Err(format!("Google Photos list failed ({}): {}", status, body));
         }
 
-        let resp_json: serde_json::Value = serde_json::from_str(&body)
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
+        let resp_json: serde_json::Value =
+            serde_json::from_str(&body).map_err(|e| format!("Failed to parse response: {}", e))?;
         let items = resp_json["mediaItems"]
             .as_array()
             .cloned()
@@ -1394,18 +1304,9 @@ impl StorageBackend for GooglePhotosBackend {
 
         let mut files = Vec::new();
         for item in &items {
-            let item_id = item["id"]
-                .as_str()
-                .unwrap_or("")
-                .to_string();
-            let filename = item["filename"]
-                .as_str()
-                .unwrap_or("unknown")
-                .to_string();
-            let base_url = item["baseUrl"]
-                .as_str()
-                .unwrap_or("")
-                .to_string();
+            let item_id = item["id"].as_str().unwrap_or("").to_string();
+            let filename = item["filename"].as_str().unwrap_or("unknown").to_string();
+            let base_url = item["baseUrl"].as_str().unwrap_or("").to_string();
             let modified = item["mediaMetadata"]["creationTime"]
                 .as_str()
                 .or_else(|| item["creationTime"].as_str())
@@ -1449,12 +1350,9 @@ impl StorageBackend for GooglePhotosBackend {
             ));
         }
 
-        let resp_json: serde_json::Value = serde_json::from_str(&body)
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
-        let base_url = resp_json["baseUrl"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        let resp_json: serde_json::Value =
+            serde_json::from_str(&body).map_err(|e| format!("Failed to parse response: {}", e))?;
+        let base_url = resp_json["baseUrl"].as_str().unwrap_or("").to_string();
 
         Ok(base_url)
     }
@@ -1500,10 +1398,7 @@ impl TelegramBackend {
     }
 
     fn api_url(&self, method: &str) -> String {
-        format!(
-            "https://api.telegram.org/bot{}/{}",
-            self.bot_token, method
-        )
+        format!("https://api.telegram.org/bot{}/{}", self.bot_token, method)
     }
 }
 
@@ -1553,26 +1448,19 @@ impl StorageBackend for TelegramBackend {
             .map_err(|e| format!("Failed to read upload response: {}", e))?;
 
         if status < 200 || status >= 300 {
-            return Err(format!(
-                "Telegram upload failed ({}): {}",
-                status, body
-            ));
+            return Err(format!("Telegram upload failed ({}): {}", status, body));
         }
 
-        let resp_json: serde_json::Value = serde_json::from_str(&body)
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
+        let resp_json: serde_json::Value =
+            serde_json::from_str(&body).map_err(|e| format!("Failed to parse response: {}", e))?;
 
         if !resp_json["ok"].as_bool().unwrap_or(false) {
-            let desc = resp_json["description"]
-                .as_str()
-                .unwrap_or("Unknown error");
+            let desc = resp_json["description"].as_str().unwrap_or("Unknown error");
             return Err(format!("Telegram API error: {}", desc));
         }
 
         // Return the message link or a reference
-        let message_id = resp_json["result"]["message_id"]
-            .as_i64()
-            .unwrap_or(0);
+        let message_id = resp_json["result"]["message_id"].as_i64().unwrap_or(0);
         let chat_id = resp_json["result"]["chat"]["id"]
             .as_i64()
             .map(|id| id.to_string())
@@ -1604,19 +1492,14 @@ impl StorageBackend for TelegramBackend {
             .map_err(|e| format!("Failed to read response: {}", e))?;
 
         if status < 200 || status >= 300 {
-            return Err(format!(
-                "Telegram getFile failed ({}): {}",
-                status, body
-            ));
+            return Err(format!("Telegram getFile failed ({}): {}", status, body));
         }
 
-        let resp_json: serde_json::Value = serde_json::from_str(&body)
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
+        let resp_json: serde_json::Value =
+            serde_json::from_str(&body).map_err(|e| format!("Failed to parse response: {}", e))?;
 
         if !resp_json["ok"].as_bool().unwrap_or(false) {
-            let desc = resp_json["description"]
-                .as_str()
-                .unwrap_or("Unknown error");
+            let desc = resp_json["description"].as_str().unwrap_or("Unknown error");
             return Err(format!("Telegram API error: {}", desc));
         }
 
@@ -1649,11 +1532,9 @@ impl StorageBackend for TelegramBackend {
             .map_err(|e| format!("Failed to read download body: {}", e))?;
 
         if let Some(parent) = Path::new(local_path).parent() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create directory: {}", e))?;
+            fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
         }
-        fs::write(local_path, &bytes)
-            .map_err(|e| format!("Failed to write file: {}", e))?;
+        fs::write(local_path, &bytes).map_err(|e| format!("Failed to write file: {}", e))?;
 
         Ok(())
     }
@@ -1663,9 +1544,7 @@ impl StorageBackend for TelegramBackend {
         // We can only delete messages in groups if the bot has admin rights
         // For now, we return Ok as a no-op since Telegram is append-only for most use cases
         let _ = remote_path;
-        info!(
-            "Telegram: delete_file is a no-op (Telegram is append-only for bot messages)"
-        );
+        info!("Telegram: delete_file is a no-op (Telegram is append-only for bot messages)");
         Ok(())
     }
 
@@ -1696,19 +1575,14 @@ impl StorageBackend for TelegramBackend {
             .map_err(|e| format!("Failed to read response: {}", e))?;
 
         if status < 200 || status >= 300 {
-            return Err(format!(
-                "Telegram getFile failed ({}): {}",
-                status, body
-            ));
+            return Err(format!("Telegram getFile failed ({}): {}", status, body));
         }
 
-        let resp_json: serde_json::Value = serde_json::from_str(&body)
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
+        let resp_json: serde_json::Value =
+            serde_json::from_str(&body).map_err(|e| format!("Failed to parse response: {}", e))?;
 
         if !resp_json["ok"].as_bool().unwrap_or(false) {
-            let desc = resp_json["description"]
-                .as_str()
-                .unwrap_or("Unknown error");
+            let desc = resp_json["description"].as_str().unwrap_or("Unknown error");
             return Err(format!("Telegram API error: {}", desc));
         }
 
@@ -1741,8 +1615,8 @@ impl StorageBackend for TelegramBackend {
             ));
         }
 
-        let resp_json: serde_json::Value = serde_json::from_str(&body)
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
+        let resp_json: serde_json::Value =
+            serde_json::from_str(&body).map_err(|e| format!("Failed to parse response: {}", e))?;
 
         if resp_json["ok"].as_bool().unwrap_or(false) {
             let bot_name = resp_json["result"]["username"]
@@ -1751,9 +1625,7 @@ impl StorageBackend for TelegramBackend {
             info!("Telegram bot connected: @{}", bot_name);
             Ok(true)
         } else {
-            let desc = resp_json["description"]
-                .as_str()
-                .unwrap_or("Unknown error");
+            let desc = resp_json["description"].as_str().unwrap_or("Unknown error");
             Err(format!("Telegram API error: {}", desc))
         }
     }
@@ -1767,8 +1639,7 @@ fn urlencoding(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3);
     for byte in s.as_bytes() {
         match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
-            | b'-' | b'_' | b'.' | b'~' => {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
                 out.push(*byte as char);
             }
             b => {
@@ -1817,7 +1688,9 @@ pub fn create_backend(config: &SyncConfig) -> Result<Box<dyn StorageBackend>, St
                 .ok_or("GitLab backend requires project_id (use repo_name field)")?;
             let branch = config.branch.as_deref().unwrap_or("main");
             let base_url = config.base_path.as_deref();
-            Ok(Box::new(GitLabBackend::new(token, project_id, branch, base_url)))
+            Ok(Box::new(GitLabBackend::new(
+                token, project_id, branch, base_url,
+            )))
         }
         SyncBackendType::GoogleDrive => {
             let token = config

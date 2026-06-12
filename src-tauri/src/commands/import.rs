@@ -1,9 +1,9 @@
-use tauri::State;
-use serde::{Deserialize, Serialize};
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use tauri::State;
 
-use crate::AppState;
 use crate::db::schema::FileNode;
+use crate::AppState;
 
 /// Result of a directory scan / import operation.
 #[derive(Debug, Serialize, Deserialize)]
@@ -39,10 +39,11 @@ pub fn import_file(
         return Err(format!("File not found: {}", file_path));
     }
 
-    let metadata = std::fs::metadata(path)
-        .map_err(|e| format!("Failed to read file metadata: {}", e))?;
+    let metadata =
+        std::fs::metadata(path).map_err(|e| format!("Failed to read file metadata: {}", e))?;
 
-    let file_name = path.file_name()
+    let file_name = path
+        .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown")
         .to_string();
@@ -56,9 +57,7 @@ pub fn import_file(
     } else {
         infer::get_from_path(path)
             .map(|m| m.mime_type().to_string())
-            .or_else(|| {
-                mime_guess::from_path(path).first().map(|m| m.to_string())
-            })
+            .or_else(|| mime_guess::from_path(path).first().map(|m| m.to_string()))
     };
 
     // Hash file contents with BLAKE3 (for files only, not directories)
@@ -97,7 +96,11 @@ pub fn import_file(
         id: file_id.clone(),
         name: file_name,
         file_type: if is_dir { "folder" } else { "file" }.to_string(),
-        parent_id: if parent_path.is_empty() { None } else { Some(parent_path) },
+        parent_id: if parent_path.is_empty() {
+            None
+        } else {
+            Some(parent_path)
+        },
         size_bytes,
         mime_type,
         hash_blake3,
@@ -123,7 +126,8 @@ pub fn import_file(
         &file_id,
         serialized.as_str(),
         file_node.parent_id.as_deref(),
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     // Index in Tantivy for searchability
     let tantivy_index = state.tantivy_index.write().map_err(|e| e.to_string())?;
@@ -184,7 +188,11 @@ pub fn scan_directory(
         return Err(format!("Path is not a directory: {}", dir_path));
     }
 
-    let parent_path_for_children = if parent_id.is_empty() { dir_path.clone() } else { parent_id.clone() };
+    let parent_path_for_children = if parent_id.is_empty() {
+        dir_path.clone()
+    } else {
+        parent_id.clone()
+    };
 
     // Collect all entries with walkdir
     let mut walker = walkdir::WalkDir::new(&dir_path);
@@ -242,7 +250,11 @@ pub fn scan_directory(
         let metadata = match entry.metadata() {
             Ok(m) => m,
             Err(e) => {
-                errors.push(format!("Failed to read metadata for {}: {}", path.display(), e));
+                errors.push(format!(
+                    "Failed to read metadata for {}: {}",
+                    path.display(),
+                    e
+                ));
                 continue;
             }
         };
@@ -254,10 +266,7 @@ pub fn scan_directory(
 
         let is_dir = metadata.is_dir();
         let size_bytes = metadata.len();
-        let file_name = entry
-            .file_name()
-            .to_string_lossy()
-            .to_string();
+        let file_name = entry.file_name().to_string_lossy().to_string();
 
         // Detect MIME type
         let mime_type = if is_dir {
@@ -283,7 +292,10 @@ pub fn scan_directory(
 
         // Build context_data
         let mut context = serde_json::Map::new();
-        context.insert("original_path".to_string(), serde_json::json!(&file_path_str));
+        context.insert(
+            "original_path".to_string(),
+            serde_json::json!(&file_path_str),
+        );
         context.insert("source".to_string(), serde_json::json!("filesystem_import"));
 
         // Extract EXIF GPS for image files
@@ -324,8 +336,12 @@ pub fn scan_directory(
 
         // Store in database atomically with parent index
         let serialized = serde_json::to_string(&file_node).map_err(|e| e.to_string())?;
-        db.insert_file_with_index(&file_id, serialized.as_str(), Some(&parent_path_for_children))
-            .map_err(|e| e.to_string())?;
+        db.insert_file_with_index(
+            &file_id,
+            serialized.as_str(),
+            Some(&parent_path_for_children),
+        )
+        .map_err(|e| e.to_string())?;
 
         // Index in Tantivy (no commit yet — batch at the end)
         let content_text = if !is_dir && size_bytes < 1024 * 1024 {
@@ -394,7 +410,10 @@ pub fn upload_file(
     // Delegate to import_file which already streams from disk
     let file_node = import_file(file_path, parent_path, state)?;
     let bytes_written = file_node.size_bytes;
-    Ok(UploadResult { file_node, bytes_written })
+    Ok(UploadResult {
+        file_node,
+        bytes_written,
+    })
 }
 
 /// Rebuild the Tantivy search index from all FileNodes in the database.
@@ -403,7 +422,8 @@ pub fn upload_file(
 pub fn rebuild_search_index(state: State<'_, AppState>) -> Result<u32, String> {
     let db = state.db.read().map_err(|e| e.to_string())?;
     let tx = db.begin_read().map_err(|e| e.to_string())?;
-    let table = tx.open_table(crate::db::Database::get_files_table())
+    let table = tx
+        .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
 
     let tantivy_index = state.tantivy_index.write().map_err(|e| e.to_string())?;
@@ -411,8 +431,7 @@ pub fn rebuild_search_index(state: State<'_, AppState>) -> Result<u32, String> {
 
     for entry in table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
-        let node: FileNode = serde_json::from_str(&value.value())
-            .map_err(|e| e.to_string())?;
+        let node: FileNode = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
 
         // Read file content for text files (up to 64KB)
         let content_text = if node.file_type == "file" {
@@ -452,9 +471,15 @@ pub fn rebuild_search_index(state: State<'_, AppState>) -> Result<u32, String> {
 /// Returns (lat, lon) or (None, None) if no GPS data found.
 fn extract_gps_if_image(path: &std::path::Path) -> (Option<f64>, Option<f64>) {
     // Only try for image files
-    let is_image = path.extension()
+    let is_image = path
+        .extension()
         .and_then(|e| e.to_str())
-        .map(|e| matches!(e.to_lowercase().as_str(), "jpg" | "jpeg" | "tiff" | "tif" | "heic" | "heif" | "png" | "webp"))
+        .map(|e| {
+            matches!(
+                e.to_lowercase().as_str(),
+                "jpg" | "jpeg" | "tiff" | "tif" | "heic" | "heif" | "png" | "webp"
+            )
+        })
         .unwrap_or(false);
 
     if !is_image {
@@ -526,8 +551,20 @@ fn extract_gps_if_image(path: &std::path::Path) -> (Option<f64>, Option<f64>) {
             }
         });
 
-    let final_lat = latitude.map(|lat| if lat_ref.as_deref() == Some("S") { -lat } else { lat });
-    let final_lon = longitude.map(|lon| if lon_ref.as_deref() == Some("W") { -lon } else { lon });
+    let final_lat = latitude.map(|lat| {
+        if lat_ref.as_deref() == Some("S") {
+            -lat
+        } else {
+            lat
+        }
+    });
+    let final_lon = longitude.map(|lon| {
+        if lon_ref.as_deref() == Some("W") {
+            -lon
+        } else {
+            lon
+        }
+    });
 
     (final_lat, final_lon)
 }

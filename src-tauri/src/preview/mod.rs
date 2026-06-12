@@ -19,12 +19,21 @@ pub struct PreviewMeta {
 
 /// Generate a thumbnail preview for an image file
 /// In production: uses the image crate for images, auto-thumbnail for videos/PDFs
-pub fn generate_thumbnail(data: &[u8], max_size: u32, file_id: &str, preview_dir: &str) -> Result<PreviewMeta> {
+pub fn generate_thumbnail(
+    data: &[u8],
+    max_size: u32,
+    file_id: &str,
+    preview_dir: &str,
+) -> Result<PreviewMeta> {
     let img = image::load_from_memory(data)?;
     let (w, h) = (img.width(), img.height());
 
     // Scale down to fit within max_size
-    let scale = if w > h { max_size as f64 / w as f64 } else { max_size as f64 / h as f64 };
+    let scale = if w > h {
+        max_size as f64 / w as f64
+    } else {
+        max_size as f64 / h as f64
+    };
     let new_w = (w as f64 * scale) as u32;
     let new_h = (h as f64 * scale) as u32;
 
@@ -50,7 +59,11 @@ pub fn generate_thumbnail(data: &[u8], max_size: u32, file_id: &str, preview_dir
 }
 
 /// Extract metadata for a preview card (without generating image)
-pub fn extract_preview_metadata(filename: &str, size: u64, mime: Option<&str>) -> serde_json::Value {
+pub fn extract_preview_metadata(
+    filename: &str,
+    size: u64,
+    mime: Option<&str>,
+) -> serde_json::Value {
     serde_json::json!({
         "filename": filename,
         "size": size,
@@ -79,9 +92,30 @@ fn format_size_human(bytes: u64) -> String {
 fn is_code_file(filename: &str) -> bool {
     matches!(
         filename.rsplit('.').next().unwrap_or(""),
-        "rs" | "ts" | "tsx" | "js" | "jsx" | "py" | "go" | "c" | "cpp" | "java"
-            | "rb" | "swift" | "kt" | "html" | "css" | "json" | "toml" | "yaml"
-            | "md" | "sql" | "sh" | "lua" | "zig" | "vue" | "svelte"
+        "rs" | "ts"
+            | "tsx"
+            | "js"
+            | "jsx"
+            | "py"
+            | "go"
+            | "c"
+            | "cpp"
+            | "java"
+            | "rb"
+            | "swift"
+            | "kt"
+            | "html"
+            | "css"
+            | "json"
+            | "toml"
+            | "yaml"
+            | "md"
+            | "sql"
+            | "sh"
+            | "lua"
+            | "zig"
+            | "vue"
+            | "svelte"
     )
 }
 

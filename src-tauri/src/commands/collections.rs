@@ -1,22 +1,23 @@
-use tauri::State;
 use chrono::Utc;
+use tauri::State;
 
-use crate::AppState;
 use crate::db::schema::{Collection, CollectionItem, FileNode};
+use crate::AppState;
 
 /// List all collections from the database.
 #[tauri::command]
 pub fn list_collections(state: State<'_, AppState>) -> Result<Vec<Collection>, String> {
     let db = state.db.read().map_err(|e| e.to_string())?;
     let tx = db.begin_read().map_err(|e| e.to_string())?;
-    let table = tx.open_table(crate::db::Database::get_collections_table())
+    let table = tx
+        .open_table(crate::db::Database::get_collections_table())
         .map_err(|e| e.to_string())?;
 
     let mut results = Vec::new();
     for entry in table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
-        let collection: Collection = serde_json::from_str(&value.value())
-            .map_err(|e| e.to_string())?;
+        let collection: Collection =
+            serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
         results.push(collection);
     }
 
@@ -50,9 +51,11 @@ pub fn create_collection(
     let serialized = serde_json::to_string(&collection).map_err(|e| e.to_string())?;
     let tx = db.begin_write().map_err(|e| e.to_string())?;
     {
-        let mut table = tx.open_table(crate::db::Database::get_collections_table())
+        let mut table = tx
+            .open_table(crate::db::Database::get_collections_table())
             .map_err(|e| e.to_string())?;
-        table.insert(&collection_id, serialized.as_str())
+        table
+            .insert(&collection_id, serialized.as_str())
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
@@ -73,22 +76,26 @@ pub fn add_to_collection(
 
     // Verify the collection exists
     let tx_read = db.begin_read().map_err(|e| e.to_string())?;
-    let coll_table = tx_read.open_table(crate::db::Database::get_collections_table())
+    let coll_table = tx_read
+        .open_table(crate::db::Database::get_collections_table())
         .map_err(|e| e.to_string())?;
-    let coll_value = coll_table.get(&collection_id)
+    let coll_value = coll_table
+        .get(&collection_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Collection not found: {}", collection_id))?;
-    let mut collection: Collection = serde_json::from_str(&coll_value.value())
-        .map_err(|e| e.to_string())?;
+    let mut collection: Collection =
+        serde_json::from_str(&coll_value.value()).map_err(|e| e.to_string())?;
 
     // Verify the file exists
-    let file_table = tx_read.open_table(crate::db::Database::get_files_table())
+    let file_table = tx_read
+        .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
-    let file_value = file_table.get(&file_id)
+    let file_value = file_table
+        .get(&file_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
-    let mut file_node: FileNode = serde_json::from_str(&file_value.value())
-        .map_err(|e| e.to_string())?;
+    let mut file_node: FileNode =
+        serde_json::from_str(&file_value.value()).map_err(|e| e.to_string())?;
     drop(tx_read);
 
     let now = Utc::now().to_rfc3339();
@@ -123,19 +130,22 @@ pub fn add_to_collection(
     let tx = db.begin_write().map_err(|e| e.to_string())?;
     {
         // Update collection
-        let mut ct = tx.open_table(crate::db::Database::get_collections_table())
+        let mut ct = tx
+            .open_table(crate::db::Database::get_collections_table())
             .map_err(|e| e.to_string())?;
         ct.insert(&collection_id, coll_serialized.as_str())
             .map_err(|e| e.to_string())?;
 
         // Update file node
-        let mut ft = tx.open_table(crate::db::Database::get_files_table())
+        let mut ft = tx
+            .open_table(crate::db::Database::get_files_table())
             .map_err(|e| e.to_string())?;
         ft.insert(&file_id, file_serialized.as_str())
             .map_err(|e| e.to_string())?;
 
         // Store collection item
-        let mut it = tx.open_table(crate::db::Database::get_collection_items_table())
+        let mut it = tx
+            .open_table(crate::db::Database::get_collection_items_table())
             .map_err(|e| e.to_string())?;
         it.insert(&item_id, item_serialized.as_str())
             .map_err(|e| e.to_string())?;
@@ -157,22 +167,25 @@ pub fn remove_from_collection(
 
     // Read collection and file
     let tx_read = db.begin_read().map_err(|e| e.to_string())?;
-    let coll_table = tx_read.open_table(crate::db::Database::get_collections_table())
+    let coll_table = tx_read
+        .open_table(crate::db::Database::get_collections_table())
         .map_err(|e| e.to_string())?;
-    let coll_value = coll_table.get(&collection_id)
+    let coll_value = coll_table
+        .get(&collection_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Collection not found: {}", collection_id))?;
-    let mut collection: Collection = serde_json::from_str(&coll_value.value())
-        .map_err(|e| e.to_string())?;
+    let mut collection: Collection =
+        serde_json::from_str(&coll_value.value()).map_err(|e| e.to_string())?;
 
     // Find the collection item that matches
-    let items_table = tx_read.open_table(crate::db::Database::get_collection_items_table())
+    let items_table = tx_read
+        .open_table(crate::db::Database::get_collection_items_table())
         .map_err(|e| e.to_string())?;
     let mut item_id_to_remove: Option<String> = None;
     for entry in items_table.iter().map_err(|e| e.to_string())? {
         let (key, value) = entry.map_err(|e| e.to_string())?;
-        let item: CollectionItem = serde_json::from_str(&value.value())
-            .map_err(|e| e.to_string())?;
+        let item: CollectionItem =
+            serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
         if item.collection_id == collection_id && item.file_id == file_id {
             item_id_to_remove = Some(key.value().to_string());
             break;
@@ -180,17 +193,19 @@ pub fn remove_from_collection(
     }
 
     // Read file node
-    let file_table = tx_read.open_table(crate::db::Database::get_files_table())
+    let file_table = tx_read
+        .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
-    let file_value = file_table.get(&file_id)
-        .map_err(|e| e.to_string())?;
+    let file_value = file_table.get(&file_id).map_err(|e| e.to_string())?;
     drop(tx_read);
 
     let now = Utc::now().to_rfc3339();
 
     // Update collection
     collection.item_ids.retain(|id| {
-        item_id_to_remove.as_ref().map_or(true, |to_remove| id != to_remove)
+        item_id_to_remove
+            .as_ref()
+            .map_or(true, |to_remove| id != to_remove)
     });
     collection.updated_at = now.clone();
 
@@ -199,27 +214,29 @@ pub fn remove_from_collection(
     let tx = db.begin_write().map_err(|e| e.to_string())?;
     {
         // Update collection
-        let mut ct = tx.open_table(crate::db::Database::get_collections_table())
+        let mut ct = tx
+            .open_table(crate::db::Database::get_collections_table())
             .map_err(|e| e.to_string())?;
         ct.insert(&collection_id, coll_serialized.as_str())
             .map_err(|e| e.to_string())?;
 
         // Remove collection item if found
         if let Some(ref item_id) = item_id_to_remove {
-            let mut it = tx.open_table(crate::db::Database::get_collection_items_table())
+            let mut it = tx
+                .open_table(crate::db::Database::get_collection_items_table())
                 .map_err(|e| e.to_string())?;
-            it.remove(item_id.as_str())
-                .map_err(|e| e.to_string())?;
+            it.remove(item_id.as_str()).map_err(|e| e.to_string())?;
         }
 
         // Update file node if it exists
         if let Some(fv) = file_value {
-            let mut file_node: FileNode = serde_json::from_str(&fv.value())
-                .map_err(|e| e.to_string())?;
+            let mut file_node: FileNode =
+                serde_json::from_str(&fv.value()).map_err(|e| e.to_string())?;
             file_node.collection_ids.retain(|id| id != &collection_id);
             file_node.modified_at = now;
             let file_serialized = serde_json::to_string(&file_node).map_err(|e| e.to_string())?;
-            let mut ft = tx.open_table(crate::db::Database::get_files_table())
+            let mut ft = tx
+                .open_table(crate::db::Database::get_files_table())
                 .map_err(|e| e.to_string())?;
             ft.insert(&file_id, file_serialized.as_str())
                 .map_err(|e| e.to_string())?;

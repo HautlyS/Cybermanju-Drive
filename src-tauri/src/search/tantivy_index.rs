@@ -7,13 +7,11 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use tantivy::{
-    collector::TopDocs,
-    query::QueryParser,
-    schema::*,
-    Index, IndexReader, IndexWriter, ReloadPolicy,
-};
 use std::collections::HashSet;
+use tantivy::{
+    collector::TopDocs, query::QueryParser, schema::*, Index, IndexReader, IndexWriter,
+    ReloadPolicy,
+};
 
 /// Search result item
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -201,7 +199,8 @@ impl SearchIndex {
 
         // Delete any existing document with this file_id before adding
         // (Tantivy doesn't have update — delete + add)
-        self.writer.delete_term(Term::from_field_text(self.file_id_field, file_id));
+        self.writer
+            .delete_term(Term::from_field_text(self.file_id_field, file_id));
         let doc = self.build_document(&params);
         self.writer.add_document(doc)?;
         self.writer.commit()?;
@@ -216,7 +215,8 @@ impl SearchIndex {
     /// and trigger reader reloads).
     pub fn add_document_batch(&self, docs: Vec<DocumentParams<'_>>) -> Result<()> {
         for params in &docs {
-            self.writer.delete_term(Term::from_field_text(self.file_id_field, params.file_id));
+            self.writer
+                .delete_term(Term::from_field_text(self.file_id_field, params.file_id));
             let doc = self.build_document(params);
             self.writer.add_document(doc)?;
         }
@@ -251,7 +251,8 @@ impl SearchIndex {
             created_at,
             blake3_hash,
         };
-        self.writer.delete_term(Term::from_field_text(self.file_id_field, file_id));
+        self.writer
+            .delete_term(Term::from_field_text(self.file_id_field, file_id));
         let doc = self.build_document(&params);
         self.writer.add_document(doc)?;
         Ok(())
@@ -271,12 +272,14 @@ impl SearchIndex {
     /// Useful for batch operations where the caller wants to delete multiple
     /// documents and commit once via a subsequent explicit commit or batch add.
     pub fn delete_term(&self, field: Field, term_text: &str) {
-        self.writer.delete_term(Term::from_field_text(field, term_text));
+        self.writer
+            .delete_term(Term::from_field_text(field, term_text));
     }
 
     /// Remove a document from the index by file_id and commit.
     pub fn remove_document(&self, file_id: &str) -> Result<()> {
-        self.writer.delete_term(Term::from_field_text(self.file_id_field, file_id));
+        self.writer
+            .delete_term(Term::from_field_text(self.file_id_field, file_id));
         self.writer.commit()?;
         Ok(())
     }
@@ -299,7 +302,11 @@ impl SearchIndex {
 
         let query_parser = QueryParser::for_index(
             &searcher,
-            vec![self.file_name_field, self.content_text_field, self.tags_field],
+            vec![
+                self.file_name_field,
+                self.content_text_field,
+                self.tags_field,
+            ],
         );
         let query = query_parser.parse_query(&request.query)?;
 
@@ -310,13 +317,10 @@ impl SearchIndex {
             .iter()
             .filter_map(|(score, doc_address)| {
                 let doc = searcher.doc(*doc_address).ok()?;
-                let fid = doc.get_first(self.file_id_field)?
-                    .as_text()?
-                    .to_string();
-                let fname = doc.get_first(self.file_name_field)?
-                    .as_text()?
-                    .to_string();
-                let content = doc.get_first(self.content_text_field)
+                let fid = doc.get_first(self.file_id_field)?.as_text()?.to_string();
+                let fname = doc.get_first(self.file_name_field)?.as_text()?.to_string();
+                let content = doc
+                    .get_first(self.content_text_field)
                     .and_then(|v| v.as_text())
                     .unwrap_or("");
                 let snippet: String = content.chars().take(200).collect();
@@ -358,9 +362,7 @@ impl SearchIndex {
 
         // Seek to the prefix and collect matching terms
         for (term, _) in terms.range(prefix..)? {
-            let term_str = std::str::from_utf8(term.as_ref())
-                .unwrap_or("")
-                .to_string();
+            let term_str = std::str::from_utf8(term.as_ref()).unwrap_or("").to_string();
 
             if !term_str.starts_with(prefix) {
                 break; // Past the prefix range
@@ -369,7 +371,10 @@ impl SearchIndex {
             // Only include complete words (split on whitespace in the term)
             for word in term_str.split_whitespace() {
                 let word_lower = word.to_lowercase();
-                if word_lower.starts_with(prefix) && !seen.contains(&word_lower) && word_lower.len() > prefix.len() {
+                if word_lower.starts_with(prefix)
+                    && !seen.contains(&word_lower)
+                    && word_lower.len() > prefix.len()
+                {
                     seen.insert(word_lower.clone());
                     suggestions.push(SearchSuggestion {
                         text: word_lower,
@@ -385,15 +390,16 @@ impl SearchIndex {
         // Also check content_text field for completions
         if let Ok(content_terms) = searcher.index().terms_for_field(self.content_text_field) {
             for (term, _) in content_terms.range(prefix..)? {
-                let term_str = std::str::from_utf8(term.as_ref())
-                    .unwrap_or("")
-                    .to_string();
+                let term_str = std::str::from_utf8(term.as_ref()).unwrap_or("").to_string();
                 if !term_str.starts_with(prefix) {
                     break;
                 }
                 for word in term_str.split_whitespace() {
                     let word_lower = word.to_lowercase();
-                    if word_lower.starts_with(prefix) && !seen.contains(&word_lower) && word_lower.len() > prefix.len() {
+                    if word_lower.starts_with(prefix)
+                        && !seen.contains(&word_lower)
+                        && word_lower.len() > prefix.len()
+                    {
                         seen.insert(word_lower.clone());
                         suggestions.push(SearchSuggestion {
                             text: word_lower,
@@ -413,7 +419,11 @@ impl SearchIndex {
     /// Get the total number of indexed documents.
     pub fn doc_count(&self) -> Result<u64> {
         let searcher = self.reader.searcher();
-        Ok(searcher.segment_readers().iter().map(|r| r.num_docs() as u64).sum())
+        Ok(searcher
+            .segment_readers()
+            .iter()
+            .map(|r| r.num_docs() as u64)
+            .sum())
     }
 }
 
@@ -431,14 +441,20 @@ fn determine_match_type_from_query(
 
     // Check file_name
     if let Some(val) = doc.get_first(*file_name_field).and_then(|v| v.as_text()) {
-        if terms.iter().any(|t| val.to_lowercase().contains(&t.to_lowercase())) {
+        if terms
+            .iter()
+            .any(|t| val.to_lowercase().contains(&t.to_lowercase()))
+        {
             return "filename".to_string();
         }
     }
 
     // Check tags
     if let Some(val) = doc.get_first(*tags_field).and_then(|v| v.as_text()) {
-        if terms.iter().any(|t| val.to_lowercase().contains(&t.to_lowercase())) {
+        if terms
+            .iter()
+            .any(|t| val.to_lowercase().contains(&t.to_lowercase()))
+        {
             return "tag".to_string();
         }
     }

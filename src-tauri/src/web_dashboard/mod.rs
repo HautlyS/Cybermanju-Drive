@@ -38,12 +38,10 @@ const COLLECTION_ITEMS_TABLE: TableDefinition<&str, &str> =
     TableDefinition::new("collection_items");
 const FACE_GROUPS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("face_groups");
 const LOOSE_GROUPS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("loose_groups");
-const ENCRYPTION_KEYS_TABLE: TableDefinition<&str, &str> =
-    TableDefinition::new("encryption_keys");
+const ENCRYPTION_KEYS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("encryption_keys");
 const LOCATIONS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("locations");
 const USERS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("users");
-const USER_FILE_PERMS_TABLE: TableDefinition<&str, &str> =
-    TableDefinition::new("user_file_perms");
+const USER_FILE_PERMS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("user_file_perms");
 
 // ─── Security constants ─────────────────────────────────────────────
 
@@ -149,7 +147,10 @@ impl WebDashboard {
             let addr = format!("{}:{}", this.bind_addr, this.port);
             let listener = match TcpListener::bind(&addr) {
                 Ok(l) => {
-                    info!("Web Dashboard listening on http://{} (localhost only)", addr);
+                    info!(
+                        "Web Dashboard listening on http://{} (localhost only)",
+                        addr
+                    );
                     l
                 }
                 Err(e) => {
@@ -199,7 +200,10 @@ impl WebDashboard {
 
         // Store the thread handle for later joining
         {
-            let mut thread_guard = self.server_thread.lock().expect("server_thread lock poisoned");
+            let mut thread_guard = self
+                .server_thread
+                .lock()
+                .expect("server_thread lock poisoned");
             *thread_guard = Some(handle);
         }
 
@@ -229,7 +233,10 @@ impl WebDashboard {
 
         // Join the server thread to ensure clean shutdown
         {
-            let mut thread_guard = self.server_thread.lock().expect("server_thread lock poisoned");
+            let mut thread_guard = self
+                .server_thread
+                .lock()
+                .expect("server_thread lock poisoned");
             if let Some(handle) = thread_guard.take() {
                 if let Err(e) = handle.join() {
                     error!("Web Dashboard thread join error: {:?}", e);
@@ -248,12 +255,8 @@ impl Drop for WebDashboard {
 // ─── Connection handler ──────────────────────────────────────────────
 
 fn handle_connection(dashboard: &WebDashboard, mut stream: TcpStream) {
-    stream
-        .set_read_timeout(Some(Duration::from_secs(5)))
-        .ok();
-    stream
-        .set_write_timeout(Some(Duration::from_secs(5)))
-        .ok();
+    stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
+    stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
 
     // Extract client IP for rate limiting
     let client_ip = stream
@@ -413,7 +416,7 @@ fn handle_request(
         ["api"] | ["api", "health"]           // health checks
             | ["api", "auth", "login"]         // JWT login
             | ["api", "users", "login"]        // legacy login (backward compat)
-            | ["api", "users", "register"]     // user registration (first-time setup)
+            | ["api", "users", "register"] // user registration (first-time setup)
     );
 
     // Verify JWT for authenticated endpoints
@@ -431,9 +434,7 @@ fn handle_request(
         }
 
         // ─── User registration ────────────────────────────────────
-        ["api", "users", "register"] if method == "POST" => {
-            register_user_web(db, body, origin)
-        }
+        ["api", "users", "register"] if method == "POST" => register_user_web(db, body, origin),
 
         // ─── File endpoints ───────────────────────────────────────
         ["api", "files"] if method == "GET" => list_all_json(db, FILES_TABLE, origin),
@@ -445,7 +446,9 @@ fn handle_request(
 
         // ─── Collection endpoints ─────────────────────────────────
         ["api", "collections"] if method == "GET" => list_all_json(db, COLLECTIONS_TABLE, origin),
-        ["api", "collection-items"] if method == "GET" => list_all_json(db, COLLECTION_ITEMS_TABLE, origin),
+        ["api", "collection-items"] if method == "GET" => {
+            list_all_json(db, COLLECTION_ITEMS_TABLE, origin)
+        }
 
         // ─── Face group endpoints ─────────────────────────────────
         ["api", "face-groups"] if method == "GET" => list_all_json(db, FACE_GROUPS_TABLE, origin),
@@ -487,7 +490,9 @@ fn handle_request(
         // ─── Permission endpoints ─────────────────────────────────
         ["api", "permissions"] if method == "POST" => set_permission_web(db, body, origin),
         ["api", "permissions", "verify"] if method == "POST" => verify_access_web(db, body, origin),
-        ["api", "permissions", file_id] if method == "GET" => get_permissions_for_file(db, file_id, origin),
+        ["api", "permissions", file_id] if method == "GET" => {
+            get_permissions_for_file(db, file_id, origin)
+        }
 
         // ─── Sync config endpoints ────────────────────────────────
         ["api", "sync", "configs"] if method == "GET" => {
@@ -565,7 +570,10 @@ fn verify_jwt_auth(
     let token = match auth_header {
         Some(h) => {
             // Expected format: "Bearer <token>"
-            if let Some(t) = h.strip_prefix("Bearer ").or_else(|| h.strip_prefix("bearer ")) {
+            if let Some(t) = h
+                .strip_prefix("Bearer ")
+                .or_else(|| h.strip_prefix("bearer "))
+            {
                 t.trim()
             } else {
                 return Err(json_error(
@@ -576,11 +584,7 @@ fn verify_jwt_auth(
             }
         }
         None => {
-            return Err(json_error(
-                401,
-                "Authorization header required",
-                origin,
-            ));
+            return Err(json_error(401, "Authorization header required", origin));
         }
     };
 
@@ -624,10 +628,7 @@ fn create_jwt(
 
 /// Check and update the rate limit for a client IP.
 /// Returns true if the request is allowed, false if rate limited.
-fn check_rate_limit(
-    rate_limits: &Mutex<HashMap<String, (u32, Instant)>>,
-    client_ip: &str,
-) -> bool {
+fn check_rate_limit(rate_limits: &Mutex<HashMap<String, (u32, Instant)>>, client_ip: &str) -> bool {
     let mut limits = match rate_limits.lock() {
         Ok(g) => g,
         Err(_) => return false, // If lock is poisoned, allow the request (fail open)
@@ -927,25 +928,14 @@ fn list_users_safe(db: &RedbDb, origin: Option<&str>) -> String {
 
 /// Login endpoint — expects JSON body: { "username": "...", "password": "..." }
 /// Verifies argon2 password hash and returns a JWT token.
-fn login_user(
-    db: &RedbDb,
-    body: &str,
-    jwt_secret: &[u8; 32],
-    origin: Option<&str>,
-) -> String {
+fn login_user(db: &RedbDb, body: &str, jwt_secret: &[u8; 32], origin: Option<&str>) -> String {
     let req: serde_json::Value = match serde_json::from_str(body) {
         Ok(v) => v,
         Err(e) => return json_error(400, &format!("Invalid JSON: {}", e), origin),
     };
 
-    let username = req
-        .get("username")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let password = req
-        .get("password")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let username = req.get("username").and_then(|v| v.as_str()).unwrap_or("");
+    let password = req.get("password").and_then(|v| v.as_str()).unwrap_or("");
 
     if username.is_empty() || password.is_empty() {
         return json_error(400, "username and password are required", origin);
@@ -1043,14 +1033,8 @@ fn register_user_web(db: &RedbDb, body: &str, origin: Option<&str>) -> String {
         Err(e) => return json_error(400, &format!("Invalid JSON: {}", e), origin),
     };
 
-    let username = req
-        .get("username")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let password = req
-        .get("password")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let username = req.get("username").and_then(|v| v.as_str()).unwrap_or("");
+    let password = req.get("password").and_then(|v| v.as_str()).unwrap_or("");
     let display_name = req
         .get("displayName")
         .and_then(|v| v.as_str())
@@ -1164,11 +1148,7 @@ fn set_permission_web(db: &RedbDb, body: &str, origin: Option<&str>) -> String {
     }
 
     if !["read", "write", "admin"].contains(&access) {
-        return json_error(
-            400,
-            "access must be 'read', 'write', or 'admin'",
-            origin,
-        );
+        return json_error(400, "access must be 'read', 'write', or 'admin'", origin);
     }
 
     let perm_id = uuid::Uuid::new_v4().to_string();
@@ -1221,14 +1201,8 @@ fn verify_access_web(db: &RedbDb, body: &str, origin: Option<&str>) -> String {
         Err(e) => return json_error(400, &format!("Invalid JSON: {}", e), origin),
     };
 
-    let user_id = req
-        .get("userId")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
-    let file_id = req
-        .get("fileId")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let user_id = req.get("userId").and_then(|v| v.as_str()).unwrap_or("");
+    let file_id = req.get("fileId").and_then(|v| v.as_str()).unwrap_or("");
     let required_access = req
         .get("requiredAccess")
         .and_then(|v| v.as_str())
@@ -1273,18 +1247,9 @@ fn verify_access_web(db: &RedbDb, body: &str, origin: Option<&str>) -> String {
     for entry in perms_table.iter() {
         if let Ok((_, value)) = entry {
             if let Ok(perm) = serde_json::from_str::<serde_json::Value>(&value.value()) {
-                let p_user = perm
-                    .get("userId")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let p_file = perm
-                    .get("fileId")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let p_access = perm
-                    .get("access")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let p_user = perm.get("userId").and_then(|v| v.as_str()).unwrap_or("");
+                let p_file = perm.get("fileId").and_then(|v| v.as_str()).unwrap_or("");
+                let p_access = perm.get("access").and_then(|v| v.as_str()).unwrap_or("");
 
                 if p_user == user_id && p_file == file_id {
                     if access_level_sufficient(p_access, required_access) {

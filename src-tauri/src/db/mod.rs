@@ -5,8 +5,8 @@
 
 pub mod schema;
 
-use redb::{Database as RedbDatabase, ReadTransaction, TableDefinition, WriteTransaction};
 use anyhow::Result;
+use redb::{Database as RedbDatabase, ReadTransaction, TableDefinition, WriteTransaction};
 
 // ---------------------------------------------------------------------------
 // redb table definitions  (&str key → &str JSON value)
@@ -15,7 +15,8 @@ use anyhow::Result;
 const FILES_TABLE: TableDefinition<&str, &str> = TableDefinition::new("files");
 const ACCOUNTS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("accounts");
 const COLLECTIONS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("collections");
-const COLLECTION_ITEMS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("collection_items");
+const COLLECTION_ITEMS_TABLE: TableDefinition<&str, &str> =
+    TableDefinition::new("collection_items");
 const FACE_GROUPS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("face_groups");
 const LOOSE_GROUPS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("loose_groups");
 const ENCRYPTION_KEYS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("encryption_keys");
@@ -207,11 +208,7 @@ impl Database {
     }
 
     /// Remove a file from the files table AND its parent index in a single transaction.
-    pub fn remove_file_with_index(
-        &self,
-        file_id: &str,
-        parent_id: Option<&str>,
-    ) -> Result<bool> {
+    pub fn remove_file_with_index(&self, file_id: &str, parent_id: Option<&str>) -> Result<bool> {
         let tx = self.db.begin_write()?;
         let removed = {
             let mut files_table = tx.open_table(FILES_TABLE)?;

@@ -18,8 +18,8 @@ use sha2::{Sha256, Sha512};
 use std::collections::HashMap;
 
 // Real ML-KEM from pqcrypto-mlkem
-use pqcrypto_mlkem::mlkem768 as mlkem768;
-use pqcrypto_mlkem::mlkem1024 as mlkem1024;
+use pqcrypto_mlkem::mlkem1024;
+use pqcrypto_mlkem::mlkem768;
 
 // Real ML-DSA from ml-dsa (FIPS 204, formerly CRYSTALS-Dilithium)
 use ml_dsa::{KeyGen, MlDsa44, MlDsa65, MlDsa87};
@@ -205,10 +205,7 @@ fn derive_symmetric_key(
 /// without storing an additional key: the X25519 static key is deterministically
 /// derived from the ML-KEM decapsulation key.
 fn derive_x25519_static_secret(mlkem_sk: &[u8]) -> X25519StaticSecret {
-    let hk = Hkdf::<Sha256>::new(
-        Some(b"cybermanju-x25519-static-derivation"),
-        mlkem_sk,
-    );
+    let hk = Hkdf::<Sha256>::new(Some(b"cybermanju-x25519-static-derivation"), mlkem_sk);
     let mut okm = [0u8; 32];
     hk.expand(b"x25519-static-secret", &mut okm)
         .expect("HKDF expand for 32 bytes should never fail");
@@ -339,7 +336,10 @@ impl PqcEngine {
 
     /// Get encryption status based on active key state.
     pub fn get_status(&self) -> EncryptionStatus {
-        let active = self.active_key_id.as_ref().and_then(|id| self.keypairs.get(id));
+        let active = self
+            .active_key_id
+            .as_ref()
+            .and_then(|id| self.keypairs.get(id));
         EncryptionStatus {
             is_encrypted: active.is_some(),
             algorithm: active.map(|kp| kp.algorithm.display_name().to_string()),
@@ -426,12 +426,14 @@ pub fn encrypt_data(plaintext: &[u8], keypair: &KeyPair) -> Result<FileEncrypted
             let x25519_shared = ephemeral_secret.diffie_hellman(&x25519_static_public);
 
             // Derive symmetric key from BOTH shared secrets
-            let key = derive_symmetric_key(
-                shared_secret.as_bytes(),
-                Some(x25519_shared.as_bytes()),
-            )?;
+            let key =
+                derive_symmetric_key(shared_secret.as_bytes(), Some(x25519_shared.as_bytes()))?;
 
-            (key, kem_ct.as_bytes().to_vec(), Some(ephemeral_public.as_bytes().to_vec()))
+            (
+                key,
+                kem_ct.as_bytes().to_vec(),
+                Some(ephemeral_public.as_bytes().to_vec()),
+            )
         }
         _ => unreachable!("is_signature_only() checked above"),
     };
@@ -506,7 +508,8 @@ fn encrypt_with_symmetric_key(plaintext: &[u8], keypair: &KeyPair) -> Result<Fil
 ///   5. Verify BLAKE3 integrity hash of the decrypted plaintext
 pub fn decrypt_data(encrypted: &FileEncryptedData, keypair: &KeyPair) -> Result<Vec<u8>> {
     // ML-DSA and ClassicalSign use symmetric decryption
-    if keypair.algorithm.is_signature_only() || matches!(keypair.algorithm, EncryptionAlgo::Aes256) {
+    if keypair.algorithm.is_signature_only() || matches!(keypair.algorithm, EncryptionAlgo::Aes256)
+    {
         return decrypt_with_symmetric_key(encrypted, keypair);
     }
 
@@ -521,7 +524,10 @@ pub fn decrypt_data(encrypted: &FileEncryptedData, keypair: &KeyPair) -> Result<
                 );
             }
             let ct = mlkem1024::Ciphertext::from_bytes(&encrypted.kem_ciphertext);
-            let shared_secret = mlkem1024::decapsulate(&ct, &mlkem1024::SecretKey::from_bytes(&keypair.private_key));
+            let shared_secret = mlkem1024::decapsulate(
+                &ct,
+                &mlkem1024::SecretKey::from_bytes(&keypair.private_key),
+            );
             derive_symmetric_key(shared_secret.as_bytes(), None)?
         }
         EncryptionAlgo::Hybrid => {
@@ -534,7 +540,8 @@ pub fn decrypt_data(encrypted: &FileEncryptedData, keypair: &KeyPair) -> Result<
                 );
             }
             let ct = mlkem768::Ciphertext::from_bytes(&encrypted.kem_ciphertext);
-            let shared_secret = mlkem768::decapsulate(&ct, &mlkem768::SecretKey::from_bytes(&keypair.private_key));
+            let shared_secret =
+                mlkem768::decapsulate(&ct, &mlkem768::SecretKey::from_bytes(&keypair.private_key));
 
             // Derive the same X25519 static secret from ML-KEM SK
             let x25519_static_secret = derive_x25519_static_secret(&keypair.private_key);
@@ -548,10 +555,7 @@ pub fn decrypt_data(encrypted: &FileEncryptedData, keypair: &KeyPair) -> Result<
             let ephemeral_pk = X25519PublicKey::from(ephemeral_pk_bytes);
             let x25519_shared = x25519_static_secret.diffie_hellman(&ephemeral_pk);
 
-            derive_symmetric_key(
-                shared_secret.as_bytes(),
-                Some(x25519_shared.as_bytes()),
-            )?
+            derive_symmetric_key(shared_secret.as_bytes(), Some(x25519_shared.as_bytes()))?
         }
         _ => unreachable!(),
     };
@@ -629,7 +633,8 @@ pub fn sign_message(message: &[u8], keypair: &KeyPair) -> Result<Vec<u8>> {
             let seed = ml_dsa::Seed::<MlDsa44>::try_from(keypair.private_key.as_slice())
                 .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-44 seed: {:?}", e))?;
             let sk = ml_dsa::SigningKey::<MlDsa44>::from_seed(&seed);
-            let sig = sk.sign_deterministic(message, b"")
+            let sig = sk
+                .sign_deterministic(message, b"")
                 .map_err(|e| anyhow::anyhow!("ML-DSA-44 signing failed: {:?}", e))?;
             Ok(sig.to_vec())
         }
@@ -637,7 +642,8 @@ pub fn sign_message(message: &[u8], keypair: &KeyPair) -> Result<Vec<u8>> {
             let seed = ml_dsa::Seed::<MlDsa65>::try_from(keypair.private_key.as_slice())
                 .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-65 seed: {:?}", e))?;
             let sk = ml_dsa::SigningKey::<MlDsa65>::from_seed(&seed);
-            let sig = sk.sign_deterministic(message, b"")
+            let sig = sk
+                .sign_deterministic(message, b"")
                 .map_err(|e| anyhow::anyhow!("ML-DSA-65 signing failed: {:?}", e))?;
             Ok(sig.to_vec())
         }
@@ -645,7 +651,8 @@ pub fn sign_message(message: &[u8], keypair: &KeyPair) -> Result<Vec<u8>> {
             let seed = ml_dsa::Seed::<MlDsa87>::try_from(keypair.private_key.as_slice())
                 .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-87 seed: {:?}", e))?;
             let sk = ml_dsa::SigningKey::<MlDsa87>::from_seed(&seed);
-            let sig = sk.sign_deterministic(message, b"")
+            let sig = sk
+                .sign_deterministic(message, b"")
                 .map_err(|e| anyhow::anyhow!("ML-DSA-87 signing failed: {:?}", e))?;
             Ok(sig.to_vec())
         }
@@ -657,10 +664,7 @@ pub fn sign_message(message: &[u8], keypair: &KeyPair) -> Result<Vec<u8>> {
             let result = mac.finalize();
             Ok(result.into_bytes().to_vec())
         }
-        _ => anyhow::bail!(
-            "Algorithm {:?} does not support signing",
-            keypair.algorithm
-        ),
+        _ => anyhow::bail!("Algorithm {:?} does not support signing", keypair.algorithm),
     }
 }
 
@@ -671,29 +675,28 @@ pub fn sign_message(message: &[u8], keypair: &KeyPair) -> Result<Vec<u8>> {
 ///
 /// Returns `Ok(true)` if the signature is valid, `Ok(false)` if invalid,
 /// and `Err` for unexpected failures (e.g., wrong key length).
-pub fn verify_signature(
-    message: &[u8],
-    signature_bytes: &[u8],
-    keypair: &KeyPair,
-) -> Result<bool> {
+pub fn verify_signature(message: &[u8], signature_bytes: &[u8], keypair: &KeyPair) -> Result<bool> {
     match &keypair.algorithm {
         EncryptionAlgo::MlDsa44 => {
-            let pk = ml_dsa::VerifyingKey::<MlDsa44>::decode(&keypair.public_key)
-                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-44 verifying key: {:?}", e))?;
+            let pk = ml_dsa::VerifyingKey::<MlDsa44>::decode(&keypair.public_key).map_err(|e| {
+                anyhow::anyhow!("Failed to decode ML-DSA-44 verifying key: {:?}", e)
+            })?;
             let sig = ml_dsa::Signature::<MlDsa44>::try_from(signature_bytes)
                 .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-44 signature: {:?}", e))?;
             Ok(pk.verify(message, &sig).is_ok())
         }
         EncryptionAlgo::MlDsa65 => {
-            let pk = ml_dsa::VerifyingKey::<MlDsa65>::decode(&keypair.public_key)
-                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-65 verifying key: {:?}", e))?;
+            let pk = ml_dsa::VerifyingKey::<MlDsa65>::decode(&keypair.public_key).map_err(|e| {
+                anyhow::anyhow!("Failed to decode ML-DSA-65 verifying key: {:?}", e)
+            })?;
             let sig = ml_dsa::Signature::<MlDsa65>::try_from(signature_bytes)
                 .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-65 signature: {:?}", e))?;
             Ok(pk.verify(message, &sig).is_ok())
         }
         EncryptionAlgo::MlDsa87 => {
-            let pk = ml_dsa::VerifyingKey::<MlDsa87>::decode(&keypair.public_key)
-                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-87 verifying key: {:?}", e))?;
+            let pk = ml_dsa::VerifyingKey::<MlDsa87>::decode(&keypair.public_key).map_err(|e| {
+                anyhow::anyhow!("Failed to decode ML-DSA-87 verifying key: {:?}", e)
+            })?;
             let sig = ml_dsa::Signature::<MlDsa87>::try_from(signature_bytes)
                 .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-87 signature: {:?}", e))?;
             Ok(pk.verify(message, &sig).is_ok())
@@ -728,7 +731,9 @@ pub fn algorithm_from_str(s: &str) -> Option<EncryptionAlgo> {
         "ml_dsa44" | "ml-dsa44" | "ml-dsa-44" | "dilithium2" => Some(EncryptionAlgo::MlDsa44),
         "ml_dsa65" | "ml-dsa65" | "ml-dsa-65" | "dilithium3" => Some(EncryptionAlgo::MlDsa65),
         "ml_dsa87" | "ml-dsa87" | "ml-dsa-87" | "dilithium5" => Some(EncryptionAlgo::MlDsa87),
-        "classical_sign" | "hmac" | "sphincsplus" | "sphincs+" => Some(EncryptionAlgo::ClassicalSign),
+        "classical_sign" | "hmac" | "sphincsplus" | "sphincs+" => {
+            Some(EncryptionAlgo::ClassicalSign)
+        }
         "aes256" | "chacha20" => Some(EncryptionAlgo::Aes256),
         _ => None,
     }
@@ -774,9 +779,9 @@ impl EncryptedFileMeta {
         let nonce_bytes = BASE64
             .decode(&self.nonce)
             .context("Failed to decode nonce from base64")?;
-        let nonce: [u8; 12] = nonce_bytes
-            .try_into()
-            .map_err(|_| anyhow::anyhow!("Nonce must be exactly 12 bytes, got {}", nonce_bytes.len()))?;
+        let nonce: [u8; 12] = nonce_bytes.try_into().map_err(|_| {
+            anyhow::anyhow!("Nonce must be exactly 12 bytes, got {}", nonce_bytes.len())
+        })?;
 
         let kem_ciphertext = if self.kem_ciphertext.is_empty() {
             Vec::new()

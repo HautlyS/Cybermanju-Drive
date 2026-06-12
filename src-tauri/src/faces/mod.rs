@@ -44,8 +44,8 @@
 //   Model paths: ~/.cache/cybermanju/scrfd_2.5g.onnx, arcface_mfacenet.onnx
 //   See fn_onnx_detect_faces, fn_onnx_embed_face for reference implementations
 
-use anyhow::Result;
 use crate::db::schema::FileNode;
+use anyhow::Result;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
@@ -215,7 +215,12 @@ impl SimHashIndex {
                 for d in 0..EMBEDDING_DIM {
                     // BLAKE3-based PRNG: hash(seed, bit, d) → uniform [0,1] → normal-like
                     let hash = blake3::hash(
-                        format!("sim:{}:{}", seed.wrapping_add(bit as u64 * 10000 + d as u64), "").as_bytes(),
+                        format!(
+                            "sim:{}:{}",
+                            seed.wrapping_add(bit as u64 * 10000 + d as u64),
+                            ""
+                        )
+                        .as_bytes(),
                     );
                     let bytes = hash.as_bytes();
                     // Box-Muller transform: uniform → normal
@@ -256,11 +261,7 @@ impl SimHashIndex {
         let mut hash: u64 = 0;
         for (bit, proj) in projections.iter().enumerate().take(HASH_BITS) {
             // Dot product — auto-vectorized by LLVM via -C opt-level=3
-            let dot: f32 = embedding
-                .iter()
-                .zip(proj.iter())
-                .map(|(a, b)| a * b)
-                .sum();
+            let dot: f32 = embedding.iter().zip(proj.iter()).map(|(a, b)| a * b).sum();
             // Branchless: if dot > 0, set bit
             hash |= ((dot > 0.0) as u64) << bit;
         }
@@ -285,7 +286,12 @@ impl SimHashIndex {
     ///   hamming_dist=0: ~50-80% recall (depends on distance distribution)
     ///   hamming_dist=1: ~90-97% recall (triples candidate count)
     ///   hamming_dist=2: ~97-99% recall (but 6x more candidates)
-    pub fn query_candidates(&self, query: &[f32], hamming_dist: u32, exclude_idx: Option<usize>) -> Vec<usize> {
+    pub fn query_candidates(
+        &self,
+        query: &[f32],
+        hamming_dist: u32,
+        exclude_idx: Option<usize>,
+    ) -> Vec<usize> {
         let query_hash = Self::hash_embedding(query, &self.projections);
         let mut candidates = HashSet::with_capacity(64 << hamming_dist);
 
@@ -302,7 +308,13 @@ impl SimHashIndex {
             } else {
                 // Multi-probe: enumerate all hashes within hamming_dist bits
                 // Using Gosper's hack for efficient subset enumeration
-                self.enumerate_hamming_neighbors(query_hash, hamming_dist, table, &mut candidates, exclude_idx);
+                self.enumerate_hamming_neighbors(
+                    query_hash,
+                    hamming_dist,
+                    table,
+                    &mut candidates,
+                    exclude_idx,
+                );
             }
         }
 
@@ -397,11 +409,17 @@ impl SimHashIndex {
         // Partial sort — only need top-k, not full sort
         // nth_element equivalent: O(n) average vs O(n log n) for full sort
         if results.len() > k * 2 {
-            results.select_nth_unstable_by(k, |a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+            results.select_nth_unstable_by(k, |a, b| {
+                a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
+            });
             results.truncate(k);
-            results.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+            results.sort_unstable_by(|a, b| {
+                a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
+            });
         } else {
-            results.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+            results.sort_unstable_by(|a, b| {
+                a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
+            });
             results.truncate(k);
         }
 
@@ -528,14 +546,24 @@ pub fn embedding_distance(a: &[f32], b: &[f32]) -> f32 {
         return 1.0;
     }
 
-    let (dot, norm_a_sq, norm_b_sq) = a.iter().zip(b.iter()).fold(
-        (0.0f32, 0.0f32, 0.0f32),
-        |(d, na, nb), (x, y)| (d + x * y, na + x * x, nb + y * y),
-    );
+    let (dot, norm_a_sq, norm_b_sq) = a
+        .iter()
+        .zip(b.iter())
+        .fold((0.0f32, 0.0f32, 0.0f32), |(d, na, nb), (x, y)| {
+            (d + x * y, na + x * x, nb + y * y)
+        });
 
     // Skip sqrt for L2-normalized embeddings (‖v‖² ≈ 1.0 within f32 epsilon).
-    let norm_a = if (norm_a_sq - 1.0).abs() < 1e-5 { 1.0 } else { norm_a_sq.sqrt() };
-    let norm_b = if (norm_b_sq - 1.0).abs() < 1e-5 { 1.0 } else { norm_b_sq.sqrt() };
+    let norm_a = if (norm_a_sq - 1.0).abs() < 1e-5 {
+        1.0
+    } else {
+        norm_a_sq.sqrt()
+    };
+    let norm_b = if (norm_b_sq - 1.0).abs() < 1e-5 {
+        1.0
+    } else {
+        norm_b_sq.sqrt()
+    };
 
     if norm_a == 0.0 || norm_b == 0.0 {
         return 1.0;
@@ -551,14 +579,24 @@ pub fn embedding_distance(a: &[f32], b: &[f32]) -> f32 {
 /// eliminated bounds checks and better cache locality.
 #[inline]
 fn embedding_distance_arr(a: &[f32], b: &[f32; EMBEDDING_DIM]) -> f32 {
-    let (dot, norm_a_sq, norm_b_sq) = a.iter().zip(b.iter()).fold(
-        (0.0f32, 0.0f32, 0.0f32),
-        |(d, na, nb), (x, y)| (d + x * y, na + x * x, nb + y * y),
-    );
+    let (dot, norm_a_sq, norm_b_sq) = a
+        .iter()
+        .zip(b.iter())
+        .fold((0.0f32, 0.0f32, 0.0f32), |(d, na, nb), (x, y)| {
+            (d + x * y, na + x * x, nb + y * y)
+        });
 
     // Skip sqrt for L2-normalized embeddings (‖v‖² ≈ 1.0 within f32 epsilon).
-    let norm_a = if (norm_a_sq - 1.0).abs() < 1e-5 { 1.0 } else { norm_a_sq.sqrt() };
-    let norm_b = if (norm_b_sq - 1.0).abs() < 1e-5 { 1.0 } else { norm_b_sq.sqrt() };
+    let norm_a = if (norm_a_sq - 1.0).abs() < 1e-5 {
+        1.0
+    } else {
+        norm_a_sq.sqrt()
+    };
+    let norm_b = if (norm_b_sq - 1.0).abs() < 1e-5 {
+        1.0
+    } else {
+        norm_b_sq.sqrt()
+    };
 
     if norm_a == 0.0 || norm_b == 0.0 {
         return 1.0;
@@ -576,11 +614,7 @@ pub fn embedding_distance_batch(query: &[f32], embeddings: &[[f32]]) -> Vec<f32>
     if embeddings.len() > PAR_BATCH_SIZE {
         embeddings
             .par_chunks(PAR_BATCH_SIZE)
-            .flat_map_iter(|chunk| {
-                chunk
-                    .iter()
-                    .map(|emb| embedding_distance(query, emb))
-            })
+            .flat_map_iter(|chunk| chunk.iter().map(|emb| embedding_distance(query, emb)))
             .collect()
     } else {
         embeddings
@@ -852,10 +886,7 @@ impl UnionFind {
 // TRADEOFF: Exact but O(n^2) — impractical for n > 500
 
 /// DBSCAN-like clustering using brute-force O(n^2) pairwise comparison.
-pub fn cluster_bruteforce(
-    embeddings: &[(String, Vec<f32>)],
-    threshold: f32,
-) -> Vec<Cluster> {
+pub fn cluster_bruteforce(embeddings: &[(String, Vec<f32>)], threshold: f32) -> Vec<Cluster> {
     if embeddings.is_empty() {
         return Vec::new();
     }
@@ -893,10 +924,7 @@ pub fn cluster_bruteforce(
 // TRADEOFF: Approximate — may miss some edges (lower recall than brute-force)
 
 /// SimHash-accelerated clustering: build sparse neighbor graph via LSH.
-pub fn cluster_simhash(
-    embeddings: &[(String, Vec<f32>)],
-    threshold: f32,
-) -> Vec<Cluster> {
+pub fn cluster_simhash(embeddings: &[(String, Vec<f32>)], threshold: f32) -> Vec<Cluster> {
     if embeddings.is_empty() {
         return Vec::new();
     }
@@ -1058,10 +1086,7 @@ pub fn cluster_chinese_whispers(
 // BEST FOR: n > 500, variable-density clusters, noise-heavy data
 
 /// HDBSCAN-inspired clustering using MST + persistence-based cluster extraction.
-pub fn cluster_hdbscan(
-    embeddings: &[(String, Vec<f32>)],
-    min_cluster_size: usize,
-) -> Vec<Cluster> {
+pub fn cluster_hdbscan(embeddings: &[(String, Vec<f32>)], min_cluster_size: usize) -> Vec<Cluster> {
     if embeddings.len() < min_cluster_size {
         return Vec::new();
     }
@@ -1076,7 +1101,8 @@ pub fn cluster_hdbscan(
     let mut core_distances: Vec<f32> = Vec::with_capacity(n);
     for i in 0..n {
         // Request k+1 then filter self — knn doesn't support exclude_idx
-        let neighbors: Vec<(usize, f32)> = index.knn(&embeddings[i].1, k + 1)
+        let neighbors: Vec<(usize, f32)> = index
+            .knn(&embeddings[i].1, k + 1)
             .into_iter()
             .filter(|(j, _)| *j != i)
             .take(k)
@@ -1232,10 +1258,7 @@ pub struct Cluster {
 /// Collect connected components from Union-Find into Cluster structs.
 ///
 /// COMPLEXITY: O(n * d) for cluster collection + O(n * c * d) for medoid
-fn collect_clusters(
-    embeddings: &[(String, Vec<f32>)],
-    uf: &mut UnionFind,
-) -> Vec<Cluster> {
+fn collect_clusters(embeddings: &[(String, Vec<f32>)], uf: &mut UnionFind) -> Vec<Cluster> {
     let n = embeddings.len();
 
     // Group indices by root
@@ -1267,7 +1290,9 @@ fn collect_clusters(
                 for i in 0..member_embeddings_refs.len() {
                     let total_dist: f32 = (0..member_embeddings_refs.len())
                         .filter(|&j| j != i)
-                        .map(|j| embedding_distance(member_embeddings_refs[i], member_embeddings_refs[j]))
+                        .map(|j| {
+                            embedding_distance(member_embeddings_refs[i], member_embeddings_refs[j])
+                        })
                         .sum::<f32>();
                     if total_dist < best_dist {
                         best_dist = total_dist;
@@ -1278,11 +1303,15 @@ fn collect_clusters(
             };
 
             let cohesion = if member_embeddings_refs.len() <= 50 {
-                let total_pairs = (member_embeddings_refs.len() * (member_embeddings_refs.len() - 1)) / 2;
+                let total_pairs =
+                    (member_embeddings_refs.len() * (member_embeddings_refs.len() - 1)) / 2;
                 let mut total_dist = 0.0f32;
                 for i in 0..member_embeddings_refs.len() {
                     for j in (i + 1)..member_embeddings_refs.len() {
-                        total_dist += embedding_distance(member_embeddings_refs[i], member_embeddings_refs[j]);
+                        total_dist += embedding_distance(
+                            member_embeddings_refs[i],
+                            member_embeddings_refs[j],
+                        );
                     }
                 }
                 total_dist / total_pairs as f32
@@ -1291,10 +1320,16 @@ fn collect_clusters(
                 let step = member_embeddings_refs.len() / sample_size;
                 let total_pairs = sample_size * (sample_size - 1) / 2;
                 let mut total_dist = 0.0f32;
-                let samples: Vec<_> = (0..member_embeddings_refs.len()).step_by(step.max(1)).take(sample_size).collect();
+                let samples: Vec<_> = (0..member_embeddings_refs.len())
+                    .step_by(step.max(1))
+                    .take(sample_size)
+                    .collect();
                 for i in 0..samples.len() {
                     for j in (i + 1)..samples.len() {
-                        total_dist += embedding_distance(member_embeddings_refs[samples[i]], member_embeddings_refs[samples[j]]);
+                        total_dist += embedding_distance(
+                            member_embeddings_refs[samples[i]],
+                            member_embeddings_refs[samples[j]],
+                        );
                     }
                 }
                 total_dist / total_pairs as f32
@@ -1302,7 +1337,10 @@ fn collect_clusters(
 
             Cluster {
                 id: idx,
-                members: member_indices.iter().map(|&i| embeddings[i].0.clone()).collect(),
+                members: member_indices
+                    .iter()
+                    .map(|&i| embeddings[i].0.clone())
+                    .collect(),
                 medoid,
                 cohesion,
             }
@@ -1345,7 +1383,9 @@ fn collect_clusters_from_labels(
                 for i in 0..member_embeddings_refs.len() {
                     let total_dist: f32 = (0..member_embeddings_refs.len())
                         .filter(|&j| j != i)
-                        .map(|j| embedding_distance(member_embeddings_refs[i], member_embeddings_refs[j]))
+                        .map(|j| {
+                            embedding_distance(member_embeddings_refs[i], member_embeddings_refs[j])
+                        })
                         .sum::<f32>();
                     if total_dist < best_dist {
                         best_dist = total_dist;
@@ -1356,11 +1396,15 @@ fn collect_clusters_from_labels(
             };
 
             let cohesion = if member_embeddings_refs.len() <= 50 {
-                let total_pairs = (member_embeddings_refs.len() * (member_embeddings_refs.len() - 1)) / 2;
+                let total_pairs =
+                    (member_embeddings_refs.len() * (member_embeddings_refs.len() - 1)) / 2;
                 let mut total_dist = 0.0f32;
                 for i in 0..member_embeddings_refs.len() {
                     for j in (i + 1)..member_embeddings_refs.len() {
-                        total_dist += embedding_distance(member_embeddings_refs[i], member_embeddings_refs[j]);
+                        total_dist += embedding_distance(
+                            member_embeddings_refs[i],
+                            member_embeddings_refs[j],
+                        );
                     }
                 }
                 total_dist / total_pairs as f32
@@ -1369,10 +1413,16 @@ fn collect_clusters_from_labels(
                 let step = member_embeddings_refs.len() / sample_size;
                 let total_pairs = sample_size * (sample_size - 1) / 2;
                 let mut total_dist = 0.0f32;
-                let samples: Vec<_> = (0..member_embeddings_refs.len()).step_by(step.max(1)).take(sample_size).collect();
+                let samples: Vec<_> = (0..member_embeddings_refs.len())
+                    .step_by(step.max(1))
+                    .take(sample_size)
+                    .collect();
                 for i in 0..samples.len() {
                     for j in (i + 1)..samples.len() {
-                        total_dist += embedding_distance(member_embeddings_refs[samples[i]], member_embeddings_refs[samples[j]]);
+                        total_dist += embedding_distance(
+                            member_embeddings_refs[samples[i]],
+                            member_embeddings_refs[samples[j]],
+                        );
                     }
                 }
                 total_dist / total_pairs as f32
@@ -1380,7 +1430,10 @@ fn collect_clusters_from_labels(
 
             Cluster {
                 id: idx,
-                members: member_indices.iter().map(|&i| embeddings[i].0.clone()).collect(),
+                members: member_indices
+                    .iter()
+                    .map(|&i| embeddings[i].0.clone())
+                    .collect(),
                 medoid,
                 cohesion,
             }
@@ -1445,10 +1498,7 @@ pub fn detect_faces_in_file(file_node: &FileNode) -> Result<Vec<Vec<f32>>> {
 ///
 /// COMPLEXITY: O(face_count * EMBEDDING_DIM) where face_count ∈ {0, 1, 2, 3}
 fn detect_faces_blake3_fallback(file_node: &FileNode) -> Vec<Vec<f32>> {
-    let seed = file_node
-        .hash_blake3
-        .as_deref()
-        .unwrap_or(&file_node.id);
+    let seed = file_node.hash_blake3.as_deref().unwrap_or(&file_node.id);
 
     let face_count = if file_node.file_type == "folder" {
         0
@@ -1483,9 +1533,7 @@ fn detect_faces_blake3_fallback(file_node: &FileNode) -> Vec<Vec<f32>> {
 fn seed_to_embedding(seed: &str) -> Vec<f32> {
     // Use BLAKE3 XOF (eXtensible Output Function) to fill all 128 dims
     // without cycling — avoids correlations from repeated bytes.
-    let mut xof_output = blake3::Hasher::new()
-        .update(seed.as_bytes())
-        .finalize_xof();
+    let mut xof_output = blake3::Hasher::new().update(seed.as_bytes()).finalize_xof();
     let mut hash_bytes = [0u8; EMBEDDING_DIM];
     xof_output.fill(&mut hash_bytes);
 
@@ -1563,9 +1611,9 @@ pub fn recluster_all(
         pairs
             .par_chunks(PAR_BATCH_SIZE)
             .flat_map_iter(|chunk| {
-                chunk.iter().map(|&(i, j)| {
-                    embedding_distance(&all_embeddings[i].1, &all_embeddings[j].1)
-                })
+                chunk
+                    .iter()
+                    .map(|&(i, j)| embedding_distance(&all_embeddings[i].1, &all_embeddings[j].1))
             })
             .collect()
     } else {
@@ -1856,7 +1904,10 @@ mod tests {
     fn test_different_seeds_different_embeddings() {
         let v1 = seed_to_embedding("seed_a");
         let v2 = seed_to_embedding("seed_b");
-        assert_ne!(v1, v2, "different seeds should produce different embeddings");
+        assert_ne!(
+            v1, v2,
+            "different seeds should produce different embeddings"
+        );
     }
 
     // ── Union-Find Tests ──────────────────────────────────────
@@ -1998,7 +2049,10 @@ mod tests {
     fn test_adaptive_threshold_uniform() {
         let distances = vec![0.3; 100];
         let threshold = adaptive_threshold(&distances, 0.5);
-        assert!(threshold > 0.0 && threshold < 1.0, "threshold should be reasonable");
+        assert!(
+            threshold > 0.0 && threshold < 1.0,
+            "threshold should be reasonable"
+        );
     }
 
     #[test]
@@ -2049,7 +2103,11 @@ mod tests {
 
         let result = detect_faces_in_file(&file_node).unwrap();
         assert!(!result.is_empty(), "should detect at least one face");
-        assert_eq!(result[0].len(), EMBEDDING_DIM, "embedding should be correct dim");
+        assert_eq!(
+            result[0].len(),
+            EMBEDDING_DIM,
+            "embedding should be correct dim"
+        );
     }
 
     #[test]

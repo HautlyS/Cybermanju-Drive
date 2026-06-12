@@ -4,13 +4,13 @@
 // Password hashing: argon2id (cryptographically secure, salted, key-stretched)
 // Session tokens: HMAC-SHA256 with 24-hour expiry (not forgeable)
 
-use tauri::State;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::State;
 
-use crate::AppState;
 use crate::db::schema::{User, UserFilePermission};
+use crate::AppState;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use hmac::{Hmac, Mac};
@@ -97,8 +97,8 @@ fn generate_session_token(username: &str, hmac_secret: &[u8]) -> String {
     hmac_input.extend_from_slice(&timestamp.to_be_bytes());
     hmac_input.extend_from_slice(&nonce);
 
-    let mut mac = HmacSha256::new_from_slice(hmac_secret)
-        .expect("HMAC-SHA256 accepts any key length");
+    let mut mac =
+        HmacSha256::new_from_slice(hmac_secret).expect("HMAC-SHA256 accepts any key length");
     mac.update(&hmac_input);
     let hmac_bytes = mac.finalize().into_bytes();
 
@@ -120,10 +120,7 @@ fn generate_session_token(username: &str, hmac_secret: &[u8]) -> String {
 ///   - The token is malformed (bad base64, wrong length)
 ///   - The HMAC signature doesn't match (forged token)
 ///   - The token has expired (>24 hours old)
-pub fn verify_session_token(
-    token: &str,
-    hmac_secret: &[u8],
-) -> Result<(String, u64), String> {
+pub fn verify_session_token(token: &str, hmac_secret: &[u8]) -> Result<(String, u64), String> {
     let token_bytes = BASE64
         .decode(token)
         .map_err(|_| "Invalid token: bad base64 encoding".to_string())?;
@@ -183,8 +180,8 @@ pub fn verify_session_token(
     hmac_input.extend_from_slice(&timestamp.to_be_bytes());
     hmac_input.extend_from_slice(nonce);
 
-    let mut mac = HmacSha256::new_from_slice(hmac_secret)
-        .expect("HMAC-SHA256 accepts any key length");
+    let mut mac =
+        HmacSha256::new_from_slice(hmac_secret).expect("HMAC-SHA256 accepts any key length");
     mac.update(&hmac_input);
 
     // verify_slice performs constant-time comparison internally
@@ -305,17 +302,23 @@ pub fn authenticate_user(
                     // Write the upgraded hash back to the database
                     let mut upgraded_user = user.clone();
                     upgraded_user.password_hash = new_hash;
-                    let serialized = serde_json::to_string(&upgraded_user).map_err(|e| e.to_string())?;
+                    let serialized =
+                        serde_json::to_string(&upgraded_user).map_err(|e| e.to_string())?;
                     let db_write = state.db.write().map_err(|e| e.to_string())?;
                     let tx_write = db_write.begin_write().map_err(|e| e.to_string())?;
                     {
                         let mut table = tx_write
                             .open_table(crate::db::Database::get_users_table())
                             .map_err(|e| e.to_string())?;
-                        table.insert(&user.id, serialized.as_str()).map_err(|e| e.to_string())?;
+                        table
+                            .insert(&user.id, serialized.as_str())
+                            .map_err(|e| e.to_string())?;
                     }
                     tx_write.commit().map_err(|e| e.to_string())?;
-                    log::info!("Upgraded legacy BLAKE3 password hash to argon2id for user '{}'", username);
+                    log::info!(
+                        "Upgraded legacy BLAKE3 password hash to argon2id for user '{}'",
+                        username
+                    );
                     true
                 } else {
                     false
