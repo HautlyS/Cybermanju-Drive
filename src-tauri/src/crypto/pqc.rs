@@ -26,7 +26,9 @@ use ml_dsa::{Generate, MlDsa44, MlDsa65, MlDsa87};
 use signature::{Signer, Verifier};
 
 // X25519 for hybrid classical component
-use x25519_dalek::{EphemeralSecret, PublicKey as X25519PublicKey, StaticSecret as X25519StaticSecret};
+use x25519_dalek::{
+    EphemeralSecret, PublicKey as X25519PublicKey, StaticSecret as X25519StaticSecret,
+};
 
 type HmacSha512 = Hmac<Sha512>;
 

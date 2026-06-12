@@ -367,7 +367,8 @@ fn handle_connection(dashboard: &WebDashboard, mut stream: TcpStream) {
     let db_guard = match dashboard.db.lock() {
         Ok(g) => g,
         Err(_) => {
-            let _ = stream.write_all(json_error(500, "Database lock poisoned", effective_origin).as_bytes());
+            let _ = stream
+                .write_all(json_error(500, "Database lock poisoned", effective_origin).as_bytes());
             return;
         }
     };
