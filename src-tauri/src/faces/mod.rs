@@ -669,9 +669,9 @@ pub fn adaptive_threshold(distances: &[f32], base: f32) -> f32 {
         }
     }
 
-    let knee_threshold = sorted[knee_idx.min(n - 1)];
+    let gap_mid = (sorted[knee_idx] + sorted[knee_idx - 1]) / 2.0;
     // Blend: 70% knee + 30% base for stability
-    knee_threshold * 0.7 + base * 0.3
+    gap_mid * 0.7 + base * 0.3
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -66,7 +66,7 @@ pub fn detect_language(filename: &str) -> &'static str {
 /// Extract symbols from source code using heuristic line-by-line scanning.
 ///
 /// In production, this is replaced by tree-sitter query API:
-///   ```
+///   ```ignore
 ///   let mut parser = Parser::new();
 ///   parser.set_language(&LANGUAGE_RUST)?;
 ///   let tree = parser.parse(content, None)?;
