@@ -269,12 +269,11 @@ impl PqcEngine {
             EncryptionAlgo::MlDsa65 => {
                 // Real ML-DSA-65 key generation (FIPS 204, NIST Level 3)
                 let sk = SigningKey::<MlDsa65>::generate();
-                let sk_bytes = sk.to_seed().as_ref().to_vec();
-                let pk_bytes = sk.verifying_key().encode().as_ref().to_vec();
+                let sk_bytes = sk.to_seed().as_slice().to_vec();
+                let pk_bytes = sk.verifying_key().encode().as_slice().to_vec();
                 (pk_bytes, sk_bytes)
             }
             EncryptionAlgo::MlDsa87 => {
-                // Real ML-DSA-87 key generation (FIPS 204, NIST Level 5)
                 let sk = SigningKey::<MlDsa87>::generate();
                 let sk_bytes = sk.to_seed().as_slice().to_vec();
                 let pk_bytes = sk.verifying_key().encode().as_slice().to_vec();

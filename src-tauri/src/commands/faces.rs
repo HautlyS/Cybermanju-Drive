@@ -265,12 +265,13 @@ pub fn detect_faces_batch_cmd(state: State<'_, AppState>) -> Result<ReclusterRes
             .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
             .collect();
         for fid in &file_keys {
-            let entry = ft_table.get(fid.as_str()).map_err(|e| e.to_string())?;
-            if let Some(fv) = entry {
-                let node_str = fv.value().to_string();
-                drop(fv);
+            let node_str = ft_table
+                .get(fid.as_str())
+                .map_err(|e| e.to_string())?
+                .map(|fv| fv.value().to_string());
+            if let Some(ref node_str) = node_str {
                 let mut file_node: FileNode =
-                    serde_json::from_str(&node_str).map_err(|e| e.to_string())?;
+                    serde_json::from_str(node_str).map_err(|e| e.to_string())?;
                 if !file_node.face_group_ids.is_empty() {
                     file_node.face_group_ids.clear();
                     let file_serialized =
@@ -317,12 +318,13 @@ pub fn detect_faces_batch_cmd(state: State<'_, AppState>) -> Result<ReclusterRes
 
             // Update file nodes to reference this face group
             for file_id in &cluster.members {
-                let entry = ft_table.get(file_id.as_str()).map_err(|e| e.to_string())?;
-                if let Some(fv) = entry {
-                    let node_str = fv.value().to_string();
-                    drop(fv);
+                let node_str = ft_table
+                    .get(file_id.as_str())
+                    .map_err(|e| e.to_string())?
+                    .map(|fv| fv.value().to_string());
+                if let Some(ref node_str) = node_str {
                     let mut file_node: FileNode =
-                        serde_json::from_str(&node_str).map_err(|e| e.to_string())?;
+                        serde_json::from_str(node_str).map_err(|e| e.to_string())?;
                     if !file_node.face_group_ids.contains(&group_id) {
                         file_node.face_group_ids.push(group_id.clone());
                     }
