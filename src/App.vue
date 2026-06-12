@@ -3,6 +3,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { isWebMode } from '@/composables/useTauri'
 import MatrixRain from '@/components/MatrixRain.vue'
 import PrayerFlags from '@/components/PrayerFlags.vue'
 import TopBar from '@/components/TopBar.vue'
@@ -20,6 +21,7 @@ import UserManagementPanel from '@/components/UserManagementPanel.vue'
 import WebDashboardPanel from '@/components/WebDashboardPanel.vue'
 import DashboardOverlay from '@/components/DashboardOverlay.vue'
 import SyncPanel from '@/components/SyncPanel.vue'
+import LandingPage from '@/components/LandingPage.vue'
 import type { PanelType } from '@/types'
 
 const store = useAppStore()
@@ -38,6 +40,10 @@ const rightPanelTitle = computed(() => {
 
 onMounted(() => {
   store.initialize()
+  // Show landing page as default in web/WASM mode
+  if (isWebMode() && store.currentPanel === 'files') {
+    store.currentPanel = 'landing'
+  }
 })
 </script>
 
@@ -102,8 +108,11 @@ onMounted(() => {
 
         <!-- Panel router -->
         <div class="content-panels">
+          <!-- Landing page (web/WASM mode default) -->
+          <LandingPage v-if="store.currentPanel === 'landing'" @open-app="store.currentPanel = 'files'" />
+
           <!-- Default file grid -->
-          <FileGrid v-if="store.currentPanel === 'files'" />
+          <FileGrid v-else-if="store.currentPanel === 'files'" />
 
           <!-- Web Dashboard overlay -->
           <DashboardOverlay v-else-if="store.currentPanel === 'webdash'" @close="store.currentPanel = 'files'" />

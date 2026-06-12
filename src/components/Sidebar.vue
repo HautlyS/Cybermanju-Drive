@@ -23,7 +23,7 @@
         class="sidebar-tab"
         :class="{ 'tab-active': store.sidebarSection === tab.id }"
         :title="tab.label"
-        @click="store.sidebarSection = tab.id as any"
+        @click="store.sidebarSection = tab.id as any; if (tab.id === 'landing') store.currentPanel = 'landing'"
       >
         <component :is="tab.icon" :size="16" />
         <span v-if="!store.sidebarCollapsed" class="tab-label">{{ tab.label }}</span>
@@ -32,6 +32,32 @@
 
     <!-- Content area -->
     <div v-if="!store.sidebarCollapsed" class="sidebar-content">
+      <!-- Landing page quick links -->
+      <div v-if="store.sidebarSection === 'landing'" class="sidebar-section">
+        <div class="section-header">
+          <Home :size="14" class="text-neon" />
+          <span class="section-title">Quick Links</span>
+        </div>
+        <div class="quick-links">
+          <button class="quick-link" @click="store.currentPanel = 'landing'">
+            <span class="ql-icon">📥</span>
+            <span>Download App</span>
+          </button>
+          <button class="quick-link" @click="store.currentPanel = 'sync'">
+            <span class="ql-icon">☁️</span>
+            <span>Cloud Sync Setup</span>
+          </button>
+          <a href="https://github.com/hautlythird211/Cybermanju-Drive" target="_blank" class="quick-link">
+            <span class="ql-icon">💻</span>
+            <span>Source Code</span>
+          </a>
+          <a href="https://github.com/hautlythird211/Cybermanju-Drive/blob/main/README.md" target="_blank" class="quick-link">
+            <span class="ql-icon">📖</span>
+            <span>Documentation</span>
+          </a>
+        </div>
+      </div>
+
       <!-- Tree view -->
       <div v-if="store.sidebarSection === 'tree'" class="sidebar-section">
         <div class="section-header">
@@ -280,9 +306,10 @@ import { computed, h, defineComponent } from 'vue'
 import {
   FolderTree, HardDrive, BookMarked, Users, Palette, Group,
   Plus, ChevronRight, Folder, File, Star, Lock, Link,
-  UserCheck, Globe, Shield, CloudUpload,
+  UserCheck, Globe, Shield, CloudUpload, Home,
 } from 'lucide-vue-next'
 import { useAppStore } from '@/stores/app'
+import { isWebMode } from '@/composables/useTauri'
 import type { FileNode, SyncBackendType } from '@/types'
 import { SYNC_BACKEND_INFO } from '@/types'
 
@@ -309,17 +336,25 @@ const allTags = computed<string[]>(() => {
   return [...tagSet].sort()
 })
 
-const sectionTabs = [
-  { id: 'tree', label: 'Tree', icon: FolderTree },
-  { id: 'locations', label: 'Locations', icon: HardDrive },
-  { id: 'collections', label: 'Collections', icon: BookMarked },
-  { id: 'people', label: 'People', icon: Users },
-  { id: 'styles', label: 'Styles', icon: Palette },
-  { id: 'loose', label: 'Loose', icon: Group },
-  { id: 'sync', label: 'Sync', icon: CloudUpload },
-  { id: 'users', label: 'Users', icon: UserCheck },
-  { id: 'dashboard', label: 'Remote', icon: Globe },
-]
+const sectionTabs = computed(() => {
+  const tabs = []
+  // Show Home/landing tab only in web mode
+  if (isWebMode()) {
+    tabs.push({ id: 'landing', label: 'Home', icon: Home })
+  }
+  tabs.push(
+    { id: 'tree', label: 'Tree', icon: FolderTree },
+    { id: 'locations', label: 'Locations', icon: HardDrive },
+    { id: 'collections', label: 'Collections', icon: BookMarked },
+    { id: 'people', label: 'People', icon: Users },
+    { id: 'styles', label: 'Styles', icon: Palette },
+    { id: 'loose', label: 'Loose', icon: Group },
+    { id: 'sync', label: 'Sync', icon: CloudUpload },
+    { id: 'users', label: 'Users', icon: UserCheck },
+    { id: 'dashboard', label: 'Remote', icon: Globe },
+  )
+  return tabs
+})
 
 const rootFolders = computed(() =>
   store.files.filter(f => f.fileType === 'folder' && !f.parentId)
@@ -452,6 +487,42 @@ const TreeNode = defineComponent({
 }
 
 .tab-label {
+  white-space: nowrap;
+}
+
+/* Quick links */
+.quick-links {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 4px;
+}
+
+.quick-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--cyber-text-secondary, #aaa);
+  font-size: 12px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.1s;
+  text-align: left;
+  width: 100%;
+}
+
+.quick-link:hover {
+  background: var(--cyber-bg-hover, rgba(255,255,255,0.05));
+  color: var(--cyber-text-primary, #fff);
+}
+
+.ql-icon {
+  font-size: 14px;
+}
   font-family: monospace;
   font-size: 11px;
   font-weight: 600;
