@@ -8,7 +8,10 @@ import type {
   CompressionStats, ParseResult, GeoMarker,
   ViewMode, PanelType, SidebarSection,
   SyncConfig, SyncProgress, SyncResult, RemoteFile,
+  AuthResult, ModuleInfo,
 } from '@/types'
+import { MODULE_METADATA } from '@/types'
+import { setAuthToken } from '@/composables/useTauri'
 
 export const useAppStore = defineStore('cybermanju', () => {
   // ── Navigation State ──────────────────────────────────────
@@ -43,6 +46,16 @@ export const useAppStore = defineStore('cybermanju', () => {
   // ── Code Intelligence State ───────────────────────────────
   const parseResult = ref<ParseResult | null>(null)
 
+  // ── Auth State ────────────────────────────────────────────
+  const currentUser = ref<AuthResult | null>(null)
+  const authToken = ref('')
+  const isAuthenticated = computed(() => !!currentUser.value)
+  const showLoginPopup = ref(false)
+
+  // ── Transition State ──────────────────────────────────────
+  const previousPanel = ref<PanelType | null>(null)
+  const isTransitioning = ref(false)
+
   // ── UI State ──────────────────────────────────────────────
   const searchQuery = ref('')
   const isSearching = ref(false)
@@ -52,6 +65,11 @@ export const useAppStore = defineStore('cybermanju', () => {
   const showEncryptionPanel = ref(false)
   const showCompressionPanel = ref(false)
   const commandPaletteOpen = ref(false)
+
+  // ── Module Helpers ─────────────────────────────────────────
+  const currentModule = computed<ModuleInfo>(() =>
+    MODULE_METADATA[showEncryptionPanel.value ? 'encryption' : showCompressionPanel.value ? 'compression' : currentPanel.value] || MODULE_METADATA.files
+  )
 
   // ── Computed ──────────────────────────────────────────────
   const selectedFile = computed(() =>

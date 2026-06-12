@@ -1,6 +1,16 @@
 export type ViewMode = 'grid' | 'list' | 'masonry'
 export type PanelType = 'landing' | 'files' | 'preview' | 'encryption' | 'compression' | 'collections' | 'faces' | 'map' | 'code' | 'search' | 'style' | 'accounts' | 'loose-groups' | 'sync' | 'webdash' | 'users' | 'dashboard'
 export type SidebarSection = 'tree' | 'locations' | 'collections' | 'people' | 'styles' | 'loose' | 'users' | 'sync' | 'dashboard' | 'landing'
+
+export interface ModuleInfo {
+  id: PanelType
+  label: string
+  icon: string
+  color: string
+  gradient: string
+  description: string
+  requiresAuth: boolean
+}
 export type EncryptionAlgo = 'kyber1024' | 'dilithium5' | 'frodokem1344' | 'hybrid' | 'aes256'
 export type CompressionType = 'none' | 'lz4' | 'zstd' | 'triple'
 export type AccountType = 'local' | 'cloud' | 'network'
@@ -347,6 +357,26 @@ export interface RemoteFile {
   sizeBytes: number
   modifiedAt: string
   url: string
+}
+
+export const MODULE_METADATA: Record<PanelType, ModuleInfo> = {
+  landing: { id: 'landing', label: 'HOME', icon: '[~]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #0a0a0a 50%, #000000 100%)', description: 'Quantum-resistant encrypted file manager', requiresAuth: false },
+  files: { id: 'files', label: 'FILES', icon: '[#]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #0a0a1a 50%, #000000 100%)', description: 'Browse and manage your encrypted files', requiresAuth: true },
+  search: { id: 'search', label: 'SEARCH', icon: '[S]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #0a0a0a 50%, #000000 100%)', description: 'Tantivy BM25 full-text search', requiresAuth: true },
+  collections: { id: 'collections', label: 'COLLECTIONS', icon: '[*]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #0d0800 50%, #000000 100%)', description: 'Curate and organize file collections', requiresAuth: true },
+  faces: { id: 'faces', label: 'PEOPLE', icon: '[+]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #0d0008 50%, #000000 100%)', description: 'AI face detection and clustering', requiresAuth: true },
+  map: { id: 'map', label: 'MAP', icon: '[@]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #000a0d 50%, #000000 100%)', description: 'GPS-tagged files on MapLibre GL', requiresAuth: true },
+  code: { id: 'code', label: 'CODE', icon: '[T]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #000d08 50%, #000000 100%)', description: 'Tree-sitter code intelligence', requiresAuth: true },
+  sync: { id: 'sync', label: 'SYNC', icon: '[~]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #00080d 50%, #000000 100%)', description: 'Multi-backend cloud sync', requiresAuth: true },
+  accounts: { id: 'accounts', label: 'ACCOUNTS', icon: '[@]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #0a0a0d 50%, #000000 100%)', description: 'Manage local and cloud accounts', requiresAuth: true },
+  'loose-groups': { id: 'loose-groups', label: 'LOOSE', icon: '[%]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #0d0d00 50%, #000000 100%)', description: 'Ad-hoc file grouping', requiresAuth: true },
+  style: { id: 'style', label: 'TAGS', icon: '[&]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #0a000d 50%, #000000 100%)', description: 'CLIP-based visual style tags', requiresAuth: true },
+  users: { id: 'users', label: 'USERS', icon: '[!]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #0d0000 50%, #000000 100%)', description: 'Multi-user access control', requiresAuth: true },
+  dashboard: { id: 'dashboard', label: 'REMOTE', icon: '[D]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #00080d 50%, #000000 100%)', description: 'Web dashboard and API status', requiresAuth: true },
+  webdash: { id: 'webdash', label: 'OVERLAY', icon: '[W]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #05050a 50%, #000000 100%)', description: 'Remote access dashboard', requiresAuth: true },
+  preview: { id: 'preview', label: 'PREVIEW', icon: '[P]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #0a0a0a 50%, #000000 100%)', description: 'File preview panel', requiresAuth: true },
+  encryption: { id: 'encryption', label: 'ENCRYPT', icon: '[@]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #0d0000 50%, #000000 100%)', description: 'Post-quantum encryption management', requiresAuth: true },
+  compression: { id: 'compression', label: 'COMPRESS', icon: '[$]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #000d00 50%, #000000 100%)', description: 'Triple-layer compression pipeline', requiresAuth: true },
 }
 
 export const SYNC_BACKEND_INFO: Record<SyncBackendType, { name: string; description: string; color: string; icon: string }> = {
