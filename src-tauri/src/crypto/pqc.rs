@@ -20,9 +20,10 @@ use std::collections::HashMap;
 // Real ML-KEM from pqcrypto-mlkem
 use pqcrypto_mlkem::mlkem1024;
 use pqcrypto_mlkem::mlkem768;
+use pqcrypto_traits::kem::{Ciphertext as _, SharedSecret as _};
 
 // Real ML-DSA from ml-dsa (FIPS 204, formerly CRYSTALS-Dilithium)
-use ml_dsa::{Generate, MlDsa44, MlDsa65, MlDsa87};
+use ml_dsa::{KeyGen, MlDsa44, MlDsa65, MlDsa87};
 use signature::{Signer, Verifier};
 
 // X25519 for hybrid classical component
@@ -258,25 +259,25 @@ impl PqcEngine {
             }
             EncryptionAlgo::MlDsa44 => {
                 // Real ML-DSA-44 key generation (FIPS 204, NIST Level 2)
-                let kp = MlDsa44::generate();
+                let kp = MlDsa44::key_gen(&mut rand_core::OsRng);
                 // SigningKey: store 32-byte seed (reconstruct via from_seed)
                 let sk_bytes = kp.signing_key().to_seed().to_vec();
                 // VerifyingKey: store encoded public key bytes
-                let pk_bytes = kp.verifying_key().encode().as_ref().to_vec();
+                let pk_bytes = kp.verifying_key().to_bytes().to_vec();
                 (pk_bytes, sk_bytes)
             }
             EncryptionAlgo::MlDsa65 => {
                 // Real ML-DSA-65 key generation (FIPS 204, NIST Level 3)
-                let kp = MlDsa65::generate();
+                let kp = MlDsa65::key_gen(&mut rand_core::OsRng);
                 let sk_bytes = kp.signing_key().to_seed().to_vec();
-                let pk_bytes = kp.verifying_key().encode().as_ref().to_vec();
+                let pk_bytes = kp.verifying_key().to_bytes().to_vec();
                 (pk_bytes, sk_bytes)
             }
             EncryptionAlgo::MlDsa87 => {
                 // Real ML-DSA-87 key generation (FIPS 204, NIST Level 5)
-                let kp = MlDsa87::generate();
+                let kp = MlDsa87::key_gen(&mut rand_core::OsRng);
                 let sk_bytes = kp.signing_key().to_seed().to_vec();
-                let pk_bytes = kp.verifying_key().encode().as_ref().to_vec();
+                let pk_bytes = kp.verifying_key().to_bytes().to_vec();
                 (pk_bytes, sk_bytes)
             }
             EncryptionAlgo::ClassicalSign => {
@@ -634,27 +635,21 @@ pub fn sign_message(message: &[u8], keypair: &KeyPair) -> Result<Vec<u8>> {
             let seed = ml_dsa::Seed::<MlDsa44>::try_from(keypair.private_key.as_slice())
                 .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-44 seed: {:?}", e))?;
             let sk = ml_dsa::SigningKey::<MlDsa44>::from_seed(&seed);
-            let sig: ml_dsa::Signature<MlDsa44> = sk
-                .try_sign(message)
-                .map_err(|e| anyhow::anyhow!("ML-DSA-44 signing failed: {:?}", e))?;
+            let sig: ml_dsa::Signature<MlDsa44> = sk.sign(message);
             Ok(sig.to_vec())
         }
         EncryptionAlgo::MlDsa65 => {
             let seed = ml_dsa::Seed::<MlDsa65>::try_from(keypair.private_key.as_slice())
                 .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-65 seed: {:?}", e))?;
             let sk = ml_dsa::SigningKey::<MlDsa65>::from_seed(&seed);
-            let sig: ml_dsa::Signature<MlDsa65> = sk
-                .try_sign(message)
-                .map_err(|e| anyhow::anyhow!("ML-DSA-65 signing failed: {:?}", e))?;
+            let sig: ml_dsa::Signature<MlDsa65> = sk.sign(message);
             Ok(sig.to_vec())
         }
         EncryptionAlgo::MlDsa87 => {
             let seed = ml_dsa::Seed::<MlDsa87>::try_from(keypair.private_key.as_slice())
                 .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-87 seed: {:?}", e))?;
             let sk = ml_dsa::SigningKey::<MlDsa87>::from_seed(&seed);
-            let sig: ml_dsa::Signature<MlDsa87> = sk
-                .try_sign(message)
-                .map_err(|e| anyhow::anyhow!("ML-DSA-87 signing failed: {:?}", e))?;
+            let sig: ml_dsa::Signature<MlDsa87> = sk.sign(message);
             Ok(sig.to_vec())
         }
         EncryptionAlgo::ClassicalSign => {

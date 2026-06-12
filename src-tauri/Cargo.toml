@@ -31,6 +31,7 @@ blake3 = "1"
 redb = "2"
 # Post-quantum cryptography — real ML-KEM (FIPS 203)
 pqcrypto-mlkem = "0.1"
+pqcrypto-traits = "0.3"
 # Post-quantum digital signatures — real ML-DSA (FIPS 204)
 ml-dsa = { version = "0.1.1", features = ["getrandom"] }
 signature = "3"
