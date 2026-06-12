@@ -7,7 +7,7 @@
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use chacha20poly1305::{
-    aead::{Aead, KeyInit, OsRng as AeadOsRng},
+    aead::{Aead, KeyInit as AeadKeyInit, OsRng as AeadOsRng},
     ChaCha20Poly1305, Nonce,
 };
 use hkdf::Hkdf;

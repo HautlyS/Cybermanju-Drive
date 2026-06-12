@@ -542,7 +542,10 @@ fn extract_gps_if_image(path: &std::path::Path) -> (Option<f64>, Option<f64>) {
         .get_field(exif::Tag::GPSLatitudeRef, exif::In::PRIMARY)
         .and_then(|f| {
             if let exif::Value::Ascii(ref bytes) = f.value {
-                std::str::from_utf8(bytes).ok().map(|s| s.to_string())
+                bytes
+                    .first()
+                    .and_then(|b| std::str::from_utf8(b).ok())
+                    .map(|s| s.to_string())
             } else {
                 None
             }
