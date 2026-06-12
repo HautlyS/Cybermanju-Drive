@@ -151,9 +151,9 @@ impl SyncPipeline {
         let backend = create_backend(&self.config)?;
 
         if self.config.max_concurrent_uploads > 1 {
-            self.sync_all_parallel(&file_ids, &backend, state)
+            self.sync_all_parallel(&file_ids, backend.as_ref(), state)
         } else {
-            self.sync_all_sequential(&file_ids, &backend, state)
+            self.sync_all_sequential(&file_ids, backend.as_ref(), state)
         }
     }
 
@@ -322,7 +322,7 @@ impl SyncPipeline {
         let start = std::time::Instant::now();
 
         let (bytes_uploaded, bytes_saved) =
-            self.sync_single_file_inner(&file_id, &backend, compressor, state)?;
+            self.sync_single_file_inner(&file_id, backend.as_ref(), compressor, state)?;
 
         self.progress.processed_files.fetch_add(1, Ordering::SeqCst);
         if let Ok(mut status) = self.progress.status.lock().map_err(|e| e.to_string()) {
