@@ -1,450 +1,149 @@
 <template>
-  <div class="code-intel-panel">
-    <!-- Header -->
+  <div class="code-panel">
     <div class="panel-header">
       <div class="header-left">
-        <Code :size="22" class="icon-code" />
-        <h2 class="panel-title">Code Intelligence</h2>
+        <span class="icon-code">[T]</span>
+        <h2 class="panel-title">CODE INTELLIGENCE</h2>
       </div>
-      <button class="close-btn" @click="$emit('close')">
-        <span class="close-x">✕</span>
-      </button>
     </div>
 
-    <!-- Parse Result -->
-    <template v-if="parseResult">
-      <!-- File Info -->
-      <div class="file-info-card">
-        <div class="info-row">
-          <div class="info-item">
-            <FileCode :size="14" class="info-icon" />
-            <span class="info-label">Language</span>
-            <span class="language-badge">{{ parseResult.language }}</span>
-          </div>
-          <div class="info-item">
-            <Hash :size="14" class="info-icon" />
-            <span class="info-label">Lines</span>
-            <span class="mono">{{ parseResult.totalLines.toLocaleString() }}</span>
-          </div>
-          <div class="info-item">
-            <Gauge :size="14" class="info-icon" />
-            <span class="info-label">Parse</span>
-            <span class="mono">{{ parseResult.parseTimeMs.toFixed(1) }} ms</span>
-          </div>
-        </div>
+    <div class="section">
+      <h3 class="section-title">[PARSE] ANALYZE FILE</h3>
+      <div v-if="selectedFile" class="selected-file">
+        <span>{{ selectedFile.name }}</span>
+        <button class="bw-btn" style="margin-top:6px;" @click="handleParse">[PARSE WITH TREE-SITTER]</button>
       </div>
-
-      <!-- Symbol Tree -->
-      <div class="section" v-if="parseResult.symbols.length > 0">
-        <h3 class="section-title">
-          <GitBranch :size="16" />
-          Symbol Tree ({{ parseResult.symbols.length }})
-        </h3>
-        <div class="symbol-tree">
-          <SymbolTreeNode
-            v-for="sym in parseResult.symbols"
-            :key="sym.name + sym.startLine"
-            :symbol="sym"
-            :depth="0"
-          />
-        </div>
-      </div>
-
-      <!-- Empty Symbols -->
-      <div class="section" v-else>
-        <div class="no-symbols">
-          <Braces :size="24" class="no-sym-icon" />
-          <p>No symbols found in this file.</p>
-        </div>
-      </div>
-    </template>
-
-    <!-- Empty State -->
-    <div class="empty-state" v-if="!parseResult">
-      <div class="empty-visual">
-        <Code :size="40" class="empty-icon" />
-        <Type :size="24" class="empty-icon-sub" />
-      </div>
-      <p>Select a code file to see its structure. Supports 200+ languages via Tree-sitter.</p>
+      <p v-else class="text-muted">SELECT A TEXT/CODE FILE TO PARSE</p>
     </div>
 
-    <!-- Status Footer -->
-    <div class="status-footer">
-      <span>🌳 Powered by tree-sitter (Rust bindings) • Arborium grammar distribution</span>
+    <div class="section" v-if="parseResult">
+      <h3 class="section-title">[DATA] PARSE RESULT</h3>
+      <div class="parse-meta">
+        <div class="meta-row"><span class="meta-key text-muted">LANGUAGE</span><span class="meta-value">{{ parseResult.language }}</span></div>
+        <div class="meta-row"><span class="meta-key text-muted">LINES</span><span class="meta-value">{{ parseResult.totalLines }}</span></div>
+        <div class="meta-row"><span class="meta-key text-muted">SYMBOLS</span><span class="meta-value">{{ parseResult.symbols.length }}</span></div>
+        <div class="meta-row"><span class="meta-key text-muted">PARSE TIME</span><span class="meta-value">{{ parseResult.parseTimeMs }}ms</span></div>
+      </div>
+
+      <div class="symbol-tree">
+        <div v-for="sym in parseResult.symbols" :key="sym.name + sym.startLine" class="symbol-row">
+          <span class="symbol-kind">{{ sym.kind }}</span>
+          <span class="symbol-name">{{ sym.name }}</span>
+          <span class="symbol-lines text-muted">:{{ sym.startLine }}</span>
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h } from 'vue'
+import { computed } from 'vue'
 import { useAppStore } from '@/stores/app'
-import type { CodeSymbol } from '@/types'
-import {
-  Code,
-  Hash,
-  Braces,
-  FileCode,
-  GitBranch,
-  Type,
-  Gauge,
-} from 'lucide-vue-next'
 
 const store = useAppStore()
-
-const emit = defineEmits<{
-  close: []
-}>()
-
+const selectedFile = computed(() => store.selectedFile)
 const parseResult = computed(() => store.parseResult)
 
-// ── Symbol icon/color helpers ─────────────────────────────
-function getSymbolIcon(kind: string): string {
-  const icons: Record<string, string> = {
-    function: '⬡', fn: '⬡', method: '⬡',
-    class: '◈', struct: '◈',
-    interface: '◇', type_alias: '◇', type: '◇', trait: '◇',
-    variable: '●', const: '●', let: '●', property: '◆', field: '◆',
-    impl: '⚙', constructor: '🔧',
-    module: '📦', enum: '◆', macro: '⚡', import: '📥',
-  }
-  return icons[kind] || '●'
+async function handleParse() {
+  if (!store.selectedFile?.path) return
+  await store.parseFileCode(store.selectedFile.path)
 }
-
-function getSymbolColor(kind: string): string {
-  const colors: Record<string, string> = {
-    function: '#FFB800', fn: '#FFB800', method: '#FFB800',
-    class: '#00D4FF', struct: '#00D4FF',
-    interface: '#A855F7', type_alias: '#A855F7', type: '#A855F7', trait: '#A855F7',
-    variable: '#9CA3AF', const: '#FACC15', let: '#9CA3AF', property: '#9CA3AF', field: '#9CA3AF',
-    impl: '#FF6B2B', constructor: '#FF6B2B',
-    module: '#1E3A8A', enum: '#FF2D6F', macro: '#00FF41', import: '#6B7280',
-  }
-  return colors[kind] || '#9CA3AF'
-}
-
-// ── Recursive SymbolTreeNode (render-function component) ───
-const SymbolTreeNode = defineComponent({
-  name: 'SymbolTreeNode',
-  props: {
-    symbol: { type: Object as () => CodeSymbol, required: true },
-    depth: { type: Number, required: true },
-  },
-  setup(props) {
-    function handleClick() {
-      // TODO: emit event to navigate to file/line in code viewer
-    }
-
-    return (): ReturnType<typeof h> => h('div', { class: 'symbol-node-wrapper' }, [
-      h('div', {
-        class: 'symbol-node',
-        style: { paddingLeft: (props.depth * 16 + 8) + 'px' },
-        onClick: handleClick,
-      }, [
-        h('span', {
-          class: 'sym-icon',
-          style: { color: getSymbolColor(props.symbol.kind) },
-        }, getSymbolIcon(props.symbol.kind)),
-        h('span', { class: 'sym-name' }, props.symbol.name),
-        h('span', {
-          class: 'sym-kind',
-          style: { color: getSymbolColor(props.symbol.kind), borderColor: getSymbolColor(props.symbol.kind) + '44' },
-        }, props.symbol.kind),
-        h('span', { class: 'sym-lines' }, `L${props.symbol.startLine}–${props.symbol.endLine}`),
-        props.symbol.children && props.symbol.children.length > 0
-          ? h('span', { class: 'sym-toggle' }, '▾')
-          : null,
-      ]),
-      ...(props.symbol.children || []).map(child =>
-        h(SymbolTreeNode, {
-          symbol: child,
-          depth: props.depth + 1,
-          key: child.name + child.startLine,
-        })
-      ),
-    ])
-  },
-})
 </script>
 
 <style scoped>
-.code-intel-panel {
-  width: 400px;
+.code-panel {
+  width: 100%;
   height: 100%;
-  background: var(--cyber-bg-panel, #12121a);
-  border-left: 3px solid #000;
-  box-shadow: -4px 0 0 0 #000;
+  background: #000;
   overflow-y: auto;
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  font-family: 'Inter', system-ui, sans-serif;
-  color: #F5F5F4;
+  padding: 16px;
+  font-family: 'Courier New', monospace;
+  color: #FFFFFF;
 }
 
-.code-intel-panel::-webkit-scrollbar {
-  width: 6px;
-}
-.code-intel-panel::-webkit-scrollbar-track {
-  background: #0a0a0f;
-}
-.code-intel-panel::-webkit-scrollbar-thumb {
-  background: #333;
-  border-radius: 3px;
-}
-
-/* Header */
 .panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-bottom: 12px;
-  border-bottom: 3px solid #000;
+  padding-bottom: 10px;
+  border-bottom: 2px solid #FFFFFF;
+  margin-bottom: 16px;
 }
 
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
+.header-left { display: flex; align-items: center; gap: 8px; }
+.icon-code { font-size: 16px; }
+.panel-title { font-size: 14px; font-weight: 800; letter-spacing: 1px; margin: 0; }
 
-.icon-code {
-  color: #00FF41;
-  filter: drop-shadow(0 0 6px #00FF41);
-}
-
-.panel-title {
-  font-size: 18px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 2px;
-  color: #00FF41;
-  text-shadow: 0 0 10px #00FF41, 0 0 20px rgba(0, 255, 65, 0.3);
-  margin: 0;
-}
-
-.close-btn {
-  background: none;
-  border: 2px solid #333;
-  color: #9CA3AF;
-  cursor: pointer;
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  transition: all 0.15s;
-}
-.close-btn:hover {
-  border-color: #FF2D6F;
-  color: #FF2D6F;
-}
-
-/* File Info Card */
-.file-info-card {
-  background: #1a1a2e;
-  border: 3px solid #000;
-  box-shadow: 3px 3px 0 0 #000;
-  padding: 12px 14px;
-}
-
-.info-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-}
-
-.info-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.info-icon {
-  color: #00FF41;
-  opacity: 0.6;
-}
-
-.info-label {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  color: #6B7280;
-}
-
-.language-badge {
-  font-size: 11px;
-  font-weight: 700;
-  color: #00FF41;
-  background: rgba(0, 255, 65, 0.1);
-  border: 1px solid rgba(0, 255, 65, 0.3);
-  padding: 2px 8px;
-  border-radius: 2px;
-  text-transform: capitalize;
-}
-
-/* Sections */
-.section {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
+.section { margin-bottom: 16px; }
 
 .section-title {
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 1.5px;
-  color: #9CA3AF;
-  margin: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding-bottom: 6px;
-  border-bottom: 2px solid #1a1a2e;
+  letter-spacing: 1px;
+  color: rgba(255,255,255,0.6);
+  margin: 0 0 8px;
 }
 
-/* Symbol Tree */
-.symbol-tree {
-  display: flex;
-  flex-direction: column;
-  background: #1a1a2e;
-  border: 3px solid #000;
-  box-shadow: 3px 3px 0 0 #000;
-  overflow: hidden;
-}
-
-.symbol-node-wrapper {
-  display: flex;
-  flex-direction: column;
-}
-
-.symbol-node {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
+.bw-btn {
+  padding: 6px 12px;
+  background: #FFFFFF;
+  color: #000;
+  border: 2px solid #FFFFFF;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  font-weight: 700;
   cursor: pointer;
-  transition: background 0.1s;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-  min-height: 32px;
 }
 
-.symbol-node:hover {
-  background: rgba(0, 255, 65, 0.04);
-}
+.bw-btn:hover { background: #000; color: #FFFFFF; }
 
-.sym-icon {
-  font-size: 14px;
-  line-height: 1;
-  flex-shrink: 0;
-  width: 18px;
-  text-align: center;
-}
-
-.sym-name {
+.selected-file {
   font-size: 12px;
-  font-weight: 600;
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  color: #F5F5F4;
+  background: rgba(255,255,255,0.05);
+  padding: 6px 8px;
+  border: 2px solid rgba(255,255,255,0.3);
+}
+
+.parse-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.meta-key { font-size: 10px; }
+.meta-value { font-size: 10px; font-family: 'Courier New', monospace; font-weight: 700; }
+
+.symbol-tree {
+  border: 2px solid rgba(255,255,255,0.3);
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.sym-kind {
-  font-size: 9px;
-  font-weight: 700;
+.symbol-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  font-size: 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+.symbol-kind {
+  font-size: 8px;
+  color: rgba(255,255,255,0.6);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding: 1px 5px;
-  border: 1px solid;
-  border-radius: 2px;
   flex-shrink: 0;
+  min-width: 40px;
 }
 
-.sym-lines {
-  font-size: 10px;
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  color: #4B5563;
-  margin-left: auto;
-  flex-shrink: 0;
-}
+.symbol-name { color: #FFFFFF; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.symbol-lines { flex-shrink: 0; font-size: 9px; }
 
-.sym-toggle {
-  font-size: 10px;
-  color: #4B5563;
-  flex-shrink: 0;
-}
-
-/* No Symbols */
-.no-symbols {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 20px;
-}
-
-.no-sym-icon {
-  color: #333;
-}
-
-.no-symbols p {
-  font-size: 12px;
-  color: #6B7280;
-  margin: 0;
-}
-
-/* Empty State */
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-  padding: 50px 20px;
-  text-align: center;
-}
-
-.empty-visual {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-}
-
-.empty-icon {
-  color: #1a1a2e;
-}
-
-.empty-icon-sub {
-  color: #252540;
-}
-
-.empty-state p {
-  font-size: 13px;
-  color: #6B7280;
-  margin: 0;
-  line-height: 1.6;
-  max-width: 300px;
-}
-
-/* Footer */
-.status-footer {
-  margin-top: auto;
-  padding-top: 12px;
-  border-top: 2px solid #1a1a2e;
-  font-size: 10px;
-  color: #4B5563;
-  text-align: center;
-  letter-spacing: 0.5px;
-}
-
-/* Utility */
-.mono {
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
-  font-size: 12px;
-}
+.text-muted { color: rgba(255,255,255,0.5) !important; }
 </style>

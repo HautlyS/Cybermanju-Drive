@@ -27,7 +27,7 @@ COPY src/ ./src/
 RUN DOCKER_BUILD=true npm run build:wasm
 
 # ─── Stage 2: Rust Backend Build ─────────────────────────────────────
-FROM rust:1.86-alpine AS backend-builder
+FROM rust:alpine AS backend-builder
 
 # musl-dev is required for linking on Alpine
 RUN apk add --no-cache musl-dev pkgconf

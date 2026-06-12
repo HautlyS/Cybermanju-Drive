@@ -196,6 +196,9 @@ jobs:
           workspaces: src-tauri
           cache-on-failure: true
 
+      - name: Initialize Android project
+        run: npm run tauri android init
+
       - name: Build Android APK
         run: npm run tauri android build
         env:
