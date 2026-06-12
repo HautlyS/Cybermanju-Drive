@@ -2,10 +2,11 @@ use tauri::State;
 use serde::{Deserialize, Serialize};
 
 use crate::AppState;
-use crate::search::tantivy_index::{SearchFilters, SearchRequest, SearchResult as TantivyResult};
+use crate::search::tantivy_index::{SearchRequest, SearchResult as TantivyResult};
 
 /// Search result returned to the frontend.
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SearchResult {
     pub file_id: String,
     pub file_name: String,
@@ -18,7 +19,6 @@ pub struct SearchResult {
 pub fn search_files(
     query: String,
     limit: Option<usize>,
-    filters: Option<SearchFilters>,
     state: State<'_, AppState>,
 ) -> Result<Vec<SearchResult>, String> {
     let limit = limit.unwrap_or(50);
@@ -27,7 +27,6 @@ pub fn search_files(
     let request = SearchRequest {
         query: query.clone(),
         limit: Some(limit),
-        filters,
     };
 
     let results = tantivy_index

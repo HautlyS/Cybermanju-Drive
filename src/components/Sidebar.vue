@@ -127,9 +127,9 @@
           <span class="section-title">Tags</span>
         </div>
         <div class="tag-cloud">
-          <span v-if="store.allTags.length === 0" class="tag-item badge badge-cyan" style="opacity:0.5">No tags yet</span>
+          <span v-if="allTags.length === 0" class="tag-item badge badge-cyan" style="opacity:0.5">No tags yet</span>
           <span
-            v-for="tag in store.allTags"
+            v-for="tag in allTags"
             :key="tag"
             class="tag-item badge badge-green"
             @click="store.searchQuery = tag; store.currentPanel = 'search'; store.searchFiles(tag)"
@@ -235,7 +235,7 @@
             Web dashboard on port 3456. Access from any device via browser.
           </p>
           <div class="neobrutalism-card" style="padding: 8px; margin-bottom: 8px;">
-            <code style="font-size: 11px; color: var(--matrix-green);">http://localhost:3456</code>
+            <code style="font-size: 11px; color: var(--matrix-green);">{{ dashboardUrl }}</code>
           </div>
           <button
             class="neobrutalism-btn"
@@ -296,6 +296,13 @@ function getBackendColor(type: SyncBackendType): string {
 
 const store = useAppStore()
 
+const dashboardUrl = computed(() => {
+  if (typeof window !== 'undefined' && window.location?.port === '3456') {
+    return window.location.origin
+  }
+  return 'http://localhost:3456'
+})
+
 const allTags = computed<string[]>(() => {
   const tagSet = new Set<string>()
   store.files.forEach(f => f.tags?.forEach(t => tagSet.add(t)))
@@ -341,7 +348,7 @@ const TreeNode = defineComponent({
       store.files.filter(f => f.parentId === props.node.id)
     )
 
-    return () => h('div', { class: 'tree-node' }, [
+    return (): ReturnType<typeof h> => h('div', { class: 'tree-node' }, [
       h('div', {
         class: ['tree-node-row', { 'tree-node-active': isExpanded.value }],
         style: { paddingLeft: `${props.depth * 16 + 8}px` },

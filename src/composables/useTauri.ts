@@ -375,10 +375,11 @@ const WRITE_ONLY_COMMANDS = new Set([
 ])
 
 /** The core invoke — works in both Tauri and Web modes. */
-async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   if (isTauri()) {
     // ── Tauri IPC path ────────────────────────────────────
-    return (await import('@tauri-apps/api/core')).then(m => m.invoke<T>(cmd, args))
+    const core = await import('@tauri-apps/api/core')
+    return core.invoke<T>(cmd, args)
   }
 
   // ── Web / REST path ────────────────────────────────────

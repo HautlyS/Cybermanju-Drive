@@ -134,7 +134,7 @@ const SymbolTreeNode = defineComponent({
       // TODO: emit event to navigate to file/line in code viewer
     }
 
-    return () => h('div', { class: 'symbol-node-wrapper' }, [
+    return (): ReturnType<typeof h> => h('div', { class: 'symbol-node-wrapper' }, [
       h('div', {
         class: 'symbol-node',
         style: { paddingLeft: (props.depth * 16 + 8) + 'px' },

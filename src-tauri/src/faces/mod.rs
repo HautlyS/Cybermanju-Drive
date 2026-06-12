@@ -528,13 +528,14 @@ pub fn embedding_distance(a: &[f32], b: &[f32]) -> f32 {
         return 1.0;
     }
 
-    let (dot, norm_a, norm_b) = a.iter().zip(b.iter()).fold(
+    let (dot, norm_a_sq, norm_b_sq) = a.iter().zip(b.iter()).fold(
         (0.0f32, 0.0f32, 0.0f32),
         |(d, na, nb), (x, y)| (d + x * y, na + x * x, nb + y * y),
     );
 
-    let norm_a = norm_a.sqrt();
-    let norm_b = norm_b.sqrt();
+    // Skip sqrt for L2-normalized embeddings (‖v‖² ≈ 1.0 within f32 epsilon).
+    let norm_a = if (norm_a_sq - 1.0).abs() < 1e-5 { 1.0 } else { norm_a_sq.sqrt() };
+    let norm_b = if (norm_b_sq - 1.0).abs() < 1e-5 { 1.0 } else { norm_b_sq.sqrt() };
 
     if norm_a == 0.0 || norm_b == 0.0 {
         return 1.0;
@@ -550,13 +551,14 @@ pub fn embedding_distance(a: &[f32], b: &[f32]) -> f32 {
 /// eliminated bounds checks and better cache locality.
 #[inline]
 fn embedding_distance_arr(a: &[f32], b: &[f32; EMBEDDING_DIM]) -> f32 {
-    let (dot, norm_a, norm_b) = a.iter().zip(b.iter()).fold(
+    let (dot, norm_a_sq, norm_b_sq) = a.iter().zip(b.iter()).fold(
         (0.0f32, 0.0f32, 0.0f32),
         |(d, na, nb), (x, y)| (d + x * y, na + x * x, nb + y * y),
     );
 
-    let norm_a = norm_a.sqrt();
-    let norm_b = norm_b.sqrt();
+    // Skip sqrt for L2-normalized embeddings (‖v‖² ≈ 1.0 within f32 epsilon).
+    let norm_a = if (norm_a_sq - 1.0).abs() < 1e-5 { 1.0 } else { norm_a_sq.sqrt() };
+    let norm_b = if (norm_b_sq - 1.0).abs() < 1e-5 { 1.0 } else { norm_b_sq.sqrt() };
 
     if norm_a == 0.0 || norm_b == 0.0 {
         return 1.0;
@@ -621,13 +623,13 @@ pub fn adaptive_threshold(distances: &[f32], base: f32) -> f32 {
         return base;
     }
 
-    // Find the knee: maximum second derivative (curvature)
-    let mut max_curvature = 0.0f32;
+    // Find the knee: maximum *negative* second derivative (where slope decreases = gap shrinks)
+    let mut min_d2 = f32::INFINITY;
     let mut knee_idx = n / 2;
     for i in 1..n - 1 {
         let d2 = (sorted[i + 1] - sorted[i]) - (sorted[i] - sorted[i - 1]);
-        if d2 > max_curvature {
-            max_curvature = d2;
+        if d2 < min_d2 {
+            min_d2 = d2;
             knee_idx = i;
         }
     }
@@ -669,16 +671,18 @@ pub fn find_medoid(embeddings: &[Vec<f32>]) -> Option<Vec<f32>> {
 
     // For small clusters, exact computation is fast
     if n <= 100 {
-        let best_idx = (0..n)
-            .min_by_key(|&i| {
-                let total_dist: f32 = (0..n)
-                    .filter(|&j| j != i)
-                    .map(|j| embedding_distance(&embeddings[i], &embeddings[j]))
-                    .sum::<f32>();
-                // Convert to integer for min_by_key (avoids float comparison issues)
-                (total_dist * 1_000_000.0) as u64
-            })
-            .unwrap();
+        let mut best_idx = 0;
+        let mut best_dist = f32::INFINITY;
+        for i in 0..n {
+            let total_dist: f32 = (0..n)
+                .filter(|&j| j != i)
+                .map(|j| embedding_distance(&embeddings[i], &embeddings[j]))
+                .sum::<f32>();
+            if total_dist < best_dist {
+                best_dist = total_dist;
+                best_idx = i;
+            }
+        }
         return Some(embeddings[best_idx].clone());
     }
 
@@ -686,16 +690,18 @@ pub fn find_medoid(embeddings: &[Vec<f32>]) -> Option<Vec<f32>> {
     // Sample sqrt(n) candidates, find best among samples
     let sample_size = (n as f32).sqrt() as usize;
     let step = n / sample_size;
-    let best_idx = (0..n)
-        .step_by(step.max(1))
-        .min_by_key(|&i| {
-            let total_dist: f32 = (0..n)
-                .filter(|&j| j != i)
-                .map(|j| embedding_distance(&embeddings[i], &embeddings[j]))
-                .sum::<f32>();
-            (total_dist * 1_000_000.0) as u64
-        })
-        .unwrap();
+    let mut best_idx = 0;
+    let mut best_dist = f32::INFINITY;
+    for i in (0..n).step_by(step.max(1)) {
+        let total_dist: f32 = (0..n)
+            .filter(|&j| j != i)
+            .map(|j| embedding_distance(&embeddings[i], &embeddings[j]))
+            .sum::<f32>();
+        if total_dist < best_dist {
+            best_dist = total_dist;
+            best_idx = i;
+        }
+    }
     Some(embeddings[best_idx].clone())
 }
 
@@ -974,9 +980,22 @@ pub fn cluster_chinese_whispers(
     // Reuse a single HashMap across nodes to avoid per-node allocation
     let mut label_weights: HashMap<usize, f32> = HashMap::new();
 
-    for _ in 0..CW_MAX_ITERATIONS {
+    for iter in 0..CW_MAX_ITERATIONS {
         let mut changed = false;
-        let order: Vec<usize> = (0..n).collect();
+
+        // Shuffle iteration order using BLAKE3-seeded Fisher-Yates
+        // to avoid systematic bias from fixed 0..n ordering.
+        let mut order: Vec<usize> = (0..n).collect();
+        let mut xof = blake3::Hasher::new()
+            .update(b"chinese_whispers_order")
+            .update(&(iter as u64).to_le_bytes())
+            .finalize_xof();
+        for i in (1..n).rev() {
+            let mut buf = [0u8; 4];
+            xof.fill(&mut buf);
+            let j = u32::from_le_bytes(buf) as usize % (i + 1);
+            order.swap(i, j);
+        }
 
         for &i in &order {
             // Count label weights from neighbors
@@ -1053,10 +1072,15 @@ pub fn cluster_hdbscan(
     // Step 1: Build k-NN mutual reachability distance graph
     let index = SimHashIndex::new(embeddings);
 
-    // Compute core distances: distance to k-th nearest neighbor
+    // Compute core distances: distance to k-th nearest neighbor (excluding self)
     let mut core_distances: Vec<f32> = Vec::with_capacity(n);
     for i in 0..n {
-        let neighbors = index.knn(&embeddings[i].1, k);
+        // Request k+1 then filter self — knn doesn't support exclude_idx
+        let neighbors: Vec<(usize, f32)> = index.knn(&embeddings[i].1, k + 1)
+            .into_iter()
+            .filter(|(j, _)| *j != i)
+            .take(k)
+            .collect();
         let core_dist = neighbors.last().map(|(_, d)| *d).unwrap_or(1.0);
         core_distances.push(core_dist);
     }
@@ -1238,15 +1262,18 @@ fn collect_clusters(
             } else if member_embeddings_refs.len() == 1 {
                 Some(embeddings[member_indices[0]].1.clone())
             } else {
-                let best_idx = (0..member_embeddings_refs.len())
-                    .min_by_key(|&i| {
-                        let total_dist: f32 = (0..member_embeddings_refs.len())
-                            .filter(|&j| j != i)
-                            .map(|j| embedding_distance(member_embeddings_refs[i], member_embeddings_refs[j]))
-                            .sum::<f32>();
-                        (total_dist * 1_000_000.0) as u64
-                    })
-                    .unwrap();
+                let mut best_idx = 0;
+                let mut best_dist = f32::INFINITY;
+                for i in 0..member_embeddings_refs.len() {
+                    let total_dist: f32 = (0..member_embeddings_refs.len())
+                        .filter(|&j| j != i)
+                        .map(|j| embedding_distance(member_embeddings_refs[i], member_embeddings_refs[j]))
+                        .sum::<f32>();
+                    if total_dist < best_dist {
+                        best_dist = total_dist;
+                        best_idx = i;
+                    }
+                }
                 Some(embeddings[member_indices[best_idx]].1.clone())
             };
 
@@ -1313,15 +1340,18 @@ fn collect_clusters_from_labels(
             } else if member_embeddings_refs.len() == 1 {
                 Some(embeddings[member_indices[0]].1.clone())
             } else {
-                let best_idx = (0..member_embeddings_refs.len())
-                    .min_by_key(|&i| {
-                        let total_dist: f32 = (0..member_embeddings_refs.len())
-                            .filter(|&j| j != i)
-                            .map(|j| embedding_distance(member_embeddings_refs[i], member_embeddings_refs[j]))
-                            .sum::<f32>();
-                        (total_dist * 1_000_000.0) as u64
-                    })
-                    .unwrap();
+                let mut best_idx = 0;
+                let mut best_dist = f32::INFINITY;
+                for i in 0..member_embeddings_refs.len() {
+                    let total_dist: f32 = (0..member_embeddings_refs.len())
+                        .filter(|&j| j != i)
+                        .map(|j| embedding_distance(member_embeddings_refs[i], member_embeddings_refs[j]))
+                        .sum::<f32>();
+                    if total_dist < best_dist {
+                        best_dist = total_dist;
+                        best_idx = i;
+                    }
+                }
                 Some(embeddings[member_indices[best_idx]].1.clone())
             };
 
@@ -1451,13 +1481,17 @@ fn detect_faces_blake3_fallback(file_node: &FileNode) -> Vec<Vec<f32>> {
 ///
 /// COMPLEXITY: O(EMBEDDING_DIM) = O(128) — constant time
 fn seed_to_embedding(seed: &str) -> Vec<f32> {
-    let hash = blake3::hash(seed.as_bytes());
-    let hash_bytes = hash.as_bytes();
+    // Use BLAKE3 XOF (eXtensible Output Function) to fill all 128 dims
+    // without cycling — avoids correlations from repeated bytes.
+    let mut xof_output = blake3::Hasher::new()
+        .update(seed.as_bytes())
+        .finalize_xof();
+    let mut hash_bytes = [0u8; EMBEDDING_DIM];
+    xof_output.fill(&mut hash_bytes);
 
     let mut embedding = Vec::with_capacity(EMBEDDING_DIM);
     for i in 0..EMBEDDING_DIM {
-        let byte_idx = i % hash_bytes.len();
-        let mixed = ((hash_bytes[byte_idx] as usize).wrapping_add(i * 7)) % 256;
+        let mixed = ((hash_bytes[i] as usize).wrapping_add(i * 7)) % 256;
         let val = (mixed as f32) / 127.5 - 1.0;
         embedding.push(val);
     }

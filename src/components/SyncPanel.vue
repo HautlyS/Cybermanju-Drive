@@ -1,5 +1,5 @@
 <!-- Cybermanju Drive — Sync Panel -->
-<!-- Storage sync backends: Local, GitHub, Google Drive, Google Photos -->
+<!-- Storage sync backends: Local, GitHub, GitLab, Google Drive, Google Photos, Telegram -->
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
@@ -7,8 +7,8 @@ import { CYBER, SYNC_BACKEND_INFO } from '@/types'
 import type { SyncBackendType, SyncConfig } from '@/types'
 import {
   HardDrive, Github, FolderSync, Camera, Plus, Trash2, Play, X,
-  CheckCircle, AlertCircle, RefreshCw, Zap, Image, FileTrash2,
-  CloudUpload, Wifi, WifiOff, Loader2, GitBranch,
+  CheckCircle, AlertCircle, RefreshCw, Zap, Image,
+  CloudUpload, Wifi, WifiOff, Loader2, GitBranch, MessageCircle,
 } from 'lucide-vue-next'
 
 const store = useAppStore()
@@ -20,6 +20,7 @@ const backendIcons: Record<SyncBackendType, any> = {
   gitlab: GitBranch,
   googleDrive: FolderSync,
   googlePhotos: Camera,
+  telegram: MessageCircle,
 }
 
 // ── Form state ──
@@ -31,6 +32,8 @@ const formBranch = ref('main')
 const formToken = ref('')
 const formFolderId = ref('')
 const formAlbumId = ref('')
+const formBotToken = ref('')
+const formChatId = ref('')
 const formAutoSync = ref(true)
 const formCompressBeforeUpload = ref(true)
 const formCreatePreviews = ref(false)
@@ -93,6 +96,8 @@ function resetForm() {
   formToken.value = ''
   formFolderId.value = ''
   formAlbumId.value = ''
+  formBotToken.value = ''
+  formChatId.value = ''
   formAutoSync.value = true
   formCompressBeforeUpload.value = true
   formCreatePreviews.value = false
@@ -116,9 +121,10 @@ async function submitForm() {
     basePath: formBasePath.value || undefined,
     repoName: formRepoName.value || undefined,
     branch: formBranch.value || undefined,
-    token: formToken.value || undefined,
+    token: formToken.value || formBotToken.value || undefined,
     folderId: formFolderId.value || undefined,
     albumId: formAlbumId.value || undefined,
+    chatId: formChatId.value || undefined,
     autoSync: formAutoSync.value,
     compressBeforeUpload: formCompressBeforeUpload.value,
     createPreviews: formCreatePreviews.value,
@@ -280,7 +286,8 @@ onMounted(() => {
                 <span class="config-type" :style="{ color: getBackendColor(config.backendType) }">
                   {{ config.backendType }}
                 </span>
-                <span class="config-path" v-if="config.basePath && config.backendType === 'gitlab'">{{ config.repoName }} ({{ config.branch || 'main' }})</span>
+                <span class="config-path" v-if="config.backendType === 'telegram' && config.chatId">{{ config.chatId }}</span>
+                <span class="config-path" v-else-if="config.basePath && config.backendType === 'gitlab'">{{ config.repoName }} ({{ config.branch || 'main' }})</span>
                 <span class="config-path" v-else-if="config.basePath">{{ config.basePath }}</span>
                 <span class="config-path" v-else-if="config.repoName">{{ config.repoName }} ({{ config.branch || 'main' }})</span>
               </div>
@@ -317,7 +324,7 @@ onMounted(() => {
               <Image :size="10" /> Preview
             </span>
             <span class="toggle-chip danger" :class="{ active: config.deleteRawAfterSync }">
-              <FileTrash2 :size="10" /> Delete Raw
+              <Trash2 :size="10" /> Delete Raw
             </span>
           </div>
         </div>
@@ -344,7 +351,7 @@ onMounted(() => {
           </button>
           <button
             class="neobrutalism-btn action-btn sync-btn"
-            :disabled="syncingConfigId === config.id || (store.syncProgress && isActive)"
+            :disabled="syncingConfigId === config.id || !!store.syncProgress && isActive"
             @click="handleStartSync(config.id)"
           >
             <Loader2 v-if="syncingConfigId === config.id" :size="12" class="spin-icon" />
@@ -365,7 +372,7 @@ onMounted(() => {
         <CloudUpload :size="40" class="empty-icon" />
         <p class="empty-title">No sync backends configured</p>
         <p class="empty-desc">
-          Add a backend to sync your files to Local storage, GitHub, GitLab, Google Drive, or Google Photos.
+          Add a backend to sync your files to Local storage, GitHub, GitLab, Google Drive, Google Photos, or Telegram.
         </p>
       </div>
     </div>
@@ -506,6 +513,24 @@ onMounted(() => {
                 placeholder="OAuth2 access token"
               />
             </template>
+
+            <!-- Telegram: bot token + chat ID -->
+            <template v-if="formBackendType === 'telegram'">
+              <label class="form-label">Bot Token</label>
+              <input
+                v-model="formBotToken"
+                type="password"
+                class="form-input"
+                placeholder="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+              />
+              <label class="form-label">Chat ID</label>
+              <input
+                v-model="formChatId"
+                type="text"
+                class="form-input"
+                placeholder="@channel_name, -100xxxxxxxxxx, or numeric user ID"
+              />
+            </template>
           </div>
 
           <!-- Toggle options -->
@@ -536,7 +561,7 @@ onMounted(() => {
               <label class="toggle-row danger">
                 <input type="checkbox" v-model="formDeleteRawAfterSync" />
                 <span class="toggle-text">
-                  <FileTrash2 :size="12" />
+                  <Trash2 :size="12" />
                   Delete raw files after sync
                 </span>
               </label>

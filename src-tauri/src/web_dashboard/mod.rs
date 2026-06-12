@@ -53,6 +53,9 @@ const MAX_BODY_SIZE: usize = 104_857_600;
 /// Rate limit: max requests per window per IP
 const RATE_LIMIT_MAX: u32 = 100;
 
+/// Default port for the web dashboard
+pub const DEFAULT_PORT: u16 = 3456;
+
 /// Rate limit window duration in seconds
 const RATE_LIMIT_WINDOW_SECS: u64 = 60;
 
@@ -60,7 +63,12 @@ const RATE_LIMIT_WINDOW_SECS: u64 = 60;
 const JWT_EXPIRY_SECS: u64 = 86_400;
 
 /// Allowed CORS origins (localhost only)
-const ALLOWED_ORIGINS: &[&str] = &["http://localhost:3456", "http://127.0.0.1:3456"];
+const ALLOWED_ORIGINS: &[&str] = &[
+    "http://localhost:3456",
+    "http://127.0.0.1:3456",
+    "http://localhost:3457",
+    "http://127.0.0.1:3457",
+];
 
 // ─── JWT Claims ──────────────────────────────────────────────────────
 

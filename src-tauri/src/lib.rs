@@ -80,10 +80,10 @@ pub fn run() {
 
     // ─── Start Web Dashboard (localhost-only, JWT-authenticated) ────────
     let dashboard = std::sync::Arc::new(
-        web_dashboard::WebDashboard::new(3456, "cybermanju.db")
+        web_dashboard::WebDashboard::new(web_dashboard::DEFAULT_PORT, "cybermanju.db")
     );
     match dashboard.start() {
-        Ok(()) => tracing::info!("Web Dashboard started on port 3456 (localhost only, JWT auth)"),
+        Ok(()) => tracing::info!("Web Dashboard started on port {} (localhost only, JWT auth)", web_dashboard::DEFAULT_PORT),
         Err(e) => tracing::error!("Failed to start Web Dashboard: {}", e),
     }
     // dashboard.stop() is called explicitly below after Tauri exits,

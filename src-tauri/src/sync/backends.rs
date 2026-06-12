@@ -1839,5 +1839,16 @@ pub fn create_backend(config: &SyncConfig) -> Result<Box<dyn StorageBackend>, St
                 config.album_id.as_deref(),
             )))
         }
+        SyncBackendType::Telegram => {
+            let token = config
+                .token
+                .as_deref()
+                .ok_or("Telegram backend requires bot_token (use token field)")?;
+            let chat_id = config
+                .chat_id
+                .as_deref()
+                .ok_or("Telegram backend requires chat_id")?;
+            Ok(Box::new(TelegramBackend::new(token, chat_id)))
+        }
     }
 }

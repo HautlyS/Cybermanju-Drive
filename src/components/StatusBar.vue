@@ -31,12 +31,12 @@
     </div>
 
     <!-- Compression status -->
-    <div v-if="store.selectedFile.compressionLayers && store.selectedFile.compressionLayers[0] && store.selectedFile.compressionLayers[0] !== 'none'" class="status-section">
+    <div v-if="store.selectedFile?.compressionLayers && store.selectedFile.compressionLayers[0] && store.selectedFile.compressionLayers[0] !== 'none'" class="status-section">
       <span class="status-divider">│</span>
       <span class="badge badge-gold">
         {{ store.selectedFile.compressionLayers[0].toUpperCase() }}
       </span>
-      <span v-if="store.selectedFile.compressionLayers && store.selectedFile.compressionLayers[0]" class="status-item text-secondary">
+      <span v-if="store.selectedFile?.compressionLayers && store.selectedFile.compressionLayers[0]" class="status-item text-secondary">
         {{ store.selectedFile.compressionLayers.length }} layers
       </span>
     </div>

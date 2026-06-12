@@ -262,7 +262,7 @@ function handleStar() {
 }
 
 async function handleCopyPath() {
-  if (!store.selectedFile) return
+  if (!store.selectedFile?.path) return
   try {
     await navigator.clipboard.writeText(store.selectedFile.path)
   } catch {
@@ -286,7 +286,7 @@ const SymbolNode = defineComponent({
   },
   setup(props) {
     const isExpanded = computed(() => props.depth < 2)
-    return () => h('div', { class: 'symbol-node' }, [
+    return (): ReturnType<typeof h> => h('div', { class: 'symbol-node' }, [
       h('div', {
         class: 'symbol-row',
         style: { paddingLeft: `${props.depth * 14 + 4}px` },

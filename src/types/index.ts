@@ -2,8 +2,8 @@
 // Neobrutalism × Buddhist-Nepalese × Matrix × Cyberpunk
 
 export type ViewMode = 'grid' | 'list' | 'masonry'
-export type PanelType = 'files' | 'preview' | 'encryption' | 'compression' | 'collections' | 'faces' | 'map' | 'code' | 'search' | 'style' | 'accounts' | 'loose-groups' | 'sync' | 'webdash'
-export type SidebarSection = 'tree' | 'locations' | 'collections' | 'people' | 'styles' | 'loose'
+export type PanelType = 'files' | 'preview' | 'encryption' | 'compression' | 'collections' | 'faces' | 'map' | 'code' | 'search' | 'style' | 'accounts' | 'loose-groups' | 'sync' | 'webdash' | 'users' | 'dashboard'
+export type SidebarSection = 'tree' | 'locations' | 'collections' | 'people' | 'styles' | 'loose' | 'users' | 'sync' | 'dashboard'
 export type EncryptionAlgo = 'kyber1024' | 'dilithium5' | 'frodokem1344' | 'hybrid' | 'aes256'
 export type CompressionType = 'none' | 'lz4' | 'zstd' | 'triple'
 export type AccountType = 'local' | 'cloud' | 'network'
@@ -59,10 +59,20 @@ export interface Account {
   updatedAt: string              // Rust: updated_at
 }
 
+export interface CloudAccount {
+  id: string
+  name: string
+  backendType: SyncBackendType   // Rust: backend_type
+  token?: string
+  config: Record<string, unknown>
+  createdAt: string              // Rust: created_at
+  updatedAt: string              // Rust: updated_at
+}
+
 export interface Collection {
   id: string
   name: string
-  collectionType: string         // Rust: collection_type
+  collectionType: CollectionType  // Rust: collection_type
   color: string
   description?: string
   itemIds: string[]              // Rust: item_ids
@@ -73,6 +83,8 @@ export interface Collection {
 export interface FaceGroup {
   id: string
   name: string
+  color?: string
+  icon?: string
   fileIds: string[]              // Rust: file_ids
   centroidEmbedding?: number[]   // Rust: centroid_embedding
   binaryHash?: number            // Rust: binary_hash — 64-bit SimHash code
@@ -105,22 +117,17 @@ export interface LooseGroup {
   id: string
   name: string
   color: string
+  icon?: string
   fileIds: string[]              // Rust: file_ids
   createdAt: string              // Rust: created_at
 }
 
 export interface SearchResult {
-  file_id: string
-  file_name: string
+  fileId: string                 // Rust: file_id
+  fileName: string               // Rust: file_name
   score: number
   snippet?: string
-}
-
-export interface SearchFilters {
-  file_type?: string
-  is_encrypted?: boolean
-  has_geo?: boolean
-  tags?: string[]
+  matchType?: string             // Rust: match_type
 }
 
 export interface GeoMarker {
@@ -289,19 +296,22 @@ export const COMPRESSION_INFO: Record<CompressionType, { name: string; descripti
 }
 
 // Storage Sync Types
-export type SyncBackendType = 'local' | 'github' | 'gitlab' | 'googleDrive' | 'googlePhotos'
+export type SyncBackendType = 'local' | 'github' | 'gitlab' | 'googleDrive' | 'googlePhotos' | 'telegram'
 export type SyncStatusType = 'idle' | 'scanning' | 'compressing' | 'uploading' | 'linking' | 'cleaning' | 'error' | 'done'
 
 export interface SyncConfig {
   id: string
   backendType: SyncBackendType
   enabled: boolean
+  accountId?: string           // Multi-account support (links to CloudAccount.id)
+  name?: string                // Display name for this sync config
   basePath?: string            // Local: directory path, GitLab: instance URL (e.g., https://gitlab.com)
   repoName?: string            // GitHub: owner/repo, GitLab: project ID or path
   branch?: string
-  token?: string               // GitHub: PAT, GitLab: PAT/OAuth, Google: OAuth2 Bearer token
+  token?: string               // GitHub: PAT, GitLab: PAT/OAuth, Google: OAuth2 Bearer token, Telegram: bot token
   folderId?: string            // Google Drive: folder ID
   albumId?: string             // Google Photos: album ID
+  chatId?: string              // Telegram: target chat ID (channel, group, or user)
   autoSync: boolean
   compressBeforeUpload: boolean
   createPreviews: boolean
@@ -383,5 +393,11 @@ export const SYNC_BACKEND_INFO: Record<SyncBackendType, { name: string; descript
     description: 'Upload photos and videos to Google Photos. Optimized for media files.',
     color: '#FFB800',
     icon: 'Camera',
+  },
+  telegram: {
+    name: 'Telegram',
+    description: 'Send files to a Telegram chat, channel, or group via Bot API. Files up to 50 MB per upload.',
+    color: '#0088CC',
+    icon: 'MessageCircle',
   },
 }

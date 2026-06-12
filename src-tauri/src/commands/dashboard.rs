@@ -38,7 +38,7 @@ impl DashboardState {
 /// Get the current web dashboard status.
 #[tauri::command]
 pub fn dashboard_status(state: tauri::State<'_, Arc<DashboardState>>) -> Result<DashboardStatus, String> {
-    let port = 3456;
+    let port = crate::web_dashboard::DEFAULT_PORT;
     let running = state.running.load(Ordering::SeqCst);
     let active_connections = state.active_connections.load(Ordering::SeqCst);
 
@@ -53,7 +53,7 @@ pub fn dashboard_status(state: tauri::State<'_, Arc<DashboardState>>) -> Result<
 /// Start the web dashboard on the configured port.
 #[tauri::command]
 pub fn start_dashboard(state: tauri::State<'_, Arc<DashboardState>>) -> Result<DashboardStatus, String> {
-    let port = 3456;
+    let port = crate::web_dashboard::DEFAULT_PORT;
 
     // Check if already running
     if state.running.load(Ordering::SeqCst) {

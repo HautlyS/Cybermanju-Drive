@@ -8,7 +8,7 @@ import { Globe, Server, Copy, QrCode, Wifi, Shield, ExternalLink, Terminal } fro
 const status = reactive<DashboardStatus>({
   running: false,
   port: 3456,
-  url: 'http://localhost:3456',
+  url: window.location.port === '3456' ? window.location.origin : 'http://localhost:3456',
   activeConnections: 0,
 })
 const loading = ref(false)

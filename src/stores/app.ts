@@ -187,12 +187,12 @@ export const useAppStore = defineStore('cybermanju', () => {
   }
 
   // ── Actions: Search ───────────────────────────────────────
-  async function searchFiles(query: string, filters?: import('@/types').SearchFilters) {
+  async function searchFiles(query: string) {
     if (!query.trim()) { searchResults.value = []; return }
     isSearching.value = true
     clearError()
     try {
-      searchResults.value = await invoke<SearchResult[]>('search_files', { query, limit: 50, filters: filters || null })
+      searchResults.value = await invoke<SearchResult[]>('search_files', { query, limit: 50 })
     } catch (e) {
       setError('Search failed', e)
     } finally {
