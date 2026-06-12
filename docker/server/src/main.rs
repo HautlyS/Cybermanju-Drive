@@ -17,7 +17,7 @@ use std::fs;
 use std::io::{BufRead, BufReader, Read as IoRead, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 /// MIME type lookup for common file extensions
 fn mime_type(path: &str) -> &'static str {
@@ -227,9 +227,10 @@ fn handle_connection(state: &AppState, mut stream: TcpStream) {
     let method = parts[0];
     let path = parts[1];
 
-    // Read headers to determine Content-Length and Authorization
+    // Read headers to determine Content-Length, Authorization, and Origin
     let mut content_length: usize = 0;
     let mut auth_header: Option<String> = None;
+    let mut origin_header: Option<String> = None;
     loop {
         let mut line = String::new();
         if reader.read_line(&mut line).is_err() || line == "\r\n" || line.is_empty() {
@@ -249,6 +250,12 @@ fn handle_connection(state: &AppState, mut stream: TcpStream) {
                 .strip_prefix("Authorization:")
                 .or_else(|| val.strip_prefix("authorization:"))
                 .map(|s| s.trim().to_string());
+        } else if line_trimmed.starts_with("origin:") {
+            let val = line.trim();
+            origin_header = val
+                .strip_prefix("Origin:")
+                .or_else(|| val.strip_prefix("origin:"))
+                .map(|s| s.trim().to_string());
         }
     }
 
@@ -265,13 +272,17 @@ fn handle_connection(state: &AppState, mut stream: TcpStream) {
 
     // Route: /api/* → web dashboard handlers, everything else → static files
     if path.starts_with("/api/") || path == "/api" {
+        let db_guard = state.dashboard.db.lock().unwrap();
         let response = web_dashboard::handle_request(
             &state.dashboard,
+            &db_guard,
             method,
             path,
             &body,
             auth_header.as_deref(),
+            origin_header.as_deref(),
         );
+        drop(db_guard);
         let _ = stream.write_all(response.as_bytes());
     } else if method == "OPTIONS" {
         // CORS preflight for static assets
