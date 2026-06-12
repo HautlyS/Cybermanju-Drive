@@ -99,19 +99,7 @@ pub fn create_folder(name: String, parent_id: String, state: State<'_, AppState>
 
     let db = state.db.write().map_err(|e| e.to_string())?;
     let serialized = serde_json::to_string(&folder).map_err(|e| e.to_string())?;
-    let tx = db.begin_write().map_err(|e| e.to_string())?;
-    {
-        let mut table = tx
-            .open_table(crate::db::Database::get_files_table())
-            .map_err(|e| e.to_string())?;
-        table
-            .insert(&folder_id, serialized.as_str())
-            .map_err(|e| e.to_string())?;
-    }
-    tx.commit().map_err(|e| e.to_string())?;
-
-    // Update parent index
-    db.add_to_parent_index(&folder_id, &parent_id)
+    db.insert_file_with_index(&folder_id, serialized.as_str(), Some(&parent_id))
         .map_err(|e| e.to_string())?;
 
     Ok(folder)
@@ -128,33 +116,18 @@ pub fn delete_file(file_id: String, state: State<'_, AppState>) -> Result<bool, 
         .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
     let value = table_read.get(&file_id).map_err(|e| e.to_string())?;
-
-    // Remove from parent index if we have parent info
-    if let Some(val) = &value {
-        if let Ok(node) = serde_json::from_str::<FileNode>(val.value()) {
-            if let Some(ref parent) = node.parent_id {
-                db.remove_from_parent_index(&file_id, parent)
-                    .map_err(|e| e.to_string())?;
-            }
-        }
-    }
+    let parent_id = value.and_then(|val| {
+        serde_json::from_str::<FileNode>(val.value()).ok()
+            .and_then(|node| node.parent_id)
+    });
     drop(tx_read);
 
-    // Now delete from the files table
-    let tx = db.begin_write().map_err(|e| e.to_string())?;
-    {
-        let mut table = tx
-            .open_table(crate::db::Database::get_files_table())
-            .map_err(|e| e.to_string())?;
-        let removed = table
-            .remove(&file_id)
-            .map_err(|e| e.to_string())?
-            .is_some();
-        if !removed {
-            return Err(format!("File not found: {}", file_id));
-        }
+    // Atomically remove from both files table and parent index
+    let removed = db.remove_file_with_index(&file_id, parent_id.as_deref())
+        .map_err(|e| e.to_string())?;
+    if !removed {
+        return Err(format!("File not found: {}", file_id));
     }
-    tx.commit().map_err(|e| e.to_string())?;
 
     Ok(true)
 }
@@ -217,14 +190,10 @@ pub fn duplicate_file_context(file_id: String, state: State<'_, AppState>) -> Re
     let new_id = uuid::Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
 
-    // Generate a new blake3 hash that incorporates the original hash + new ID for uniqueness
-    let hash_input = format!(
-        "{}-{}-{}",
-        original.hash_blake3.as_deref().unwrap_or("none"),
-        new_id,
-        now
-    );
-    let new_hash = blake3::hash(hash_input.as_bytes()).to_hex().to_string();
+    // A duplicate contains identical bytes — its content hash is the same.
+    // The new_id distinguishes it as a separate FileNode.
+    let new_hash = original.hash_blake3.clone();
+    // If the original was never hashed (e.g. a folder), leave it as None.
 
     // Build context link reference
     let link_preview = serde_json::json!({
@@ -250,35 +219,27 @@ pub fn duplicate_file_context(file_id: String, state: State<'_, AppState>) -> Re
         );
     }
 
+    // Clone fields needed after the move BEFORE moving
+    let tags = original.tags.clone();
+
     let mut duplicated = original;
     duplicated.id = new_id.clone();
     duplicated.name = format!("{} (copy)", duplicated.name);
-    duplicated.hash_blake3 = Some(new_hash);
+    duplicated.hash_blake3 = new_hash;
     duplicated.thumbnail_path = Some(link_preview.to_string());
     duplicated.created_at = now.clone();
     duplicated.modified_at = now;
     duplicated.context_data = Some(context_data);
-    duplicated.tags = original.tags.clone();
+    duplicated.tags = tags;
     duplicated.collection_ids = Vec::new(); // fresh copy is not in any collection yet
 
-    // Store the duplicated file node
+    // Store the duplicated file node atomically with parent index update
     let serialized = serde_json::to_string(&duplicated).map_err(|e| e.to_string())?;
-    let tx = db.begin_write().map_err(|e| e.to_string())?;
-    {
-        let mut table = tx
-            .open_table(crate::db::Database::get_files_table())
-            .map_err(|e| e.to_string())?;
-        table
-            .insert(&new_id, serialized.as_str())
-            .map_err(|e| e.to_string())?;
-    }
-    tx.commit().map_err(|e| e.to_string())?;
-
-    // Update parent index for the duplicate
-    if let Some(ref parent) = duplicated.parent_id {
-        db.add_to_parent_index(&new_id, parent)
-            .map_err(|e| e.to_string())?;
-    }
+    db.insert_file_with_index(
+        &new_id,
+        serialized.as_str(),
+        duplicated.parent_id.as_deref(),
+    ).map_err(|e| e.to_string())?;
 
     Ok(duplicated)
 }
@@ -305,25 +266,9 @@ pub fn move_file(file_id: String, new_parent_id: String, state: State<'_, AppSta
     file_node.parent_id = Some(new_parent_id.clone());
     file_node.modified_at = Utc::now().to_rfc3339();
 
-    // Write back the updated file node
+    // Write back the updated file node + update indices atomically
     let serialized = serde_json::to_string(&file_node).map_err(|e| e.to_string())?;
-    let tx = db.begin_write().map_err(|e| e.to_string())?;
-    {
-        let mut table = tx
-            .open_table(crate::db::Database::get_files_table())
-            .map_err(|e| e.to_string())?;
-        table
-            .insert(&file_id, serialized.as_str())
-            .map_err(|e| e.to_string())?;
-    }
-    tx.commit().map_err(|e| e.to_string())?;
-
-    // Update parent index
-    if let Some(ref old) = old_parent {
-        db.remove_from_parent_index(&file_id, old)
-            .map_err(|e| e.to_string())?;
-    }
-    db.add_to_parent_index(&file_id, &new_parent_id)
+    db.move_file_with_index(&file_id, serialized.as_str(), old_parent.as_deref(), &new_parent_id)
         .map_err(|e| e.to_string())?;
 
     Ok(file_node)

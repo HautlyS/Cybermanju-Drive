@@ -298,8 +298,28 @@ pub fn authenticate_user(
             let valid = if user.password_hash.starts_with("$argon2") {
                 argon2_verify_password(&password, &user.password_hash)?
             } else {
-                // Legacy BLAKE3 hash comparison (migration path)
-                user.password_hash == blake3_hash
+                // Legacy BLAKE3 hash — verify but immediately upgrade
+                if user.password_hash == blake3_hash {
+                    // Upgrade the stored hash to argon2id right now
+                    let new_hash = argon2_hash_password(&password)?;
+                    // Write the upgraded hash back to the database
+                    let mut upgraded_user = user.clone();
+                    upgraded_user.password_hash = new_hash;
+                    let serialized = serde_json::to_string(&upgraded_user).map_err(|e| e.to_string())?;
+                    let db_write = state.db.write().map_err(|e| e.to_string())?;
+                    let tx_write = db_write.begin_write().map_err(|e| e.to_string())?;
+                    {
+                        let mut table = tx_write
+                            .open_table(crate::db::Database::get_users_table())
+                            .map_err(|e| e.to_string())?;
+                        table.insert(&user.id, serialized.as_str()).map_err(|e| e.to_string())?;
+                    }
+                    tx_write.commit().map_err(|e| e.to_string())?;
+                    log::info!("Upgraded legacy BLAKE3 password hash to argon2id for user '{}'", username);
+                    true
+                } else {
+                    false
+                }
             };
 
             if valid {

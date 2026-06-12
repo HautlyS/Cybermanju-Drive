@@ -9,9 +9,9 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use tantivy::{
     collector::TopDocs,
-    query::{Query, QueryParser},
+    query::QueryParser,
     schema::*,
-    Index, IndexReader, IndexWriter, ReloadPolicy, DocAddress,
+    Index, IndexReader, IndexWriter, ReloadPolicy,
 };
 use std::collections::HashSet;
 
@@ -335,7 +335,13 @@ impl SearchIndex {
                 let snippet: String = content.chars().take(200).collect();
 
                 // Determine match type by checking which field matched
-                let match_type = determine_match_type(&searcher, doc_address, &query, &self.file_name_field, &self.content_text_field, &self.tags_field);
+                let match_type = determine_match_type_from_query(
+                    &doc,
+                    &request.query,
+                    &self.file_name_field,
+                    &self.content_text_field,
+                    &self.tags_field,
+                );
 
                 Some(SearchResult {
                     file_id: fid,
@@ -425,33 +431,27 @@ impl SearchIndex {
 }
 
 /// Determine which field(s) caused a match for a search result.
-/// Checks if the query terms appear in specific fields.
-fn determine_match_type(
-    searcher: &tantivy::Searcher,
-    doc_address: &DocAddress,
-    query: &dyn Query,
+/// Checks if the user's query terms appear in specific fields.
+fn determine_match_type_from_query(
+    doc: &tantivy::Document,
+    query_str: &str,
     file_name_field: &Field,
     content_field: &Field,
     tags_field: &Field,
 ) -> String {
-    let doc = match searcher.doc(*doc_address) {
-        Ok(d) => d,
-        Err(_) => return "content".to_string(),
-    };
-
-    // Get the query text for matching
-    let query_text = format!("{:?}", query).to_lowercase();
+    // Normalize and tokenize the user's query string
+    let terms: Vec<&str> = query_str.split_whitespace().collect();
 
     // Check file_name
     if let Some(val) = doc.get_first(*file_name_field).and_then(|v| v.as_text()) {
-        if query_text.split_whitespace().any(|term| val.to_lowercase().contains(term)) {
+        if terms.iter().any(|t| val.to_lowercase().contains(&t.to_lowercase())) {
             return "filename".to_string();
         }
     }
 
     // Check tags
     if let Some(val) = doc.get_first(*tags_field).and_then(|v| v.as_text()) {
-        if query_text.split_whitespace().any(|term| val.to_lowercase().contains(term)) {
+        if terms.iter().any(|t| val.to_lowercase().contains(&t.to_lowercase())) {
             return "tag".to_string();
         }
     }

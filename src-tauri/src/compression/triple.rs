@@ -193,12 +193,41 @@ impl TripleCompressor {
     ///
     /// Returns the compressed bytes AND the full `CompressionStats` so callers
     /// can report timing, per-layer ratios, and BLAKE3 hash.
+    ///
+    /// If LZ4 compression ratio > 0.98 (data didn't compress), the content is
+    /// already compressed or high-entropy (media files, archives, encrypted data).
+    /// We skip ZSTD and Brotli and return the original bytes.
     pub fn compress_triple(&self, data: &[u8]) -> Result<(Vec<u8>, CompressionStats)> {
         let original_size = data.len() as u64;
         let start = std::time::Instant::now();
 
-        // Layer 1: LZ4
+        // Layer 1: LZ4 as entropy probe
         let lz4_out = self.compress_lz4(data)?;
+        let lz4_ratio = if original_size > 0 { lz4_out.len() as f64 / original_size as f64 } else { 1.0 };
+
+        // Early abort: if LZ4 doesn't help, the data is incompressible
+        if lz4_ratio > 0.98 {
+            let hash = blake3::hash(data);
+            let duration_ms = start.elapsed().as_millis() as u64;
+            return Ok((data.to_vec(), CompressionStats {
+                original_size,
+                compressed_size: original_size,
+                ratio: 1.0,
+                layer: "skipped (incompressible)".into(),
+                layer_details: vec![LayerDetail {
+                    name: "LZ4 probe".into(),
+                    algorithm: "lz4_flex".into(),
+                    input_size: original_size,
+                    output_size: lz4_out.len() as u64,
+                    ratio: lz4_ratio,
+                    color: "#6B7280".into(),
+                }],
+                blake3_hash: hash.to_hex().to_string(),
+                duration_ms,
+            }));
+        }
+
+        // Proceed with ZSTD → Brotli only for compressible data
         let lz4_detail = LayerDetail {
             name: "Layer 1: LZ4".into(),
             algorithm: "lz4_flex".into(),

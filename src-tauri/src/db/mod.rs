@@ -175,4 +175,114 @@ impl Database {
             None => Ok(Vec::new()),
         }
     }
+
+    /// Insert a FileNode AND update the parent index in a single transaction.
+    /// This ensures atomicity — a crash between the two writes is impossible.
+    pub fn insert_file_with_index(
+        &self,
+        file_id: &str,
+        serialized: &str,
+        parent_id: Option<&str>,
+    ) -> Result<()> {
+        let tx = self.db.begin_write()?;
+        {
+            let mut files_table = tx.open_table(FILES_TABLE)?;
+            files_table.insert(file_id, serialized)?;
+
+            if let Some(pid) = parent_id {
+                let mut index_table = tx.open_table(PARENT_INDEX_TABLE)?;
+                let existing: Vec<String> = index_table
+                    .get(pid)?
+                    .and_then(|v| serde_json::from_str(v.value()).ok())
+                    .unwrap_or_default();
+                let mut ids = existing;
+                if !ids.contains(&file_id.to_string()) {
+                    ids.push(file_id.to_string());
+                }
+                index_table.insert(pid, serde_json::to_string(&ids)?)?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Remove a file from the files table AND its parent index in a single transaction.
+    pub fn remove_file_with_index(
+        &self,
+        file_id: &str,
+        parent_id: Option<&str>,
+    ) -> Result<bool> {
+        let tx = self.db.begin_write()?;
+        let removed = {
+            let mut files_table = tx.open_table(FILES_TABLE)?;
+            files_table.remove(file_id)?.is_some()
+        };
+
+        if removed {
+            // Remove from parent index in the same transaction
+            if let Some(pid) = parent_id {
+                let mut index_table = tx.open_table(PARENT_INDEX_TABLE)?;
+                let existing: Vec<String> = index_table
+                    .get(pid)?
+                    .and_then(|v| serde_json::from_str(v.value()).ok())
+                    .unwrap_or_default();
+                let mut ids = existing;
+                ids.retain(|id| id != file_id);
+                if ids.is_empty() {
+                    index_table.remove(pid)?;
+                } else {
+                    index_table.insert(pid, serde_json::to_string(&ids)?)?;
+                }
+            }
+        }
+
+        tx.commit()?;
+        Ok(removed)
+    }
+
+    /// Move a file between parent indices in a single transaction with the file update.
+    pub fn move_file_with_index(
+        &self,
+        file_id: &str,
+        serialized: &str,
+        old_parent_id: Option<&str>,
+        new_parent_id: &str,
+    ) -> Result<()> {
+        let tx = self.db.begin_write()?;
+        {
+            // Update file record
+            let mut files_table = tx.open_table(FILES_TABLE)?;
+            files_table.insert(file_id, serialized)?;
+
+            // Remove from old parent index
+            if let Some(old_pid) = old_parent_id {
+                let mut index_table = tx.open_table(PARENT_INDEX_TABLE)?;
+                let existing: Vec<String> = index_table
+                    .get(old_pid)?
+                    .and_then(|v| serde_json::from_str(v.value()).ok())
+                    .unwrap_or_default();
+                let mut ids = existing;
+                ids.retain(|id| id != file_id);
+                if ids.is_empty() {
+                    index_table.remove(old_pid)?;
+                } else {
+                    index_table.insert(old_pid, serde_json::to_string(&ids)?)?;
+                }
+            }
+
+            // Add to new parent index
+            let mut index_table = tx.open_table(PARENT_INDEX_TABLE)?;
+            let existing: Vec<String> = index_table
+                .get(new_parent_id)?
+                .and_then(|v| serde_json::from_str(v.value()).ok())
+                .unwrap_or_default();
+            let mut ids = existing;
+            if !ids.contains(&file_id.to_string()) {
+                ids.push(file_id.to_string());
+            }
+            index_table.insert(new_parent_id, serde_json::to_string(&ids)?)?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
 }

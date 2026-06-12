@@ -48,12 +48,13 @@ fn algorithm_info(algo: &str) -> (&'static str, u8, &'static str) {
     match algo {
         "kyber1024" => ("ML-KEM-1024 — FIPS 203", 5, "#00FF41"),
         "kyber768" | "hybrid" | "kyber512" => ("Hybrid ML-KEM-768 + X25519", 5, "#FFB800"),
-        "dilithium5" | "dilithium3" | "dilithium2" => (
-            "HMAC-SHA512 (Dilithium fallback)",
-            5,
+        "dilithium5" | "dilithium3" | "dilithium2"
+        | "sphincsplus" | "sphincs+"
+        | "classical_sign" | "hmac" => (
+            "HMAC-SHA512 (Classical — NOT post-quantum)",
+            0,
             "#00D4FF",
         ),
-        "sphincsplus" => ("HMAC-SHA512 (SPHINCS+ fallback)", 1, "#A855F7"),
         "aes256" | "chacha20" => ("ChaCha20Poly1305 (Classical)", 0, "#FF6B2B"),
         _ => ("Unknown", 0, "#6B7280"),
     }
@@ -175,6 +176,7 @@ pub fn encrypt_file(
         "dilithium3",
         "dilithium5",
         "sphincsplus",
+        "classical_sign",
         "aes256",
     ];
     if !supported.contains(&algorithm.as_str()) {
@@ -461,7 +463,7 @@ pub fn get_encryption_status(
 /// Uses the pqcrypto-mlkem crate for actual post-quantum key generation:
 ///   - kyber1024  → ML-KEM-1024 encapsulation/decapsulation keypair
 ///   - kyber768/kyber512/hybrid → ML-KEM-768 keypair (X25519 derived at use time)
-///   - dilithium*  → 64-byte HMAC-SHA512 key with SHA-256 fingerprint
+///   - dilithium*/sphincsplus/classical_sign  → 64-byte HMAC-SHA512 key with SHA-256 fingerprint
 ///   - aes256      → 32-byte ChaCha20Poly1305 key
 ///
 /// Keys are stored as base64-encoded bytes in the database.

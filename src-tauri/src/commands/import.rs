@@ -116,25 +116,14 @@ pub fn import_file(
         modified_at: now,
     };
 
-    // Store in database
+    // Store in database atomically with parent index
     let db = state.db.write().map_err(|e| e.to_string())?;
     let serialized = serde_json::to_string(&file_node).map_err(|e| e.to_string())?;
-    let tx = db.begin_write().map_err(|e| e.to_string())?;
-    {
-        let mut table = tx.open_table(crate::db::Database::get_files_table())
-            .map_err(|e| e.to_string())?;
-        table.insert(&file_id, serialized.as_str())
-            .map_err(|e| e.to_string())?;
-    }
-    tx.commit().map_err(|e| e.to_string())?;
-
-    // Update parent index
-    if let Some(ref parent) = file_node.parent_id {
-        drop(db); // release the lock
-        let db2 = state.db.write().map_err(|e| e.to_string())?;
-        db2.add_to_parent_index(&file_id, parent)
-            .map_err(|e| e.to_string())?;
-    }
+    db.insert_file_with_index(
+        &file_id,
+        serialized.as_str(),
+        file_node.parent_id.as_deref(),
+    ).map_err(|e| e.to_string())?;
 
     // Index in Tantivy for searchability
     let tantivy_index = state.tantivy_index.write().map_err(|e| e.to_string())?;
@@ -331,19 +320,9 @@ pub fn scan_directory(
             modified_at: now,
         };
 
-        // Store in database
+        // Store in database atomically with parent index
         let serialized = serde_json::to_string(&file_node).map_err(|e| e.to_string())?;
-        let tx = db.begin_write().map_err(|e| e.to_string())?;
-        {
-            let mut table = tx.open_table(crate::db::Database::get_files_table())
-                .map_err(|e| e.to_string())?;
-            table.insert(&file_id, serialized.as_str())
-                .map_err(|e| e.to_string())?;
-        }
-        tx.commit().map_err(|e| e.to_string())?;
-
-        // Update parent index
-        db.add_to_parent_index(&file_id, &parent_path_for_children)
+        db.insert_file_with_index(&file_id, serialized.as_str(), Some(&parent_path_for_children))
             .map_err(|e| e.to_string())?;
 
         // Index in Tantivy (no commit yet — batch at the end)
@@ -388,112 +367,29 @@ pub fn scan_directory(
     })
 }
 
-/// Upload file data (from the frontend) to disk and create a FileNode entry.
-/// The frontend sends raw bytes; this writes them to a configurable storage path
-/// and creates the database record with real metadata.
+/// Upload a file that the user has selected via the dialog plugin.
+/// Accepts the resolved filesystem path rather than raw bytes to avoid
+/// loading gigabytes through the Tauri IPC bridge.
 #[tauri::command]
 pub fn upload_file(
-    file_name: String,
-    data: Vec<u8>,
+    file_path: String,
     parent_path: String,
     state: State<'_, AppState>,
 ) -> Result<UploadResult, String> {
-    let now = Utc::now().to_rfc3339();
-    let file_id = uuid::Uuid::new_v4().to_string();
-
-    // Store files in a "storage" directory next to the database
-    let storage_dir = std::path::Path::new("cybermanju_storage");
-    std::fs::create_dir_all(storage_dir)
-        .map_err(|e| format!("Failed to create storage directory: {}", e))?;
-
-    // Use UUID-based filename to avoid collisions
-    let extension = std::path::Path::new(&file_name)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
-    let stored_name = if extension.is_empty() {
-        format!("{}.{}", file_id, file_name)
-    } else {
-        format!("{}.{}", file_id, file_name)
-    };
-    let stored_path = storage_dir.join(&stored_name);
-
-    // Write the file to disk
-    std::fs::write(&stored_path, &data)
-        .map_err(|e| format!("Failed to write file: {}", e))?;
-
-    let bytes_written = data.len() as u64;
-
-    // Compute BLAKE3 hash
-    let hash_blake3 = Some(blake3::hash(&data).to_hex().to_string());
-
-    // Detect MIME type
-    let mime_type = infer::get_from_bytes(&data)
-        .map(|m| m.mime_type().to_string())
-        .or_else(|| mime_guess::from_path(&file_name).first().map(|m| m.to_string()));
-
-    // Build context_data
-    let mut context = serde_json::Map::new();
-    context.insert("original_path".to_string(), serde_json::json!(stored_path.to_string_lossy()));
-    context.insert("source".to_string(), serde_json::json!("upload"));
-    context.insert("original_filename".to_string(), serde_json::json!(file_name));
-
-    let file_node = FileNode {
-        id: file_id.clone(),
-        name: file_name,
-        file_type: "file".to_string(),
-        parent_id: if parent_path.is_empty() { None } else { Some(parent_path) },
-        size_bytes: bytes_written,
-        mime_type,
-        hash_blake3,
-        encrypted: false,
-        encryption_algorithm: None,
-        compression_layers: Vec::new(),
-        thumbnail_path: None,
-        context_data: Some(serde_json::Value::Object(context)),
-        tags: Vec::new(),
-        collection_ids: Vec::new(),
-        face_group_ids: Vec::new(),
-        loose_group_ids: Vec::new(),
-        gps_lat: None,
-        gps_lon: None,
-        created_at: now.clone(),
-        modified_at: now,
-    };
-
-    // Store in database
-    let db = state.db.write().map_err(|e| e.to_string())?;
-    let serialized = serde_json::to_string(&file_node).map_err(|e| e.to_string())?;
-    let tx = db.begin_write().map_err(|e| e.to_string())?;
-    {
-        let mut table = tx.open_table(crate::db::Database::get_files_table())
-            .map_err(|e| e.to_string())?;
-        table.insert(&file_id, serialized.as_str())
-            .map_err(|e| e.to_string())?;
-    }
-    tx.commit().map_err(|e| e.to_string())?;
-
-    // Update parent index
-    if let Some(ref parent) = file_node.parent_id {
-        db.add_to_parent_index(&file_id, parent)
-            .map_err(|e| e.to_string())?;
+    let path = std::path::Path::new(&file_path);
+    if !path.exists() {
+        return Err(format!("File not found: {}", file_path));
     }
 
-    // Index in Tantivy
-    let tantivy_index = state.tantivy_index.write().map_err(|e| e.to_string())?;
-    let content_text = String::from_utf8(data.iter().take(65536).copied().collect()).unwrap_or_default();
-    let _ = tantivy_index.add_document(
-        &file_id,
-        &file_node.name,
-        &content_text,
-        &file_node.tags,
-        &file_node.file_type,
-        false,
-        false,
-        &file_node.created_at,
-        file_node.hash_blake3.as_deref(),
-    );
+    let file_name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("upload")
+        .to_string();
 
+    // Delegate to import_file which already streams from disk
+    let file_node = import_file(file_path, parent_path, state)?;
+    let bytes_written = file_node.size_bytes;
     Ok(UploadResult { file_node, bytes_written })
 }
 

@@ -19,7 +19,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -86,7 +86,9 @@ pub struct WebDashboard {
     bind_addr: String,
     /// Random 256-bit secret generated at startup for HMAC-SHA256 JWT signing
     jwt_secret: [u8; 32],
-    db_path: String,
+    /// Shared database handle — opened once, shared across all request threads.
+    /// Using Arc<Mutex<>> since redb requires exclusive access for writes.
+    db: Arc<Mutex<RedbDb>>,
     running: AtomicBool,
     /// Per-IP rate limit counters: IP → (count, window_start)
     rate_limits: Mutex<HashMap<String, (u32, Instant)>>,
@@ -102,11 +104,16 @@ impl WebDashboard {
         let mut jwt_secret = [0u8; 32];
         OsRng.fill_bytes(&mut jwt_secret);
 
+        // Open the database once and share it across all request threads
+        let db = RedbDb::open(db_path)
+            .or_else(|_| RedbDb::create(db_path))
+            .expect("Failed to open web dashboard database");
+
         Self {
             port,
             bind_addr: "127.0.0.1".to_string(),
             jwt_secret,
-            db_path: db_path.to_string(),
+            db: Arc::new(Mutex::new(db)),
             running: AtomicBool::new(false),
             rate_limits: Mutex::new(HashMap::new()),
             server_thread: Mutex::new(None),
@@ -345,15 +352,18 @@ fn handle_connection(dashboard: &WebDashboard, mut stream: TcpStream) {
         .as_deref()
         .filter(|o| ALLOWED_ORIGINS.contains(o));
 
-    // Handle the request
+    // Handle the request — use the shared DB handle
+    let db_guard = dashboard.db.lock().unwrap();
     let response = handle_request(
         dashboard,
+        &db_guard,
         method,
         path,
         &body,
         auth_header.as_deref(),
         effective_origin,
     );
+    drop(db_guard);
 
     let _ = stream.write_all(response.as_bytes());
 }
@@ -362,6 +372,7 @@ fn handle_connection(dashboard: &WebDashboard, mut stream: TcpStream) {
 
 fn handle_request(
     dashboard: &WebDashboard,
+    db: &RedbDb,
     method: &str,
     path: &str,
     body: &str,
@@ -401,74 +412,41 @@ fn handle_request(
         }
     }
 
-    // Open redb for the request (independent handle per request)
-    let db_result = redb::Database::open(&dashboard.db_path);
-
     // Route to appropriate handler
     match path_segments.as_slice() {
         // ─── Auth endpoint (JWT login) ────────────────────────────
         ["api", "auth", "login"] | ["api", "users", "login"] if method == "POST" => {
-            match db_result {
-                Ok(db) => login_user(&db, body, &dashboard.jwt_secret, origin),
-                Err(e) => json_error(500, &format!("Database error: {}", e), origin),
-            }
+            login_user(db, body, &dashboard.jwt_secret, origin)
         }
 
         // ─── User registration ────────────────────────────────────
         ["api", "users", "register"] if method == "POST" => {
-            match db_result {
-                Ok(db) => register_user_web(&db, body, origin),
-                Err(e) => json_error(500, &format!("Database error: {}", e), origin),
-            }
+            register_user_web(db, body, origin)
         }
 
         // ─── File endpoints ───────────────────────────────────────
-        ["api", "files"] if method == "GET" => match db_result {
-            Ok(db) => list_all_json(&db, FILES_TABLE, origin),
-            Err(e) => json_error(500, &format!("Database error: {}", e), origin),
-        },
-        ["api", "files", id] if method == "GET" => match db_result {
-            Ok(db) => get_by_id(&db, FILES_TABLE, id, origin),
-            Err(e) => json_error(500, &format!("Database error: {}", e), origin),
-        },
-        ["api", "files", id] if method == "DELETE" => match db_result {
-            Ok(db) => delete_by_id(&db, FILES_TABLE, id, origin),
-            Err(e) => json_error(500, &format!("Database error: {}", e), origin),
-        },
+        ["api", "files"] if method == "GET" => list_all_json(db, FILES_TABLE, origin),
+        ["api", "files", id] if method == "GET" => get_by_id(db, FILES_TABLE, id, origin),
+        ["api", "files", id] if method == "DELETE" => delete_by_id(db, FILES_TABLE, id, origin),
 
         // ─── Account endpoints ────────────────────────────────────
-        ["api", "accounts"] if method == "GET" => match db_result {
-            Ok(db) => list_all_json(&db, ACCOUNTS_TABLE, origin),
-            Err(e) => json_error(500, &format!("Database error: {}", e), origin),
-        },
+        ["api", "accounts"] if method == "GET" => list_all_json(db, ACCOUNTS_TABLE, origin),
 
         // ─── Collection endpoints ─────────────────────────────────
-        ["api", "collections"] if method == "GET" => match db_result {
-            Ok(db) => list_all_json(&db, COLLECTIONS_TABLE, origin),
-            Err(e) => json_error(500, &format!("Database error: {}", e), origin),
-        },
-        ["api", "collection-items"] if method == "GET" => match db_result {
-            Ok(db) => list_all_json(&db, COLLECTION_ITEMS_TABLE, origin),
-            Err(e) => json_error(500, &format!("Database error: {}", e), origin),
-        },
+        ["api", "collections"] if method == "GET" => list_all_json(db, COLLECTIONS_TABLE, origin),
+        ["api", "collection-items"] if method == "GET" => list_all_json(db, COLLECTION_ITEMS_TABLE, origin),
 
         // ─── Face group endpoints ─────────────────────────────────
-        ["api", "face-groups"] if method == "GET" => match db_result {
-            Ok(db) => list_all_json(&db, FACE_GROUPS_TABLE, origin),
-            Err(e) => json_error(500, &format!("Database error: {}", e), origin),
-        },
+        ["api", "face-groups"] if method == "GET" => list_all_json(db, FACE_GROUPS_TABLE, origin),
 
         // ─── Loose group endpoints ────────────────────────────────
-        ["api", "loose-groups"] if method == "GET" => match db_result {
-            Ok(db) => list_all_json(&db, LOOSE_GROUPS_TABLE, origin),
-            Err(e) => json_error(500, &format!("Database error: {}", e), origin),
-        },
+        ["api", "loose-groups"] if method == "GET" => list_all_json(db, LOOSE_GROUPS_TABLE, origin),
 
         // ─── Encryption endpoints ─────────────────────────────────
         ["api", "encryption", "status"] if method == "GET" => {
             let status = serde_json::json!({
                 "available": true,
-                "supported_algorithms": ["kyber512", "kyber768", "kyber1024", "dilithium2", "dilithium3", "dilithium5"],
+                "supported_algorithms": ["kyber512", "kyber768", "kyber1024", "classical_sign"],
                 "engine": "pqcrypto-mlkem (ML-KEM FIPS 203 post-quantum cryptography)"
             });
             http_response(
@@ -480,49 +458,25 @@ fn handle_request(
         }
         ["api", "encryption", "keys"] if method == "GET" => {
             // SECURITY: Never expose private keys
-            match db_result {
-                Ok(db) => list_encryption_keys_safe(&db, origin),
-                Err(e) => json_error(500, &format!("Database error: {}", e), origin),
-            }
+            list_encryption_keys_safe(db, origin)
         }
 
         // ─── Geo files ───────────────────────────────────────────
-        ["api", "geo-files"] if method == "GET" => match db_result {
-            Ok(db) => list_geo_files(&db, origin),
-            Err(e) => json_error(500, &format!("Database error: {}", e), origin),
-        },
+        ["api", "geo-files"] if method == "GET" => list_geo_files(db, origin),
 
         // ─── Search ───────────────────────────────────────────────
-        ["api", "search"] if method == "GET" => match db_result {
-            Ok(db) => search_files(&db, query, origin),
-            Err(e) => json_error(500, &format!("Database error: {}", e), origin),
-        },
+        ["api", "search"] if method == "GET" => search_files(db, query, origin),
 
         // ─── Location endpoints ───────────────────────────────────
-        ["api", "locations"] if method == "GET" => match db_result {
-            Ok(db) => list_all_json(&db, LOCATIONS_TABLE, origin),
-            Err(e) => json_error(500, &format!("Database error: {}", e), origin),
-        },
+        ["api", "locations"] if method == "GET" => list_all_json(db, LOCATIONS_TABLE, origin),
 
         // ─── User endpoints ──────────────────────────────────────
-        ["api", "users"] if method == "GET" => match db_result {
-            Ok(db) => list_users_safe(&db, origin),
-            Err(e) => json_error(500, &format!("Database error: {}", e), origin),
-        },
+        ["api", "users"] if method == "GET" => list_users_safe(db, origin),
 
         // ─── Permission endpoints ─────────────────────────────────
-        ["api", "permissions"] if method == "POST" => match db_result {
-            Ok(db) => set_permission_web(&db, body, origin),
-            Err(e) => json_error(500, &format!("Database error: {}", e), origin),
-        },
-        ["api", "permissions", "verify"] if method == "POST" => match db_result {
-            Ok(db) => verify_access_web(&db, body, origin),
-            Err(e) => json_error(500, &format!("Database error: {}", e), origin),
-        },
-        ["api", "permissions", file_id] if method == "GET" => match db_result {
-            Ok(db) => get_permissions_for_file(&db, file_id, origin),
-            Err(e) => json_error(500, &format!("Database error: {}", e), origin),
-        },
+        ["api", "permissions"] if method == "POST" => set_permission_web(db, body, origin),
+        ["api", "permissions", "verify"] if method == "POST" => verify_access_web(db, body, origin),
+        ["api", "permissions", file_id] if method == "GET" => get_permissions_for_file(db, file_id, origin),
 
         // ─── Sync config endpoints ────────────────────────────────
         ["api", "sync", "configs"] if method == "GET" => {

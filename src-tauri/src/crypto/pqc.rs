@@ -36,10 +36,9 @@ pub enum EncryptionAlgo {
     Kyber1024,
     /// Hybrid: ML-KEM-768 (NIST Level 3) + X25519 (classical) for transitional security
     Hybrid,
-    /// HMAC-SHA512 signature fallback (stand-in for ML-DSA / Dilithium)
-    Dilithium5,
-    /// HMAC-SHA512 signature fallback (stand-in for SLH-DSA / SPHINCS+)
-    SphincsPlus,
+    /// Classical HMAC-SHA512 signing — NOT post-quantum.
+    /// Placeholder until pqcrypto-ml-dsa is stable.
+    ClassicalSign,
     /// ChaCha20Poly1305 — Classical only, for backward compatibility
     Aes256,
 }
@@ -49,9 +48,7 @@ impl EncryptionAlgo {
         match self {
             Self::Kyber1024 => 5,
             Self::Hybrid => 5,
-            Self::Dilithium5 => 5,
-            Self::SphincsPlus => 1,
-            Self::Aes256 => 0,
+            Self::ClassicalSign | Self::Aes256 => 0,
         }
     }
 
@@ -59,8 +56,7 @@ impl EncryptionAlgo {
         match self {
             Self::Kyber1024 => "ML-KEM-1024 — FIPS 203",
             Self::Hybrid => "Hybrid ML-KEM-768 + X25519",
-            Self::Dilithium5 => "HMAC-SHA512 (Dilithium fallback)",
-            Self::SphincsPlus => "HMAC-SHA512 (SPHINCS+ fallback)",
+            Self::ClassicalSign => "HMAC-SHA512 (Classical — NOT post-quantum)",
             Self::Aes256 => "ChaCha20Poly1305 (Classical)",
         }
     }
@@ -69,8 +65,7 @@ impl EncryptionAlgo {
         match self {
             Self::Kyber1024 => "#00FF41",
             Self::Hybrid => "#FFB800",
-            Self::Dilithium5 => "#00D4FF",
-            Self::SphincsPlus => "#A855F7",
+            Self::ClassicalSign => "#00D4FF",
             Self::Aes256 => "#FF6B2B",
         }
     }
@@ -86,9 +81,9 @@ impl EncryptionAlgo {
 ///   - `public_key`  = actual ML-KEM encapsulation key bytes
 ///   - `private_key` = actual ML-KEM decapsulation key bytes
 ///
-/// For signature-only variants (`Dilithium5`, `SphincsPlus`):
-///   - `public_key`  = SHA-256 fingerprint (32 bytes) for identification
-///   - `private_key` = 64-byte HMAC-SHA512 key
+    /// For signature-only variants (`ClassicalSign`):
+    ///   - `public_key`  = SHA-256 fingerprint (32 bytes) for identification
+    ///   - `private_key` = 64-byte HMAC-SHA512 key
 ///
 /// For classical (`Aes256`):
 ///   - `public_key`  = 32-byte ChaCha20Poly1305 key
@@ -208,7 +203,7 @@ impl PqcEngine {
     ///
     /// - `Kyber1024`: real ML-KEM-1024 keypair via pqcrypto-mlkem
     /// - `Hybrid`: real ML-KEM-768 keypair (X25519 derived at encrypt/decrypt time)
-    /// - `Dilithium5` / `SphincsPlus`: 64-byte HMAC-SHA512 key with SHA-256 fingerprint
+    /// - `ClassicalSign`: 64-byte HMAC-SHA512 key with SHA-256 fingerprint
     /// - `Aes256`: 32-byte random ChaCha20Poly1305 key
     pub fn generate_keypair(&mut self, algorithm: EncryptionAlgo) -> Result<KeyPair> {
         let id = uuid::Uuid::new_v4().to_string();
@@ -225,7 +220,7 @@ impl PqcEngine {
                 let (pk, sk) = mlkem768::keypair();
                 (pk.as_bytes().to_vec(), sk.as_bytes().to_vec())
             }
-            EncryptionAlgo::Dilithium5 | EncryptionAlgo::SphincsPlus => {
+            EncryptionAlgo::ClassicalSign => {
                 // HMAC-SHA512 fallback: 64-byte key for signing
                 let mut hmac_key = [0u8; 64];
                 OsRng.fill_bytes(&mut hmac_key);
@@ -369,7 +364,7 @@ pub fn encrypt_data(plaintext: &[u8], keypair: &KeyPair) -> Result<FileEncrypted
 
             (key, kem_ct.as_bytes().to_vec(), Some(ephemeral_public.as_bytes().to_vec()))
         }
-        EncryptionAlgo::Dilithium5 | EncryptionAlgo::SphincsPlus | EncryptionAlgo::Aes256 => {
+        EncryptionAlgo::ClassicalSign | EncryptionAlgo::Aes256 => {
             // Sign-only or classical: use the first 32 bytes of private_key directly
             if keypair.private_key.len() < 32 {
                 anyhow::bail!(
@@ -458,7 +453,7 @@ pub fn decrypt_data(encrypted: &FileEncryptedData, keypair: &KeyPair) -> Result<
                 Some(x25519_shared.as_bytes()),
             )?
         }
-        EncryptionAlgo::Dilithium5 | EncryptionAlgo::SphincsPlus | EncryptionAlgo::Aes256 => {
+        EncryptionAlgo::ClassicalSign | EncryptionAlgo::Aes256 => {
             // Sign-only or classical: use first 32 bytes of private_key directly
             if keypair.private_key.len() < 32 {
                 anyhow::bail!(
@@ -546,8 +541,9 @@ pub fn algorithm_from_str(s: &str) -> Option<EncryptionAlgo> {
     match s {
         "kyber1024" => Some(EncryptionAlgo::Kyber1024),
         "kyber768" | "kyber512" | "hybrid" => Some(EncryptionAlgo::Hybrid),
-        "dilithium5" | "dilithium3" | "dilithium2" => Some(EncryptionAlgo::Dilithium5),
-        "sphincsplus" | "sphincs+" => Some(EncryptionAlgo::SphincsPlus),
+        "dilithium5" | "dilithium3" | "dilithium2"
+        | "sphincsplus" | "sphincs+"
+        | "classical_sign" | "hmac" => Some(EncryptionAlgo::ClassicalSign),
         "aes256" | "chacha20" => Some(EncryptionAlgo::Aes256),
         _ => None,
     }

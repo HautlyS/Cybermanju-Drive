@@ -578,7 +578,7 @@ impl StorageBackend for GitHubBackend {
     fn get_file_url(&self, remote_path: &str) -> Result<String, String> {
         let (owner, repo) = parse_repo(&self.repo_name)?;
         Ok(format!(
-            "https://raw.githubusercontent.com/{}/{}/{}",
+            "https://raw.githubusercontent.com/{}/{}/{}/{}",
             owner, repo, self.branch, remote_path
         ))
     }
@@ -1066,8 +1066,9 @@ impl StorageBackend for GooglePhotosBackend {
                 .as_str()
                 .unwrap_or("")
                 .to_string();
-            let modified = item["productUrl"]
+            let modified = item["mediaMetadata"]["creationTime"]
                 .as_str()
+                .or_else(|| item["creationTime"].as_str())
                 .unwrap_or("")
                 .to_string();
 
@@ -1142,15 +1143,20 @@ impl StorageBackend for GooglePhotosBackend {
 // ===========================================================================
 
 fn urlencoding(s: &str) -> String {
-    s.chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '~' {
-                c.to_string()
-            } else {
-                format!("%{:02X}", c as u8)
+    let mut out = String::with_capacity(s.len() * 3);
+    for byte in s.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9'
+            | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*byte as char);
             }
-        })
-        .collect()
+            b => {
+                out.push('%');
+                out.push_str(&format!("{:02X}", b));
+            }
+        }
+    }
+    out
 }
 
 // ===========================================================================

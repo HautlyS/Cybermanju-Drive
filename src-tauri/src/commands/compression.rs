@@ -4,6 +4,18 @@ use chrono::Utc;
 
 use crate::AppState;
 
+/// MIME types that are already compressed — skipping triple compression avoids
+/// wasting CPU and disk space (compressed files typically expand by 0.5–5%).
+const INCOMPRESSIBLE_MIME_TYPES: &[&str] = &[
+    "image/jpeg", "image/png", "image/webp", "image/gif",
+    "image/heic", "image/avif",
+    "video/mp4", "video/webm", "video/quicktime", "video/x-matroska",
+    "audio/mpeg", "audio/aac", "audio/ogg", "audio/flac",
+    "application/zip", "application/x-7z-compressed",
+    "application/x-rar-compressed", "application/gzip",
+    "application/zstd",
+];
+
 /// Compression statistics — matches the frontend CompressionStats type exactly.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -56,6 +68,21 @@ pub fn compress_file(
     let mut file_node: crate::db::schema::FileNode = serde_json::from_str(&value.value())
         .map_err(|e| e.to_string())?;
     drop(tx_read);
+
+    // Skip compression for already-compressed MIME types
+    if let Some(ref mime) = file_node.mime_type {
+        if INCOMPRESSIBLE_MIME_TYPES.contains(&mime.as_str()) {
+            return Ok(FrontendCompressionStats {
+                original_size: file_node.size_bytes,
+                compressed_size: file_node.size_bytes,
+                ratio: 1.0,
+                layer: "skipped (already compressed)".to_string(),
+                layer_details: vec![],
+                blake3_hash: file_node.hash_blake3.clone().unwrap_or_default(),
+                duration_ms: 0,
+            });
+        }
+    }
 
     // Try to read actual file data for real compression
     let file_data: Option<Vec<u8>> = file_node.context_data
