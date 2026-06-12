@@ -12,6 +12,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 1
   RUST_BACKTRACE: 1
 
 jobs:
@@ -49,14 +50,10 @@ jobs:
 
       - name: Run Clippy
         working-directory: src-tauri
-        env:
-          CARGO_INCREMENTAL: 1
         run: cargo clippy -- -W clippy::all -D warnings
 
       - name: Run tests
         working-directory: src-tauri
-        env:
-          CARGO_INCREMENTAL: 1
         run: cargo test --no-fail-fast
 
   # ─── Docker: Build Image ──────────────────────────────────────────
