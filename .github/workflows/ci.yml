@@ -37,16 +37,11 @@ jobs:
             build-essential \
             libssl-dev
 
-      - name: Cache Cargo registry & build
-        uses: actions/cache@v4
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            src-tauri/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+          workspaces: src-tauri
+          cache-on-failure: true
 
       - name: Check formatting
         working-directory: src-tauri
@@ -54,10 +49,14 @@ jobs:
 
       - name: Run Clippy
         working-directory: src-tauri
+        env:
+          CARGO_INCREMENTAL: 1
         run: cargo clippy -- -W clippy::all -D warnings
 
       - name: Run tests
         working-directory: src-tauri
+        env:
+          CARGO_INCREMENTAL: 1
         run: cargo test --no-fail-fast
 
   # ─── Docker: Build Image ──────────────────────────────────────────
