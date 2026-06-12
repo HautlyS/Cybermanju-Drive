@@ -610,7 +610,7 @@ fn embedding_distance_arr(a: &[f32], b: &[f32; EMBEDDING_DIM]) -> f32 {
 ///
 /// COMPLEXITY: O(n * d) total, O(d) per distance
 /// PARALLELIZATION: rayon par_chunks for n > PAR_BATCH_SIZE
-pub fn embedding_distance_batch(query: &[f32], embeddings: &[[f32]]) -> Vec<f32> {
+pub fn embedding_distance_batch(query: &[f32], embeddings: &[&[f32]]) -> Vec<f32> {
     if embeddings.len() > PAR_BATCH_SIZE {
         embeddings
             .par_chunks(PAR_BATCH_SIZE)
@@ -1166,7 +1166,7 @@ pub fn cluster_hdbscan(embeddings: &[(String, Vec<f32>)], min_cluster_size: usiz
     // Find optimal cut: the heaviest edge whose removal doesn't create
     // clusters smaller than min_cluster_size
     let mut uf = UnionFind::new(n);
-    for &(u, v, weight) in &mst_edges {
+    for &(u, v, _weight) in &mst_edges {
         // Check if merging would create a valid cluster
         let ra = uf.find(u);
         let rb = uf.find(v);

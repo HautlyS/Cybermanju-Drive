@@ -2,15 +2,16 @@
 // BM25 ranking, faceted search, fuzzy matching, real term completions
 // Indexes: filename, content_text, tags, metadata
 //
-// NOTE: This struct does NOT use internal synchronization (no Mutex/RwLock).
+// NOTE: IndexWriter is wrapped in RwLock for interior mutability.
 // Callers are expected to hold the AppState RwLock before calling any method.
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::sync::RwLock;
 use tantivy::{
     collector::TopDocs, query::QueryParser, schema::*, Index, IndexReader, IndexWriter,
-    ReloadPolicy,
+    ReloadPolicy, TantivyDocument,
 };
 
 /// Search result item
@@ -60,7 +61,7 @@ pub struct DocumentParams<'a> {
 pub struct SearchIndex {
     index: Index,
     reader: IndexReader,
-    writer: IndexWriter,
+    writer: RwLock<IndexWriter>,
     schema: Schema,
     // Schema field handles — used by add_document and search
     file_id_field: Field,
@@ -108,7 +109,7 @@ impl SearchIndex {
         };
 
         // Writer with 50MB heap
-        let writer = index.writer(50_000_000)?;
+        let writer = RwLock::new(index.writer(50_000_000)?);
 
         let reader = index
             .reader_builder()
@@ -138,8 +139,8 @@ impl SearchIndex {
 
     /// Build a Tantivy `Document` from the given parameters.
     /// Shared logic between `add_document` and `add_document_batch`.
-    fn build_document(&self, params: &DocumentParams<'_>) -> Document {
-        let mut doc = Document::new();
+    fn build_document(&self, params: &DocumentParams<'_>) -> TantivyDocument {
+        let mut doc = TantivyDocument::new();
 
         doc.add_text(self.file_id_field, params.file_id);
         doc.add_text(self.file_name_field, params.file_name);
@@ -199,11 +200,11 @@ impl SearchIndex {
 
         // Delete any existing document with this file_id before adding
         // (Tantivy doesn't have update — delete + add)
-        self.writer
-            .delete_term(Term::from_field_text(self.file_id_field, file_id));
+        let mut writer = self.writer.write()?;
+        writer.delete_term(Term::from_field_text(self.file_id_field, file_id));
         let doc = self.build_document(&params);
-        self.writer.add_document(doc)?;
-        self.writer.commit()?;
+        writer.add_document(doc)?;
+        writer.commit()?;
 
         Ok(())
     }
@@ -214,13 +215,13 @@ impl SearchIndex {
     /// because Tantivy commits are expensive (they flush segments to disk
     /// and trigger reader reloads).
     pub fn add_document_batch(&self, docs: Vec<DocumentParams<'_>>) -> Result<()> {
+        let mut writer = self.writer.write()?;
         for params in &docs {
-            self.writer
-                .delete_term(Term::from_field_text(self.file_id_field, params.file_id));
+            writer.delete_term(Term::from_field_text(self.file_id_field, params.file_id));
             let doc = self.build_document(params);
-            self.writer.add_document(doc)?;
+            writer.add_document(doc)?;
         }
-        self.writer.commit()?;
+        writer.commit()?;
         Ok(())
     }
 
@@ -251,10 +252,10 @@ impl SearchIndex {
             created_at,
             blake3_hash,
         };
-        self.writer
-            .delete_term(Term::from_field_text(self.file_id_field, file_id));
+        let mut writer = self.writer.write()?;
+        writer.delete_term(Term::from_field_text(self.file_id_field, file_id));
         let doc = self.build_document(&params);
-        self.writer.add_document(doc)?;
+        writer.add_document(doc)?;
         Ok(())
     }
 
@@ -263,7 +264,8 @@ impl SearchIndex {
     /// Call this after one or more `add_document_no_commit` / `delete_term`
     /// calls to flush changes to disk and make them searchable.
     pub fn commit(&self) -> Result<()> {
-        self.writer.commit()?;
+        let mut writer = self.writer.write()?;
+        writer.commit()?;
         Ok(())
     }
 
@@ -272,15 +274,15 @@ impl SearchIndex {
     /// Useful for batch operations where the caller wants to delete multiple
     /// documents and commit once via a subsequent explicit commit or batch add.
     pub fn delete_term(&self, field: Field, term_text: &str) {
-        self.writer
-            .delete_term(Term::from_field_text(field, term_text));
+        let mut writer = self.writer.write().unwrap();
+        writer.delete_term(Term::from_field_text(field, term_text));
     }
 
     /// Remove a document from the index by file_id and commit.
     pub fn remove_document(&self, file_id: &str) -> Result<()> {
-        self.writer
-            .delete_term(Term::from_field_text(self.file_id_field, file_id));
-        self.writer.commit()?;
+        let mut writer = self.writer.write()?;
+        writer.delete_term(Term::from_field_text(self.file_id_field, file_id));
+        writer.commit()?;
         Ok(())
     }
 
@@ -301,7 +303,7 @@ impl SearchIndex {
         let searcher = self.reader.searcher();
 
         let query_parser = QueryParser::for_index(
-            &searcher,
+            &self.index,
             vec![
                 self.file_name_field,
                 self.content_text_field,
@@ -339,7 +341,7 @@ impl SearchIndex {
                     file_name: fname,
                     snippet,
                     match_type,
-                    score: *score,
+                    score: *score as f64,
                 })
             })
             .collect();
@@ -357,8 +359,7 @@ impl SearchIndex {
         let mut seen = HashSet::new();
 
         // Iterate the term dictionary for the file_name field
-        let file_name_field_entry = self.schema.get_field("file_name")?;
-        let terms = searcher.index().terms_for_field(file_name_field_entry)?;
+        let terms = self.reader.terms_for_field(self.file_name_field)?;
 
         // Seek to the prefix and collect matching terms
         for (term, _) in terms.range(prefix..)? {
@@ -388,7 +389,7 @@ impl SearchIndex {
         }
 
         // Also check content_text field for completions
-        if let Ok(content_terms) = searcher.index().terms_for_field(self.content_text_field) {
+        if let Ok(content_terms) = self.reader.terms_for_field(self.content_text_field) {
             for (term, _) in content_terms.range(prefix..)? {
                 let term_str = std::str::from_utf8(term.as_ref()).unwrap_or("").to_string();
                 if !term_str.starts_with(prefix) {
@@ -430,7 +431,7 @@ impl SearchIndex {
 /// Determine which field(s) caused a match for a search result.
 /// Checks if the user's query terms appear in specific fields.
 fn determine_match_type_from_query(
-    doc: &tantivy::Document,
+    doc: &TantivyDocument,
     query_str: &str,
     file_name_field: &Field,
     content_field: &Field,

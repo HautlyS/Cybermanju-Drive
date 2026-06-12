@@ -189,6 +189,7 @@ impl StorageBackend for LocalBackend {
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_default();
                 let modified = metadata
+                    .as_ref()
                     .and_then(|m| m.modified().ok())
                     .map(|t| {
                         chrono::DateTime::<chrono::Utc>::from(t)

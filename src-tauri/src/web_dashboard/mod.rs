@@ -366,7 +366,10 @@ fn handle_connection(dashboard: &WebDashboard, mut stream: TcpStream) {
     // Handle the request — use the shared DB handle
     let db_guard = match dashboard.db.lock() {
         Ok(g) => g,
-        Err(_) => return json_error(500, "Database lock poisoned", origin),
+        Err(_) => {
+            let _ = stream.write_all(json_error(500, "Database lock poisoned", effective_origin).as_bytes());
+            return;
+        }
     };
     let response = handle_request(
         dashboard,
@@ -692,7 +695,11 @@ fn list_all_json(
     };
 
     let mut results: Vec<serde_json::Value> = Vec::new();
-    for entry in table.iter() {
+    let iter = match table.iter() {
+        Ok(i) => i,
+        Err(e) => return json_error(500, &format!("Iteration error: {}", e), origin),
+    };
+    for entry in iter {
         match entry {
             Ok((key, value)) => {
                 let key_str = key.value().to_string();
@@ -730,7 +737,11 @@ fn list_encryption_keys_safe(db: &RedbDb, origin: Option<&str>) -> String {
     };
 
     let mut results: Vec<serde_json::Value> = Vec::new();
-    for entry in table.iter() {
+    let iter = match table.iter() {
+        Ok(i) => i,
+        Err(e) => return json_error(500, &format!("Iteration error: {}", e), origin),
+    };
+    for entry in iter {
         match entry {
             Ok((key, value)) => {
                 let key_str = key.value().to_string();
@@ -800,16 +811,18 @@ fn delete_by_id(
         Ok(tx) => tx,
         Err(e) => return json_error(500, &format!("Write error: {}", e), origin),
     };
-    let result = {
-        let mut table = match tx.open_table(table_def) {
-            Ok(t) => t,
-            Err(e) => return json_error(500, &format!("Table open error: {}", e), origin),
-        };
-        match table.remove(id) {
-            Ok(_) => true,
-            Err(e) => return json_error(500, &format!("Remove error: {}", e), origin),
+    let mut table = match tx.open_table(table_def) {
+        Ok(t) => t,
+        Err(e) => return json_error(500, &format!("Table open error: {}", e), origin),
+    };
+    let result = match table.remove(id) {
+        Ok(_) => true,
+        Err(e) => {
+            drop(table);
+            return json_error(500, &format!("Remove error: {}", e), origin);
         }
     };
+    drop(table);
     if let Err(e) = tx.commit() {
         return json_error(500, &format!("Commit error: {}", e), origin);
     }
@@ -832,7 +845,11 @@ fn list_geo_files(db: &RedbDb, origin: Option<&str>) -> String {
     };
 
     let mut results: Vec<serde_json::Value> = Vec::new();
-    for entry in table.iter() {
+    let iter = match table.iter() {
+        Ok(i) => i,
+        Err(e) => return json_error(500, &format!("Iteration error: {}", e), origin),
+    };
+    for entry in iter {
         if let Ok((_, value)) = entry {
             if let Ok(obj) = serde_json::from_str::<serde_json::Value>(&value.value()) {
                 let has_lat = obj.get("gpsLat").and_then(|v| v.as_f64()).is_some();
@@ -864,7 +881,11 @@ fn search_files(db: &RedbDb, query: &str, origin: Option<&str>) -> String {
     };
 
     let mut results: Vec<serde_json::Value> = Vec::new();
-    for entry in table.iter() {
+    let iter = match table.iter() {
+        Ok(i) => i,
+        Err(e) => return json_error(500, &format!("Iteration error: {}", e), origin),
+    };
+    for entry in iter {
         if let Ok((_, value)) = entry {
             if let Ok(obj) = serde_json::from_str::<serde_json::Value>(&value.value()) {
                 let name = obj
@@ -910,7 +931,11 @@ fn list_users_safe(db: &RedbDb, origin: Option<&str>) -> String {
     };
 
     let mut results: Vec<serde_json::Value> = Vec::new();
-    for entry in table.iter() {
+    let iter = match table.iter() {
+        Ok(i) => i,
+        Err(e) => return json_error(500, &format!("Iteration error: {}", e), origin),
+    };
+    for entry in iter {
         if let Ok((_, value)) = entry {
             if let Ok(mut obj) = serde_json::from_str::<serde_json::Value>(&value.value()) {
                 // Strip password hashes for safety
@@ -952,7 +977,11 @@ fn login_user(db: &RedbDb, body: &str, jwt_secret: &[u8; 32], origin: Option<&st
     };
 
     let mut found_user: Option<serde_json::Value> = None;
-    for entry in table.iter() {
+    let iter = match table.iter() {
+        Ok(i) => i,
+        Err(e) => return json_error(500, &format!("Iteration error: {}", e), origin),
+    };
+    for entry in iter {
         if let Ok((_, value)) = entry {
             if let Ok(user) = serde_json::from_str::<serde_json::Value>(&value.value()) {
                 if user.get("username").and_then(|v| v.as_str()) == Some(username) {
@@ -1059,7 +1088,11 @@ fn register_user_web(db: &RedbDb, body: &str, origin: Option<&str>) -> String {
         Err(e) => return json_error(500, &format!("Table open error: {}", e), origin),
     };
 
-    for entry in table.iter() {
+    let iter = match table.iter() {
+        Ok(i) => i,
+        Err(e) => return json_error(500, &format!("Iteration error: {}", e), origin),
+    };
+    for entry in iter {
         if let Ok((_, value)) = entry {
             if let Ok(user) = serde_json::from_str::<serde_json::Value>(&value.value()) {
                 if user.get("username").and_then(|v| v.as_str()) == Some(username) {
@@ -1109,7 +1142,7 @@ fn register_user_web(db: &RedbDb, body: &str, origin: Option<&str>) -> String {
             Ok(t) => t,
             Err(e) => return json_error(500, &format!("Table open error: {}", e), origin),
         };
-        if table.insert(&user_id, user_json.as_str()).is_err() {
+        if table.insert(user_id.as_str(), user_json.as_str()).is_err() {
             return json_error(500, "Failed to insert user", origin);
         }
     }
@@ -1177,7 +1210,7 @@ fn set_permission_web(db: &RedbDb, body: &str, origin: Option<&str>) -> String {
             Ok(t) => t,
             Err(e) => return json_error(500, &format!("Table open error: {}", e), origin),
         };
-        if table.insert(&perm_id, perm_json.as_str()).is_err() {
+        if table.insert(perm_id.as_str(), perm_json.as_str()).is_err() {
             return json_error(500, "Failed to insert permission", origin);
         }
     }
@@ -1244,7 +1277,11 @@ fn verify_access_web(db: &RedbDb, body: &str, origin: Option<&str>) -> String {
         Err(e) => return json_error(500, &format!("Table open error: {}", e), origin),
     };
 
-    for entry in perms_table.iter() {
+    let iter = match perms_table.iter() {
+        Ok(i) => i,
+        Err(e) => return json_error(500, &format!("Iteration error: {}", e), origin),
+    };
+    for entry in iter {
         if let Ok((_, value)) = entry {
             if let Ok(perm) = serde_json::from_str::<serde_json::Value>(&value.value()) {
                 let p_user = perm.get("userId").and_then(|v| v.as_str()).unwrap_or("");
@@ -1299,7 +1336,11 @@ fn get_permissions_for_file(db: &RedbDb, file_id: &str, origin: Option<&str>) ->
     };
 
     let mut results: Vec<serde_json::Value> = Vec::new();
-    for entry in table.iter() {
+    let iter = match table.iter() {
+        Ok(i) => i,
+        Err(e) => return json_error(500, &format!("Iteration error: {}", e), origin),
+    };
+    for entry in iter {
         if let Ok((_, value)) = entry {
             if let Ok(perm) = serde_json::from_str::<serde_json::Value>(&value.value()) {
                 if perm.get("fileId").and_then(|v| v.as_str()) == Some(file_id) {

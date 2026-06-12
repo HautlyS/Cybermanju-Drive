@@ -61,9 +61,7 @@ impl OAuthCredentials {
             ("refresh_token", refresh_token.as_str()),
         ];
 
-        if let Some(ref client_id) = self.client_id.as_str() {
-            params.push(("client_id", client_id));
-        }
+        params.push(("client_id", self.client_id.as_str()));
 
         if let Some(ref client_secret) = self.client_secret {
             params.push(("client_secret", client_secret.as_str()));

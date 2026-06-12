@@ -15,12 +15,11 @@ pub mod web_dashboard;
 use commands::faces as face_cmd;
 use commands::sync as sync_cmd;
 use commands::{
-    accounts, collections, dashboard, encryption, files, import as import_cmd, map, search_cmd,
-    users,
+    accounts, collections, dashboard, encryption, files, import as import_cmd, map,
+    search as search_cmd, users,
 };
 use db::Database;
 use std::sync::{Arc, RwLock};
-use tauri::Manager;
 
 pub struct AppState {
     pub db: RwLock<Database>,

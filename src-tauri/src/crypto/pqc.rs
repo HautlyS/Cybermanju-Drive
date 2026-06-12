@@ -22,14 +22,13 @@ use pqcrypto_mlkem::mlkem1024;
 use pqcrypto_mlkem::mlkem768;
 
 // Real ML-DSA from ml-dsa (FIPS 204, formerly CRYSTALS-Dilithium)
-use ml_dsa::{KeyGen, MlDsa44, MlDsa65, MlDsa87};
+use ml_dsa::{Generate, MlDsa44, MlDsa65, MlDsa87};
 use signature::{Signer, Verifier};
 
-// rand_core v0.10 for ml-dsa KeyGen (ml-dsa depends on rand_core ^0.10)
-use rand_core_v10::OsRng;
-
 // X25519 for hybrid classical component
-use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret as X25519StaticSecret};
+use x25519_dalek::{EphemeralSecret, PublicKey as X25519PublicKey, StaticSecret as X25519StaticSecret};
+
+type HmacSha512 = Hmac<Sha512>;
 
 // ---------------------------------------------------------------------------
 // Supported algorithms
@@ -257,7 +256,7 @@ impl PqcEngine {
             }
             EncryptionAlgo::MlDsa44 => {
                 // Real ML-DSA-44 key generation (FIPS 204, NIST Level 2)
-                let kp = MlDsa44::key_gen(&mut OsRng);
+                let kp = MlDsa44::generate();
                 // SigningKey: store 32-byte seed (reconstruct via from_seed)
                 let sk_bytes = kp.signing_key().to_seed().to_vec();
                 // VerifyingKey: store encoded public key bytes
@@ -266,14 +265,14 @@ impl PqcEngine {
             }
             EncryptionAlgo::MlDsa65 => {
                 // Real ML-DSA-65 key generation (FIPS 204, NIST Level 3)
-                let kp = MlDsa65::key_gen(&mut OsRng);
+                let kp = MlDsa65::generate();
                 let sk_bytes = kp.signing_key().to_seed().to_vec();
                 let pk_bytes = kp.verifying_key().encode().as_ref().to_vec();
                 (pk_bytes, sk_bytes)
             }
             EncryptionAlgo::MlDsa87 => {
                 // Real ML-DSA-87 key generation (FIPS 204, NIST Level 5)
-                let kp = MlDsa87::key_gen(&mut OsRng);
+                let kp = MlDsa87::generate();
                 let sk_bytes = kp.signing_key().to_seed().to_vec();
                 let pk_bytes = kp.verifying_key().encode().as_ref().to_vec();
                 (pk_bytes, sk_bytes)
@@ -281,8 +280,8 @@ impl PqcEngine {
             EncryptionAlgo::ClassicalSign => {
                 // HMAC-SHA512 fallback: 64-byte key for signing
                 let mut hmac_key = [0u8; 64];
-                use rand_core_v10::RngCore as RngCoreV10;
-                OsRng.fill_bytes(&mut hmac_key);
+                use rand_core::RngCore;
+                rand_core::OsRng.fill_bytes(&mut hmac_key);
                 // Public key = SHA-256 fingerprint for identification (not a real public key)
                 let pub_fingerprint = blake3::hash(&hmac_key).as_bytes()[..32].to_vec();
                 (pub_fingerprint, hmac_key.to_vec())
@@ -390,10 +389,10 @@ pub fn encrypt_data(plaintext: &[u8], keypair: &KeyPair) -> Result<FileEncrypted
     let (derived_key, kem_ciphertext, x25519_ephemeral_pk) = match &keypair.algorithm {
         EncryptionAlgo::Kyber1024 => {
             // --- Pure ML-KEM-1024 ---
-            if keypair.public_key.len() != mlkem1024::PUBLIC_KEY_BYTES {
+            if keypair.public_key.len() != mlkem1024::public_key_bytes() {
                 anyhow::bail!(
                     "Invalid ML-KEM-1024 public key length: expected {}, got {}",
-                    mlkem1024::PUBLIC_KEY_BYTES,
+                    mlkem1024::public_key_bytes(),
                     keypair.public_key.len()
                 );
             }
@@ -404,10 +403,10 @@ pub fn encrypt_data(plaintext: &[u8], keypair: &KeyPair) -> Result<FileEncrypted
         }
         EncryptionAlgo::Hybrid => {
             // --- Hybrid: ML-KEM-768 + X25519 ---
-            if keypair.public_key.len() != mlkem768::PUBLIC_KEY_BYTES {
+            if keypair.public_key.len() != mlkem768::public_key_bytes() {
                 anyhow::bail!(
                     "Invalid ML-KEM-768 public key length: expected {}, got {}",
-                    mlkem768::PUBLIC_KEY_BYTES,
+                    mlkem768::public_key_bytes(),
                     keypair.public_key.len()
                 );
             }
@@ -516,10 +515,10 @@ pub fn decrypt_data(encrypted: &FileEncryptedData, keypair: &KeyPair) -> Result<
     let derived_key = match &keypair.algorithm {
         EncryptionAlgo::Kyber1024 => {
             // --- Pure ML-KEM-1024 decapsulation ---
-            if encrypted.kem_ciphertext.len() != mlkem1024::CIPHERTEXT_BYTES {
+            if encrypted.kem_ciphertext.len() != mlkem1024::ciphertext_bytes() {
                 anyhow::bail!(
                     "Invalid ML-KEM-1024 ciphertext length: expected {}, got {}",
-                    mlkem1024::CIPHERTEXT_BYTES,
+                    mlkem1024::ciphertext_bytes(),
                     encrypted.kem_ciphertext.len()
                 );
             }
@@ -532,10 +531,10 @@ pub fn decrypt_data(encrypted: &FileEncryptedData, keypair: &KeyPair) -> Result<
         }
         EncryptionAlgo::Hybrid => {
             // --- Hybrid: ML-KEM-768 decapsulate + X25519 DH ---
-            if encrypted.kem_ciphertext.len() != mlkem768::CIPHERTEXT_BYTES {
+            if encrypted.kem_ciphertext.len() != mlkem768::ciphertext_bytes() {
                 anyhow::bail!(
                     "Invalid ML-KEM-768 ciphertext length: expected {}, got {}",
-                    mlkem768::CIPHERTEXT_BYTES,
+                    mlkem768::ciphertext_bytes(),
                     encrypted.kem_ciphertext.len()
                 );
             }
