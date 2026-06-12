@@ -1,4 +1,5 @@
 use chrono::Utc;
+use redb::ReadableTable;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -56,7 +57,10 @@ pub fn import_file(
         None
     } else {
         infer::get_from_path(path)
-            .map(|m| m.mime_type().to_string())
+            .ok()
+            .flatten()
+            .and_then(|m| m.mime_type())
+            .map(|m| m.to_string())
             .or_else(|| mime_guess::from_path(path).first().map(|m| m.to_string()))
     };
 
@@ -273,7 +277,10 @@ pub fn scan_directory(
             None
         } else {
             infer::get_from_path(path)
-                .map(|m| m.mime_type().to_string())
+                .ok()
+                .flatten()
+                .and_then(|m| m.mime_type())
+                .map(|m| m.to_string())
                 .or_else(|| mime_guess::from_path(path).first().map(|m| m.to_string()))
         };
 
@@ -498,13 +505,13 @@ fn extract_gps_if_image(path: &std::path::Path) -> (Option<f64>, Option<f64>) {
     };
 
     let latitude = exif_data
-        .get_field(exif::Tag::GpsLatitude, exif::In::PRIMARY)
+        .get_field(exif::Tag::GPS_GPSLatitude, exif::In::PRIMARY)
         .and_then(|field| {
             if let exif::Value::Rational(ref rationals) = field.value {
                 if rationals.len() >= 3 {
-                    let deg = rationals[0].numerator as f64 / rationals[0].denominator as f64;
-                    let min = rationals[1].numerator as f64 / rationals[1].denominator as f64;
-                    let sec = rationals[2].numerator as f64 / rationals[2].denominator as f64;
+                    let deg = rationals[0].num as f64 / rationals[0].denom as f64;
+                    let min = rationals[1].num as f64 / rationals[1].denom as f64;
+                    let sec = rationals[2].num as f64 / rationals[2].denom as f64;
                     Some(deg + min / 60.0 + sec / 3600.0)
                 } else {
                     None
@@ -515,13 +522,13 @@ fn extract_gps_if_image(path: &std::path::Path) -> (Option<f64>, Option<f64>) {
         });
 
     let longitude = exif_data
-        .get_field(exif::Tag::GpsLongitude, exif::In::PRIMARY)
+        .get_field(exif::Tag::GPS_GPSLongitude, exif::In::PRIMARY)
         .and_then(|field| {
             if let exif::Value::Rational(ref rationals) = field.value {
                 if rationals.len() >= 3 {
-                    let deg = rationals[0].numerator as f64 / rationals[0].denominator as f64;
-                    let min = rationals[1].numerator as f64 / rationals[1].denominator as f64;
-                    let sec = rationals[2].numerator as f64 / rationals[2].denominator as f64;
+                    let deg = rationals[0].num as f64 / rationals[0].denom as f64;
+                    let min = rationals[1].num as f64 / rationals[1].denom as f64;
+                    let sec = rationals[2].num as f64 / rationals[2].denom as f64;
                     Some(deg + min / 60.0 + sec / 3600.0)
                 } else {
                     None
@@ -532,7 +539,7 @@ fn extract_gps_if_image(path: &std::path::Path) -> (Option<f64>, Option<f64>) {
         });
 
     let lat_ref = exif_data
-        .get_field(exif::Tag::GpsLatitudeRef, exif::In::PRIMARY)
+        .get_field(exif::Tag::GPS_GPSLatitudeRef, exif::In::PRIMARY)
         .and_then(|f| {
             if let exif::Value::Ascii(ref bytes) = f.value {
                 std::str::from_utf8(bytes).ok().map(|s| s.to_string())
@@ -542,7 +549,7 @@ fn extract_gps_if_image(path: &std::path::Path) -> (Option<f64>, Option<f64>) {
         });
 
     let lon_ref = exif_data
-        .get_field(exif::Tag::GpsLongitudeRef, exif::In::PRIMARY)
+        .get_field(exif::Tag::GPS_GPSLongitudeRef, exif::In::PRIMARY)
         .and_then(|f| {
             if let exif::Value::Ascii(ref bytes) = f.value {
                 std::str::from_utf8(bytes).ok().map(|s| s.to_string())

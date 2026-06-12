@@ -200,7 +200,7 @@ impl SearchIndex {
 
         // Delete any existing document with this file_id before adding
         // (Tantivy doesn't have update — delete + add)
-        let mut writer = self.writer.write()?;
+        let mut writer = self.writer.write().unwrap();
         writer.delete_term(Term::from_field_text(self.file_id_field, file_id));
         let doc = self.build_document(&params);
         writer.add_document(doc)?;
@@ -215,7 +215,7 @@ impl SearchIndex {
     /// because Tantivy commits are expensive (they flush segments to disk
     /// and trigger reader reloads).
     pub fn add_document_batch(&self, docs: Vec<DocumentParams<'_>>) -> Result<()> {
-        let mut writer = self.writer.write()?;
+        let mut writer = self.writer.write().unwrap();
         for params in &docs {
             writer.delete_term(Term::from_field_text(self.file_id_field, params.file_id));
             let doc = self.build_document(params);
@@ -252,7 +252,7 @@ impl SearchIndex {
             created_at,
             blake3_hash,
         };
-        let mut writer = self.writer.write()?;
+        let mut writer = self.writer.write().unwrap();
         writer.delete_term(Term::from_field_text(self.file_id_field, file_id));
         let doc = self.build_document(&params);
         writer.add_document(doc)?;
@@ -264,7 +264,7 @@ impl SearchIndex {
     /// Call this after one or more `add_document_no_commit` / `delete_term`
     /// calls to flush changes to disk and make them searchable.
     pub fn commit(&self) -> Result<()> {
-        let mut writer = self.writer.write()?;
+        let mut writer = self.writer.write().unwrap();
         writer.commit()?;
         Ok(())
     }
@@ -280,7 +280,7 @@ impl SearchIndex {
 
     /// Remove a document from the index by file_id and commit.
     pub fn remove_document(&self, file_id: &str) -> Result<()> {
-        let mut writer = self.writer.write()?;
+        let mut writer = self.writer.write().unwrap();
         writer.delete_term(Term::from_field_text(self.file_id_field, file_id));
         writer.commit()?;
         Ok(())
@@ -318,7 +318,7 @@ impl SearchIndex {
         let results = top_docs
             .iter()
             .filter_map(|(score, doc_address)| {
-                let doc = searcher.doc(*doc_address).ok()?;
+                let doc: TantivyDocument = searcher.doc(*doc_address).ok()?;
                 let fid = doc
                     .get_first(self.file_id_field)
                     .and_then(|v| v.as_str())

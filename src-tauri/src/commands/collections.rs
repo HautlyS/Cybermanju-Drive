@@ -1,4 +1,5 @@
 use chrono::Utc;
+use redb::ReadableTable;
 use tauri::State;
 
 use crate::db::schema::{Collection, CollectionItem, FileNode};
@@ -80,7 +81,7 @@ pub fn add_to_collection(
         .open_table(crate::db::Database::get_collections_table())
         .map_err(|e| e.to_string())?;
     let coll_value = coll_table
-        .get(&collection_id)
+        .get(collection_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Collection not found: {}", collection_id))?;
     let mut collection: Collection =
@@ -91,7 +92,7 @@ pub fn add_to_collection(
         .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
     let file_value = file_table
-        .get(&file_id)
+        .get(file_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
     let mut file_node: FileNode =
@@ -171,7 +172,7 @@ pub fn remove_from_collection(
         .open_table(crate::db::Database::get_collections_table())
         .map_err(|e| e.to_string())?;
     let coll_value = coll_table
-        .get(&collection_id)
+        .get(collection_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Collection not found: {}", collection_id))?;
     let mut collection: Collection =
@@ -196,7 +197,9 @@ pub fn remove_from_collection(
     let file_table = tx_read
         .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
-    let file_value = file_table.get(&file_id).map_err(|e| e.to_string())?;
+    let file_value = file_table
+        .get(file_id.as_str())
+        .map_err(|e| e.to_string())?;
     drop(tx_read);
 
     let now = Utc::now().to_rfc3339();

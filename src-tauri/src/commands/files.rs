@@ -1,4 +1,5 @@
 use chrono::Utc;
+use redb::ReadableTable;
 use tauri::State;
 
 use crate::db::schema::FileNode;
@@ -63,7 +64,7 @@ pub fn get_file(file_id: String, state: State<'_, AppState>) -> Result<FileNode,
         .map_err(|e| e.to_string())?;
 
     let value = table
-        .get(&file_id)
+        .get(file_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
 
@@ -122,7 +123,9 @@ pub fn delete_file(file_id: String, state: State<'_, AppState>) -> Result<bool, 
     let table_read = tx_read
         .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
-    let value = table_read.get(&file_id).map_err(|e| e.to_string())?;
+    let value = table_read
+        .get(file_id.as_str())
+        .map_err(|e| e.to_string())?;
     let parent_id = value.and_then(|val| {
         serde_json::from_str::<FileNode>(val.value())
             .ok()
@@ -156,7 +159,7 @@ pub fn rename_file(
         .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
     let value = table_read
-        .get(&file_id)
+        .get(file_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
     let mut file_node: FileNode =
@@ -197,7 +200,7 @@ pub fn duplicate_file_context(
         .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
     let value = table_read
-        .get(&file_id)
+        .get(file_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
     let original: FileNode = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
@@ -269,7 +272,7 @@ pub fn move_file(
         .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
     let value = table_read
-        .get(&file_id)
+        .get(file_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
     let mut file_node: FileNode =
@@ -306,7 +309,7 @@ pub fn get_preview(
         .map_err(|e| e.to_string())?;
 
     let value = table
-        .get(&file_id)
+        .get(file_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
 
@@ -379,7 +382,7 @@ pub fn add_to_loose_group(
         .open_table(crate::db::Database::get_loose_groups_table())
         .map_err(|e| e.to_string())?;
     let group_value = group_table
-        .get(&group_id)
+        .get(group_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Loose group not found: {}", group_id))?;
     let mut group: LooseGroup =
@@ -394,7 +397,7 @@ pub fn add_to_loose_group(
         .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
     let file_value = file_table
-        .get(&file_id)
+        .get(file_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
     let mut file_node: FileNode =

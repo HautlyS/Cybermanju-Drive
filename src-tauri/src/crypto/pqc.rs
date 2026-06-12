@@ -20,10 +20,10 @@ use std::collections::HashMap;
 // Real ML-KEM from pqcrypto-mlkem
 use pqcrypto_mlkem::mlkem1024;
 use pqcrypto_mlkem::mlkem768;
-use pqcrypto_traits::kem::{Ciphertext as _, SharedSecret as _};
 
 // Real ML-DSA from ml-dsa (FIPS 204, formerly CRYSTALS-Dilithium)
 use ml_dsa::{KeyGen, MlDsa44, MlDsa65, MlDsa87};
+use pqcrypto_traits::kem::{Ciphertext as _, PublicKey as _, SecretKey as _, SharedSecret as _};
 use signature::{Signer, Verifier};
 
 // X25519 for hybrid classical component
@@ -440,13 +440,17 @@ pub fn encrypt_data(plaintext: &[u8], keypair: &KeyPair) -> Result<FileEncrypted
         _ => unreachable!("is_signature_only() checked above"),
     };
 
-    let cipher = ChaCha20Poly1305::new_from_slice(&derived_key)
-        .context("Failed to create ChaCha20Poly1305 cipher from derived key")?;
+    let cipher = ChaCha20Poly1305::new_from_slice(&derived_key).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to create ChaCha20Poly1305 cipher from derived key: {}",
+            e
+        )
+    })?;
 
     let nonce_obj = Nonce::from_slice(&nonce);
     let ciphertext = cipher
         .encrypt(nonce_obj, plaintext)
-        .context("ChaCha20Poly1305 encryption failed")?;
+        .map_err(|e| anyhow::anyhow!("ChaCha20Poly1305 encryption failed: {}", e))?;
 
     let original_hash = blake3::hash(plaintext);
 
@@ -478,13 +482,17 @@ fn encrypt_with_symmetric_key(plaintext: &[u8], keypair: &KeyPair) -> Result<Fil
         .try_into()
         .context("Failed to extract 32-byte ChaCha20Poly1305 key from private_key")?;
 
-    let cipher = ChaCha20Poly1305::new_from_slice(&derived_key)
-        .context("Failed to create ChaCha20Poly1305 cipher from derived key")?;
+    let cipher = ChaCha20Poly1305::new_from_slice(&derived_key).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to create ChaCha20Poly1305 cipher from derived key: {}",
+            e
+        )
+    })?;
 
     let nonce_obj = Nonce::from_slice(&nonce);
     let ciphertext = cipher
         .encrypt(nonce_obj, plaintext)
-        .context("ChaCha20Poly1305 encryption failed")?;
+        .map_err(|e| anyhow::anyhow!("ChaCha20Poly1305 encryption failed: {}", e))?;
 
     let original_hash = blake3::hash(plaintext);
 
@@ -562,13 +570,22 @@ pub fn decrypt_data(encrypted: &FileEncryptedData, keypair: &KeyPair) -> Result<
         _ => unreachable!(),
     };
 
-    let cipher = ChaCha20Poly1305::new_from_slice(&derived_key)
-        .context("Failed to create ChaCha20Poly1305 cipher from derived key")?;
+    let cipher = ChaCha20Poly1305::new_from_slice(&derived_key).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to create ChaCha20Poly1305 cipher from derived key: {}",
+            e
+        )
+    })?;
 
     let nonce_obj = Nonce::from_slice(&encrypted.nonce);
     let plaintext = cipher
         .decrypt(nonce_obj, encrypted.ciphertext.as_ref())
-        .context("ChaCha20Poly1305 decryption failed — wrong key or corrupted data")?;
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "ChaCha20Poly1305 decryption failed — wrong key or corrupted data: {}",
+                e
+            )
+        })?;
 
     // Verify BLAKE3 integrity hash
     let decrypted_hash = blake3::hash(&plaintext);
@@ -595,13 +612,22 @@ fn decrypt_with_symmetric_key(encrypted: &FileEncryptedData, keypair: &KeyPair) 
         .try_into()
         .context("Failed to extract 32-byte ChaCha20Poly1305 key from private_key")?;
 
-    let cipher = ChaCha20Poly1305::new_from_slice(&derived_key)
-        .context("Failed to create ChaCha20Poly1305 cipher from derived key")?;
+    let cipher = ChaCha20Poly1305::new_from_slice(&derived_key).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to create ChaCha20Poly1305 cipher from derived key: {}",
+            e
+        )
+    })?;
 
     let nonce_obj = Nonce::from_slice(&encrypted.nonce);
     let plaintext = cipher
         .decrypt(nonce_obj, encrypted.ciphertext.as_ref())
-        .context("ChaCha20Poly1305 decryption failed — wrong key or corrupted data")?;
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "ChaCha20Poly1305 decryption failed — wrong key or corrupted data: {}",
+                e
+            )
+        })?;
 
     // Verify BLAKE3 integrity hash
     let decrypted_hash = blake3::hash(&plaintext);
@@ -635,22 +661,22 @@ pub fn sign_message(message: &[u8], keypair: &KeyPair) -> Result<Vec<u8>> {
             let seed = ml_dsa::Seed::<MlDsa44>::try_from(keypair.private_key.as_slice())
                 .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-44 seed: {:?}", e))?;
             let sk = ml_dsa::SigningKey::<MlDsa44>::from_seed(&seed);
-            let sig: ml_dsa::Signature<MlDsa44> = sk.sign(message);
-            Ok(sig.to_vec())
+            let sig = sk.sign(message);
+            Ok(sig.as_ref().to_vec())
         }
         EncryptionAlgo::MlDsa65 => {
             let seed = ml_dsa::Seed::<MlDsa65>::try_from(keypair.private_key.as_slice())
                 .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-65 seed: {:?}", e))?;
             let sk = ml_dsa::SigningKey::<MlDsa65>::from_seed(&seed);
-            let sig: ml_dsa::Signature<MlDsa65> = sk.sign(message);
-            Ok(sig.to_vec())
+            let sig = sk.sign(message);
+            Ok(sig.as_ref().to_vec())
         }
         EncryptionAlgo::MlDsa87 => {
             let seed = ml_dsa::Seed::<MlDsa87>::try_from(keypair.private_key.as_slice())
                 .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-87 seed: {:?}", e))?;
             let sk = ml_dsa::SigningKey::<MlDsa87>::from_seed(&seed);
-            let sig: ml_dsa::Signature<MlDsa87> = sk.sign(message);
-            Ok(sig.to_vec())
+            let sig = sk.sign(message);
+            Ok(sig.as_ref().to_vec())
         }
         EncryptionAlgo::ClassicalSign => {
             // HMAC-SHA512 fallback (classical, not post-quantum)

@@ -1,4 +1,5 @@
 use chrono::Utc;
+use redb::ReadableTable;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -76,7 +77,7 @@ pub fn compress_file(
         .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
     let value = table_read
-        .get(&file_id)
+        .get(file_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
     let mut file_node: crate::db::schema::FileNode =
@@ -277,7 +278,7 @@ pub fn decompress_file(
         .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
     let value = table_read
-        .get(&file_id)
+        .get(file_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
     let mut file_node: crate::db::schema::FileNode =
@@ -425,7 +426,7 @@ pub fn get_compression_stats(
         .map_err(|e| e.to_string())?;
 
     let value = table
-        .get(&file_id)
+        .get(file_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
 

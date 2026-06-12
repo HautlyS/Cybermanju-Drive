@@ -1,4 +1,5 @@
 use chrono::Utc;
+use redb::ReadableTable;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use tauri::State;
@@ -45,7 +46,7 @@ pub fn detect_faces(
         .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
     let file_value = file_table
-        .get(&file_id)
+        .get(file_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
     let mut file_node: FileNode =
@@ -536,7 +537,7 @@ pub fn rename_face_group(
         .open_table(crate::db::Database::get_face_groups_table())
         .map_err(|e| e.to_string())?;
     let value = table
-        .get(&group_id)
+        .get(group_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Face group not found: {}", group_id))?;
     let mut group: FaceGroup = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
@@ -572,13 +573,13 @@ pub fn merge_face_groups(
         .open_table(crate::db::Database::get_face_groups_table())
         .map_err(|e| e.to_string())?;
     let source_val = table
-        .get(&source_group_id)
+        .get(source_group_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Source group not found: {}", source_group_id))?;
     let source: FaceGroup = serde_json::from_str(&source_val.value()).map_err(|e| e.to_string())?;
 
     let target_val = table
-        .get(&target_group_id)
+        .get(target_group_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Target group not found: {}", target_group_id))?;
     let mut target: FaceGroup =
@@ -656,7 +657,7 @@ pub fn delete_face_group(group_id: String, state: State<'_, AppState>) -> Result
         .open_table(crate::db::Database::get_face_groups_table())
         .map_err(|e| e.to_string())?;
     let group_val = fg_table
-        .get(&group_id)
+        .get(group_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Face group not found: {}", group_id))?;
     let group: FaceGroup = serde_json::from_str(group_val.value()).map_err(|e| e.to_string())?;
@@ -705,7 +706,7 @@ pub fn find_similar_faces(
         .open_table(crate::db::Database::get_face_groups_table())
         .map_err(|e| e.to_string())?;
     let source_val = fg_table
-        .get(&group_id)
+        .get(group_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Face group not found: {}", group_id))?;
     let source: FaceGroup = serde_json::from_str(&source_val.value()).map_err(|e| e.to_string())?;
@@ -765,7 +766,7 @@ pub fn get_group_files(
         .open_table(crate::db::Database::get_face_groups_table())
         .map_err(|e| e.to_string())?;
     let fg_value = fg_table
-        .get(&group_id)
+        .get(group_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Face group not found: {}", group_id))?;
     let group: FaceGroup = serde_json::from_str(&fg_value.value()).map_err(|e| e.to_string())?;

@@ -1,4 +1,5 @@
 use chrono::Utc;
+use redb::ReadableTable;
 use tauri::State;
 
 use crate::db::schema::Account;
@@ -87,7 +88,7 @@ pub fn switch_account(account_id: String, state: State<'_, AppState>) -> Result<
         .open_table(crate::db::Database::get_accounts_table())
         .map_err(|e| e.to_string())?;
 
-    let mut accounts: Vec<Account> = Vec::new();
+    let mut accounts: Vec<(String, Account)> = Vec::new();
     let mut target_found = false;
 
     for entry in read_table.iter().map_err(|e| e.to_string())? {
@@ -147,7 +148,7 @@ pub fn delete_account(account_id: String, state: State<'_, AppState>) -> Result<
         .open_table(crate::db::Database::get_accounts_table())
         .map_err(|e| e.to_string())?;
     let value = read_table
-        .get(&account_id)
+        .get(account_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Account not found: {}", account_id))?;
     let account: Account = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;

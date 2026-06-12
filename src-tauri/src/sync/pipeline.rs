@@ -9,6 +9,7 @@ use crate::AppState;
 use chrono::Utc;
 use log::{error, info, warn};
 use rayon::prelude::*;
+use redb::ReadableTable;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -64,7 +65,7 @@ impl SyncPipeline {
     pub fn new(config: SyncConfig, db_path: String) -> Self {
         Self {
             config,
-            _db_path,
+            _db_path: db_path,
             progress: Arc::new(SyncProgressInner::new()),
             cancelled: Arc::new(AtomicBool::new(false)),
         }

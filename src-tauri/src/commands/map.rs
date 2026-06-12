@@ -1,3 +1,4 @@
+use redb::ReadableTable;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -68,7 +69,7 @@ pub fn extract_exif_gps(
         .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
     let value = table_read
-        .get(&file_id)
+        .get(file_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
     let mut file_node: FileNode =
@@ -94,7 +95,7 @@ pub fn extract_exif_gps(
 
     // Extract GPS latitude
     let latitude = exif_data
-        .get_field(exif::Tag::GpsLatitude, exif::In::PRIMARY)
+        .get_field(exif::Tag::GPS_GPSLatitude, exif::In::PRIMARY)
         .and_then(|field| {
             let components = if let exif::Value::Rational(ref rationals) = field.value {
                 Some(rationals.as_slice())
@@ -102,9 +103,9 @@ pub fn extract_exif_gps(
                 None
             }?;
             if components.len() >= 3 {
-                let deg = components[0].numerator as f64 / components[0].denominator as f64;
-                let min = components[1].numerator as f64 / components[1].denominator as f64;
-                let sec = components[2].numerator as f64 / components[2].denominator as f64;
+                let deg = components[0].num as f64 / components[0].denom as f64;
+                let min = components[1].num as f64 / components[1].denom as f64;
+                let sec = components[2].num as f64 / components[2].denom as f64;
                 Some(deg + min / 60.0 + sec / 3600.0)
             } else {
                 None
@@ -114,7 +115,7 @@ pub fn extract_exif_gps(
 
     // Extract GPS longitude
     let longitude = exif_data
-        .get_field(exif::Tag::GpsLongitude, exif::In::PRIMARY)
+        .get_field(exif::Tag::GPS_GPSLongitude, exif::In::PRIMARY)
         .and_then(|field| {
             let components = if let exif::Value::Rational(ref rationals) = field.value {
                 Some(rationals.as_slice())
@@ -122,9 +123,9 @@ pub fn extract_exif_gps(
                 None
             }?;
             if components.len() >= 3 {
-                let deg = components[0].numerator as f64 / components[0].denominator as f64;
-                let min = components[1].numerator as f64 / components[1].denominator as f64;
-                let sec = components[2].numerator as f64 / components[2].denominator as f64;
+                let deg = components[0].num as f64 / components[0].denom as f64;
+                let min = components[1].num as f64 / components[1].denom as f64;
+                let sec = components[2].num as f64 / components[2].denom as f64;
                 Some(deg + min / 60.0 + sec / 3600.0)
             } else {
                 None
@@ -134,7 +135,7 @@ pub fn extract_exif_gps(
 
     // Apply GPS latitude/longitude reference (N/S, E/W)
     let lat_ref = exif_data
-        .get_field(exif::Tag::GpsLatitudeRef, exif::In::PRIMARY)
+        .get_field(exif::Tag::GPS_GPSLatitudeRef, exif::In::PRIMARY)
         .and_then(|f| {
             if let exif::Value::Ascii(ref bytes) = f.value {
                 std::str::from_utf8(bytes).ok().map(|s| s.to_string())
@@ -144,7 +145,7 @@ pub fn extract_exif_gps(
         });
 
     let lon_ref = exif_data
-        .get_field(exif::Tag::GpsLongitudeRef, exif::In::PRIMARY)
+        .get_field(exif::Tag::GPS_GPSLongitudeRef, exif::In::PRIMARY)
         .and_then(|f| {
             if let exif::Value::Ascii(ref bytes) = f.value {
                 std::str::from_utf8(bytes).ok().map(|s| s.to_string())
@@ -167,11 +168,11 @@ pub fn extract_exif_gps(
 
     // Extract altitude if available
     let altitude = exif_data
-        .get_field(exif::Tag::GpsAltitude, exif::In::PRIMARY)
+        .get_field(exif::Tag::GPS_GPSAltitude, exif::In::PRIMARY)
         .and_then(|field| {
             if let exif::Value::Rational(ref rationals) = field.value {
                 if let Some(r) = rationals.first() {
-                    Some(r.numerator as f64 / r.denominator as f64)
+                    Some(r.num as f64 / r.denom as f64)
                 } else {
                     None
                 }
