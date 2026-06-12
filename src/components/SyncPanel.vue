@@ -280,7 +280,8 @@ onMounted(() => {
                 <span class="config-type" :style="{ color: getBackendColor(config.backendType) }">
                   {{ config.backendType }}
                 </span>
-                <span class="config-path" v-if="config.basePath">{{ config.basePath }}</span>
+                <span class="config-path" v-if="config.basePath && config.backendType === 'gitlab'">{{ config.repoName }} ({{ config.branch || 'main' }})</span>
+                <span class="config-path" v-else-if="config.basePath">{{ config.basePath }}</span>
                 <span class="config-path" v-else-if="config.repoName">{{ config.repoName }} ({{ config.branch || 'main' }})</span>
               </div>
             </div>
@@ -364,7 +365,7 @@ onMounted(() => {
         <CloudUpload :size="40" class="empty-icon" />
         <p class="empty-title">No sync backends configured</p>
         <p class="empty-desc">
-          Add a backend to sync your files to Local storage, GitHub, Google Drive, or Google Photos.
+          Add a backend to sync your files to Local storage, GitHub, GitLab, Google Drive, or Google Photos.
         </p>
       </div>
     </div>
@@ -1200,7 +1201,7 @@ onMounted(() => {
 /* Backend type selector */
 .backend-selector {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   margin-bottom: 8px;
 }

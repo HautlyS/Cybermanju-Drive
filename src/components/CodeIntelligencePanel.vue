@@ -131,7 +131,7 @@ const SymbolTreeNode = defineComponent({
   },
   setup(props) {
     function handleClick() {
-      console.log('Jump to', props.symbol.name, 'line', props.symbol.startLine)
+      // TODO: emit event to navigate to file/line in code viewer
     }
 
     return () => h('div', { class: 'symbol-node-wrapper' }, [

@@ -1126,6 +1126,7 @@ dependencies = [
  "mime_guess",
  "ml-dsa",
  "pqcrypto-mlkem",
+ "rand_core 0.10.1",
  "rand_core 0.6.4",
  "rayon",
  "redb",

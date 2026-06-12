@@ -232,28 +232,37 @@ pub fn encrypt_file(
                     Ok(encrypted) => {
                         // Write encrypted bytes to .enc file
                         let enc_path = format!("{}.enc", original_path);
-                        if let Err(e) = std::fs::write(&enc_path, &encrypted.ciphertext) {
-                            log::error!(
-                                "Failed to write encrypted file {}: {}",
-                                enc_path,
+                        let enc_write_ok = std::fs::write(&enc_path, &encrypted.ciphertext)
+                            .map_err(|e| {
+                                log::error!("Failed to write encrypted file {}: {}", enc_path, e);
                                 e
-                            );
-                        }
+                            });
 
                         // Write metadata JSON to .enc.meta.json
                         let meta: EncryptedFileMeta = (&encrypted).into();
                         let meta_path = format!("{}.enc.meta.json", original_path);
-                        if let Ok(meta_json) = serde_json::to_string_pretty(&meta) {
-                            if let Err(e) = std::fs::write(&meta_path, meta_json) {
-                                log::error!(
-                                    "Failed to write encryption metadata {}: {}",
-                                    meta_path,
-                                    e
-                                );
-                            }
-                        }
+                        let meta_json = serde_json::to_string_pretty(&meta).ok();
+                        let meta_write_ok = meta_json
+                            .as_ref()
+                            .and_then(|mj| {
+                                std::fs::write(&meta_path, mj)
+                                    .map_err(|e| {
+                                        log::error!("Failed to write encryption metadata {}: {}", meta_path, e);
+                                        e
+                                    })
+                                    .ok()
+                            })
+                            .is_some();
 
-                        Some(encrypted.algorithm.clone())
+                        // Only mark as encrypted if BOTH writes succeeded
+                        if enc_write_ok.is_ok() && meta_write_ok {
+                            Some(encrypted.algorithm.clone())
+                        } else {
+                            // Cleanup: remove partial .enc file if it exists
+                            let _ = std::fs::remove_file(&enc_path);
+                            let _ = std::fs::remove_file(&meta_path);
+                            None
+                        }
                     }
                     Err(e) => {
                         log::error!(

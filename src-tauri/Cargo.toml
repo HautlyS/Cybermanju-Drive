@@ -24,7 +24,6 @@ tauri-plugin-os = "2"
 tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
@@ -50,10 +49,6 @@ zstd = "0.13"
 brotli = "7"
 # Full-text search
 tantivy = "0.22"
-# Approximate nearest-neighbor search (face clustering)
-hnsw = "0.1"
-# Tree-sitter
-tree-sitter = "0.24"
 # EXIF GPS
 kamadak-exif = "0.5"
 # Thumbnail generation
@@ -65,10 +60,6 @@ mime_guess = "2"
 chacha20poly1305 = "0.10"
 # Logging
 log = "0.4"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-# Async
-futures = "0.3"
 # Base64 for key serialization
 base64 = "0.22"
 # Password hashing

@@ -64,11 +64,16 @@ pub struct SyncConfig {
     pub id: String,
     pub backend_type: SyncBackendType,
     pub enabled: bool,
+    /// Local: directory path, GitLab: instance URL (e.g., https://gitlab.com)
     pub base_path: Option<String>,
+    /// GitHub: owner/repo, GitLab: project ID or namespace/project path
     pub repo_name: Option<String>,
     pub branch: Option<String>,
+    /// GitHub: PAT, GitLab: PAT/OAuth, Google: OAuth2 Bearer token
     pub token: Option<String>,
+    /// Google Drive: folder ID
     pub folder_id: Option<String>,
+    /// Google Photos: album ID
     pub album_id: Option<String>,
     pub auto_sync: bool,
     pub compress_before_upload: bool,

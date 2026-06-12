@@ -137,7 +137,7 @@ pub fn import_file(
         String::new()
     };
 
-    let _ = tantivy_index.add_document(
+    if let Err(e) = tantivy_index.add_document(
         &file_id,
         &file_node.name,
         &content_text,
@@ -147,7 +147,9 @@ pub fn import_file(
         file_node.gps_lat.is_some(),
         &file_node.created_at,
         file_node.hash_blake3.as_deref(),
-    );
+    ) {
+        log::warn!("Failed to index file {} in Tantivy: {}", file_id, e);
+    }
 
     log::info!(
         "Imported {} ({}) in {}ms",
@@ -335,7 +337,7 @@ pub fn scan_directory(
             String::new()
         };
 
-        let _ = tantivy_index.add_document_no_commit(
+        if let Err(e) = tantivy_index.add_document_no_commit(
             &file_id,
             &file_node.name,
             &content_text,
@@ -345,7 +347,9 @@ pub fn scan_directory(
             file_node.gps_lat.is_some(),
             &file_node.created_at,
             file_node.hash_blake3.as_deref(),
-        );
+        ) {
+            log::warn!("Failed to index file {} in Tantivy (batch): {}", file_id, e);
+        }
 
         if is_dir {
             folders_imported += 1;
@@ -422,7 +426,7 @@ pub fn rebuild_search_index(state: State<'_, AppState>) -> Result<u32, String> {
             String::new()
         };
 
-        let _ = tantivy_index.add_document_no_commit(
+        if let Err(e) = tantivy_index.add_document_no_commit(
             &node.id,
             &node.name,
             &content_text,
@@ -432,7 +436,9 @@ pub fn rebuild_search_index(state: State<'_, AppState>) -> Result<u32, String> {
             node.gps_lat.is_some(),
             &node.created_at,
             node.hash_blake3.as_deref(),
-        );
+        ) {
+            log::warn!("Failed to index file {} during rebuild: {}", node.id, e);
+        }
         count += 1;
     }
 

@@ -1,8 +1,9 @@
 // Cybermanju Drive — Storage Sync Backends
-// Four backend implementations: Local, GitHub, Google Drive, Google Photos
+// Five backend implementations: Local, GitHub, GitLab, Google Drive, Google Photos
 // All HTTP backends use reqwest::blocking (no curl subprocess).
 
 use crate::sync::models::*;
+use crate::sync::oauth::{self, OAuthCredentials};
 use log::info;
 use std::fs;
 use std::path::Path;
@@ -87,6 +88,8 @@ fn parse_repo(repo_name: &str) -> Result<(String, String), String> {
 fn http_client() -> Result<reqwest::blocking::Client, String> {
     reqwest::blocking::Client::builder()
         .user_agent("CybermanjuDrive/0.1")
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(300))
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {}", e))
 }
@@ -592,12 +595,16 @@ impl StorageBackend for GitHubBackend {
             .send()
             .map_err(|e| format!("GitHub connection test request failed: {}", e))?;
 
-        if resp.status().as_u16() == 200 {
+        let status = resp.status().as_u16();
+        // Consume response body to free connection
+        let _ = resp.text();
+
+        if status == 200 {
             Ok(true)
         } else {
             Err(format!(
                 "GitHub connection test failed (HTTP {})",
-                resp.status()
+                status
             ))
         }
     }
@@ -661,21 +668,50 @@ impl StorageBackend for GitLabBackend {
             encoded_path
         );
 
-        let put_body = serde_json::json!({
-            "branch": self.branch,
-            "content": b64,
-            "encoding": "base64",
-            "commit_message": format!("Sync upload: {}", remote_path),
-        });
-
         let client = http_client()?;
-        let resp = client
-            .post(&url)
+
+        // First check if file exists to decide POST (create) vs PUT (update)
+        let check_resp = client
+            .head(&url)
             .header("PRIVATE-TOKEN", &self.token)
-            .header("Content-Type", "application/json")
-            .json(&put_body)
-            .send()
-            .map_err(|e| format!("GitLab upload request failed: {}", e))?;
+            .send();
+
+        let file_exists = match check_resp {
+            Ok(r) => r.status().as_u16() == 200,
+            Err(_) => false,
+        };
+
+        let resp = if file_exists {
+            // Update existing file
+            let put_body = serde_json::json!({
+                "branch": self.branch,
+                "content": b64,
+                "encoding": "base64",
+                "commit_message": format!("Sync update: {}", remote_path),
+            });
+            client
+                .put(&url)
+                .header("PRIVATE-TOKEN", &self.token)
+                .header("Content-Type", "application/json")
+                .json(&put_body)
+                .send()
+                .map_err(|e| format!("GitLab update request failed: {}", e))?
+        } else {
+            // Create new file
+            let post_body = serde_json::json!({
+                "branch": self.branch,
+                "content": b64,
+                "encoding": "base64",
+                "commit_message": format!("Sync upload: {}", remote_path),
+            });
+            client
+                .post(&url)
+                .header("PRIVATE-TOKEN", &self.token)
+                .header("Content-Type", "application/json")
+                .json(&post_body)
+                .send()
+                .map_err(|e| format!("GitLab upload request failed: {}", e))?
+        };
 
         let status = resp.status().as_u16();
         let body = resp
@@ -743,14 +779,17 @@ impl StorageBackend for GitLabBackend {
             encoded_path
         );
 
+        let delete_body = serde_json::json!({
+            "branch": self.branch,
+            "commit_message": format!("Sync delete: {}", remote_path),
+        });
+
         let client = http_client()?;
         let resp = client
             .delete(&url)
             .header("PRIVATE-TOKEN", &self.token)
-            .query(&[
-                ("branch", self.branch.as_str()),
-                ("commit_message", &format!("Sync delete: {}", remote_path)),
-            ])
+            .header("Content-Type", "application/json")
+            .json(&delete_body)
             .send()
             .map_err(|e| format!("GitLab delete request failed: {}", e))?;
 
@@ -800,7 +839,7 @@ impl StorageBackend for GitLabBackend {
 
         let mut files = Vec::new();
         for item in &items {
-            // Skip directories
+            // Skip directories (trees)
             if item["type"].as_str() == Some("tree") {
                 continue;
             }
@@ -812,17 +851,13 @@ impl StorageBackend for GitLabBackend {
                 .as_str()
                 .unwrap_or(&name)
                 .to_string();
-            let id = item["id"]
-                .as_str()
-                .unwrap_or("")
-                .to_string();
 
             files.push(RemoteFile {
                 name,
-                path,
+                path: path.clone(),
                 size_bytes: 0, // GitLab tree API doesn't return size
                 modified_at: String::new(),
-                url: format!("{}/-/blob/{}/{}", self.base_url, self.branch, id),
+                url: format!("{}/-/raw/{}/{}", self.base_url, self.branch, path),
             });
         }
 
@@ -848,12 +883,16 @@ impl StorageBackend for GitLabBackend {
             .send()
             .map_err(|e| format!("GitLab connection test request failed: {}", e))?;
 
-        if resp.status().as_u16() == 200 {
+        let status = resp.status().as_u16();
+        // Consume response body to free connection
+        let _ = resp.text();
+
+        if status == 200 {
             Ok(true)
         } else {
             Err(format!(
                 "GitLab connection test failed (HTTP {})",
-                resp.status()
+                status
             ))
         }
     }
@@ -866,6 +905,7 @@ impl StorageBackend for GitLabBackend {
 pub struct GoogleDriveBackend {
     token: String,
     folder_id: Option<String>,
+    credentials: Option<OAuthCredentials>,
 }
 
 impl GoogleDriveBackend {
@@ -873,7 +913,32 @@ impl GoogleDriveBackend {
         Self {
             token: token.to_string(),
             folder_id: folder_id.map(|s| s.to_string()),
+            credentials: None,
         }
+    }
+
+    pub fn with_credentials(
+        token: &str,
+        folder_id: Option<&str>,
+        credentials: OAuthCredentials,
+    ) -> Self {
+        Self {
+            token: token.to_string(),
+            folder_id: folder_id.map(|s| s.to_string()),
+            credentials: Some(credentials),
+        }
+    }
+
+    fn get_valid_token(&mut self) -> Result<String, String> {
+        if let Some(ref mut creds) = self.credentials {
+            // Try to refresh if expired (with 5 minute buffer)
+            if creds.is_expired(300) {
+                info!("Google Drive token expired, refreshing...");
+                oauth::refresh_google_token(creds)?;
+                self.token = creds.access_token.clone();
+            }
+        }
+        Ok(self.token.clone())
     }
 }
 
@@ -1067,9 +1132,10 @@ impl StorageBackend for GoogleDriveBackend {
                 .as_str()
                 .unwrap_or("")
                 .to_string();
+            // size can be a number or string depending on the API response
             let size = item["size"]
-                .as_str()
-                .and_then(|s| s.parse().ok())
+                .as_u64()
+                .or_else(|| item["size"].as_str().and_then(|s| s.parse().ok()))
                 .unwrap_or(0);
             let modified = item["modifiedTime"]
                 .as_str()
@@ -1107,12 +1173,16 @@ impl StorageBackend for GoogleDriveBackend {
             .send()
             .map_err(|e| format!("Google Drive connection test request failed: {}", e))?;
 
-        if resp.status().as_u16() == 200 {
+        let status = resp.status().as_u16();
+        // Consume response body to free connection
+        let _ = resp.text();
+
+        if status == 200 {
             Ok(true)
         } else {
             Err(format!(
                 "Google Drive connection test failed (HTTP {})",
-                resp.status()
+                status
             ))
         }
     }
@@ -1125,6 +1195,7 @@ impl StorageBackend for GoogleDriveBackend {
 pub struct GooglePhotosBackend {
     token: String,
     album_id: Option<String>,
+    credentials: Option<OAuthCredentials>,
 }
 
 impl GooglePhotosBackend {
@@ -1132,6 +1203,19 @@ impl GooglePhotosBackend {
         Self {
             token: token.to_string(),
             album_id: album_id.map(|s| s.to_string()),
+            credentials: None,
+        }
+    }
+
+    pub fn with_credentials(
+        token: &str,
+        album_id: Option<&str>,
+        credentials: OAuthCredentials,
+    ) -> Self {
+        Self {
+            token: token.to_string(),
+            album_id: album_id.map(|s| s.to_string()),
+            credentials: Some(credentials),
         }
     }
 }
@@ -1383,12 +1467,16 @@ impl StorageBackend for GooglePhotosBackend {
             .send()
             .map_err(|e| format!("Google Photos connection test request failed: {}", e))?;
 
-        if resp.status().as_u16() == 200 {
+        let status = resp.status().as_u16();
+        // Consume response body to free connection
+        let _ = resp.text();
+
+        if status == 200 {
             Ok(true)
         } else {
             Err(format!(
                 "Google Photos connection test failed (HTTP {})",
-                resp.status()
+                status
             ))
         }
     }

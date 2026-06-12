@@ -289,12 +289,12 @@ export interface SyncConfig {
   id: string
   backendType: SyncBackendType
   enabled: boolean
-  basePath?: string
-  repoName?: string
+  basePath?: string            // Local: directory path, GitLab: instance URL (e.g., https://gitlab.com)
+  repoName?: string            // GitHub: owner/repo, GitLab: project ID or path
   branch?: string
-  token?: string
-  folderId?: string
-  albumId?: string
+  token?: string               // GitHub: PAT, GitLab: PAT/OAuth, Google: OAuth2 Bearer token
+  folderId?: string            // Google Drive: folder ID
+  albumId?: string             // Google Photos: album ID
   autoSync: boolean
   compressBeforeUpload: boolean
   createPreviews: boolean

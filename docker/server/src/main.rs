@@ -191,6 +191,7 @@ fn serve_static_file(stream: &mut TcpStream, static_dir: &Path, request_path: &s
 struct AppState {
     static_dir: PathBuf,
     db_path: String,
+    dashboard: web_dashboard::WebDashboard,
 }
 
 fn handle_connection(state: &AppState, mut stream: TcpStream) {
@@ -226,21 +227,28 @@ fn handle_connection(state: &AppState, mut stream: TcpStream) {
     let method = parts[0];
     let path = parts[1];
 
-    // Read headers to determine Content-Length
+    // Read headers to determine Content-Length and Authorization
     let mut content_length: usize = 0;
+    let mut auth_header: Option<String> = None;
     loop {
         let mut line = String::new();
         if reader.read_line(&mut line).is_err() || line == "\r\n" || line.is_empty() {
             break;
         }
-        let line = line.trim().to_lowercase();
-        if line.starts_with("content-length:") {
-            content_length = line
+        let line_trimmed = line.trim().to_lowercase();
+        if line_trimmed.starts_with("content-length:") {
+            content_length = line_trimmed
                 .strip_prefix("content-length:")
-                .unwrap()
+                .unwrap_or_default()
                 .trim()
                 .parse()
                 .unwrap_or(0);
+        } else if line_trimmed.starts_with("authorization:") {
+            let val = line.trim();
+            auth_header = val
+                .strip_prefix("Authorization:")
+                .or_else(|| val.strip_prefix("authorization:"))
+                .map(|s| s.trim().to_string());
         }
     }
 
@@ -257,9 +265,13 @@ fn handle_connection(state: &AppState, mut stream: TcpStream) {
 
     // Route: /api/* → web dashboard handlers, everything else → static files
     if path.starts_with("/api/") || path == "/api" {
-        // Delegate to the web dashboard API handlers (returns a String response)
-        let dashboard = web_dashboard::WebDashboard::new(0, &state.db_path);
-        let response = web_dashboard::handle_request(&dashboard, method, path, &body);
+        let response = web_dashboard::handle_request(
+            &state.dashboard,
+            method,
+            path,
+            &body,
+            auth_header.as_deref(),
+        );
         let _ = stream.write_all(response.as_bytes());
     } else if method == "OPTIONS" {
         // CORS preflight for static assets
@@ -312,7 +324,8 @@ fn main() {
 
     let state = Arc::new(AppState {
         static_dir,
-        db_path,
+        db_path: db_path.clone(),
+        dashboard: web_dashboard::WebDashboard::new(port, &db_path),
     });
 
     let addr = format!("0.0.0.0:{}", port);

@@ -133,7 +133,7 @@ impl WebDashboard {
         // Create shutdown channel
         let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>();
         {
-            let mut tx_guard = self.shutdown_tx.lock().unwrap();
+            let mut tx_guard = self.shutdown_tx.lock().expect("shutdown_tx lock poisoned");
             *tx_guard = Some(shutdown_tx);
         }
 
@@ -191,7 +191,7 @@ impl WebDashboard {
 
         // Store the thread handle for later joining
         {
-            let mut thread_guard = self.server_thread.lock().unwrap();
+            let mut thread_guard = self.server_thread.lock().expect("server_thread lock poisoned");
             *thread_guard = Some(handle);
         }
 
@@ -204,7 +204,7 @@ impl WebDashboard {
 
         // Send shutdown signal via channel
         {
-            let mut tx_guard = self.shutdown_tx.lock().unwrap();
+            let mut tx_guard = self.shutdown_tx.lock().expect("shutdown_tx lock poisoned");
             if let Some(tx) = tx_guard.take() {
                 let _ = tx.send(());
             }
@@ -221,7 +221,7 @@ impl WebDashboard {
 
         // Join the server thread to ensure clean shutdown
         {
-            let mut thread_guard = self.server_thread.lock().unwrap();
+            let mut thread_guard = self.server_thread.lock().expect("server_thread lock poisoned");
             if let Some(handle) = thread_guard.take() {
                 if let Err(e) = handle.join() {
                     error!("Web Dashboard thread join error: {:?}", e);
@@ -353,7 +353,10 @@ fn handle_connection(dashboard: &WebDashboard, mut stream: TcpStream) {
         .filter(|o| ALLOWED_ORIGINS.contains(o));
 
     // Handle the request — use the shared DB handle
-    let db_guard = dashboard.db.lock().unwrap();
+    let db_guard = match dashboard.db.lock() {
+        Ok(g) => g,
+        Err(_) => return json_error(500, "Database lock poisoned", origin),
+    };
     let response = handle_request(
         dashboard,
         &db_guard,
@@ -617,7 +620,10 @@ fn check_rate_limit(
     rate_limits: &Mutex<HashMap<String, (u32, Instant)>>,
     client_ip: &str,
 ) -> bool {
-    let mut limits = rate_limits.lock().unwrap();
+    let mut limits = match rate_limits.lock() {
+        Ok(g) => g,
+        Err(_) => return false, // If lock is poisoned, allow the request (fail open)
+    };
     let now = Instant::now();
 
     // Clean up stale entries (older than 2x the window)

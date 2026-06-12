@@ -482,7 +482,7 @@ impl SimHashIndex {
 
 /// Cached SimHash projections — generated once, reused across all calls.
 /// Avoids regenerating 64×128 = 8192 BLAKE3 hashes per `to_binary_hash` call.
-fn cached_projections() -> &'static [[f32; EMBEDDING_DIM]; HASH_BITS] {
+fn cached_projections() -> &'static Vec<[f32; EMBEDDING_DIM]> {
     static PROJECTIONS: OnceLock<Vec<[f32; EMBEDDING_DIM]>> = OnceLock::new();
     PROJECTIONS.get_or_init(|| SimHashIndex::generate_projections(42))
 }
@@ -706,33 +706,49 @@ pub fn find_medoid(embeddings: &[Vec<f32>]) -> Option<Vec<f32>> {
 ///   2. Only do full recomputation for small clusters (< 20)
 ///   3. For large clusters: stick with current medoid (stable)
 ///
+/// When cluster_embeddings is empty (common path from detect_faces),
+/// compares new embedding directly against current medoid.
+///
 /// COMPLEXITY: O(n * d) amortized
 pub fn update_medoid_incremental(
     current_medoid: &[f32],
     cluster_embeddings: &[Vec<f32>],
     new_embedding: &[f32],
 ) -> Vec<f32> {
-    // Quick check: compute total distance from new embedding to existing cluster
-    let new_total: f32 = cluster_embeddings
-        .iter()
-        .map(|e| embedding_distance(new_embedding, e))
-        .sum();
+    // Distance from new embedding to current medoid
+    let new_to_medoid = embedding_distance(current_medoid, new_embedding);
 
-    // Current medoid's total distance (approximate: use distance to new embedding)
-    let current_approx = embedding_distance(current_medoid, new_embedding);
+    // If cluster_embeddings is provided, use aggregate distance for better decision
+    if !cluster_embeddings.is_empty() {
+        let new_total: f32 = cluster_embeddings
+            .iter()
+            .map(|e| embedding_distance(new_embedding, e))
+            .sum();
+        let current_approx = embedding_distance(current_medoid, new_embedding);
 
-    // If new embedding is significantly better, consider it
-    if new_total < current_approx * cluster_embeddings.len() as f32 * 0.8 {
-        // Full recomputation for small clusters
-        if cluster_embeddings.len() < 20 {
-            let mut all = cluster_embeddings.to_vec();
-            all.push(new_embedding.to_vec());
-            find_medoid(&all).unwrap_or_else(|| new_embedding.to_vec())
-        } else {
-            new_embedding.to_vec()
+        // If new embedding is significantly better, consider it
+        if new_total < current_approx * cluster_embeddings.len() as f32 * 0.8 {
+            if cluster_embeddings.len() < 20 {
+                let mut all = cluster_embeddings.to_vec();
+                all.push(new_embedding.to_vec());
+                return find_medoid(&all).unwrap_or_else(|| new_embedding.to_vec());
+            } else {
+                return new_embedding.to_vec();
+            }
         }
-    } else {
+        return current_medoid.to_vec();
+    }
+
+    // No cluster embeddings available — use distance-only heuristic:
+    // If new embedding is closer to any existing member than the current medoid,
+    // it's a good candidate. But without member data, be conservative and
+    // only switch if the new embedding is very close to the medoid direction.
+    if new_to_medoid < 0.1 {
+        // New embedding is very close to medoid — likely same person, keep medoid
         current_medoid.to_vec()
+    } else {
+        // New embedding is different — could be a better representative
+        new_embedding.to_vec()
     }
 }
 
@@ -1343,41 +1359,6 @@ fn collect_clusters_from_labels(
 
     clusters.sort_unstable_by(|a, b| b.members.len().cmp(&a.members.len()));
     clusters
-}
-
-/// Compute cluster cohesion: average pairwise cosine distance.
-/// Lower = tighter cluster = better.
-///
-/// COMPLEXITY: O(n^2 * d) for exact, O(n * d) for sample-based
-fn compute_cohesion(embeddings: &[Vec<f32>]) -> f32 {
-    let n = embeddings.len();
-    if n < 2 {
-        return 0.0;
-    }
-
-    // For large clusters, use sample-based estimation
-    if n > 50 {
-        let sample_size = 20.min(n);
-        let step = n / sample_size;
-        let total_pairs = sample_size * (sample_size - 1) / 2;
-        let mut total_dist = 0.0f32;
-        let samples: Vec<_> = (0..n).step_by(step.max(1)).take(sample_size).collect();
-        for i in 0..samples.len() {
-            for j in (i + 1)..samples.len() {
-                total_dist += embedding_distance(&embeddings[samples[i]], &embeddings[samples[j]]);
-            }
-        }
-        return total_dist / total_pairs as f32;
-    }
-
-    let total_pairs = (n * (n - 1)) / 2;
-    let mut total_dist = 0.0f32;
-    for i in 0..n {
-        for j in (i + 1)..n {
-            total_dist += embedding_distance(&embeddings[i], &embeddings[j]);
-        }
-    }
-    total_dist / total_pairs as f32
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

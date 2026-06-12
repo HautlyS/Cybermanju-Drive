@@ -136,8 +136,7 @@ async function handlePredefined(type: string) {
 }
 
 function handleSelectCollection(collectionId: string) {
-  // Conceptual: could open collection view or filter files
-  console.log('Selected collection:', collectionId)
+  // TODO: open collection view or filter files by collection
 }
 </script>
 
