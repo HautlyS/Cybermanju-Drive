@@ -3,7 +3,7 @@
 
 export type ViewMode = 'grid' | 'list' | 'masonry'
 export type PanelType = 'landing' | 'files' | 'preview' | 'encryption' | 'compression' | 'collections' | 'faces' | 'map' | 'code' | 'search' | 'style' | 'accounts' | 'loose-groups' | 'sync' | 'webdash' | 'users' | 'dashboard'
-export type SidebarSection = 'tree' | 'locations' | 'collections' | 'people' | 'styles' | 'loose' | 'users' | 'sync' | 'dashboard'
+export type SidebarSection = 'tree' | 'locations' | 'collections' | 'people' | 'styles' | 'loose' | 'users' | 'sync' | 'dashboard' | 'landing'
 export type EncryptionAlgo = 'kyber1024' | 'dilithium5' | 'frodokem1344' | 'hybrid' | 'aes256'
 export type CompressionType = 'none' | 'lz4' | 'zstd' | 'triple'
 export type AccountType = 'local' | 'cloud' | 'network'

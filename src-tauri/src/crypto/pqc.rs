@@ -22,14 +22,14 @@ use pqcrypto_mlkem::mlkem1024;
 use pqcrypto_mlkem::mlkem768;
 
 // Real ML-DSA from ml-dsa (FIPS 204, formerly CRYSTALS-Dilithium)
-use ml_dsa::{Generate, Keypair, MlDsa44, MlDsa65, MlDsa87, SigningKey, SignatureEncoding, Verifier};
+use ml_dsa::{
+    Generate, Keypair, MlDsa44, MlDsa65, MlDsa87, SignatureEncoding, SigningKey, Verifier,
+};
 use pqcrypto_traits::kem::{Ciphertext as _, PublicKey as _, SecretKey as _, SharedSecret as _};
 use signature::Signer;
 
 // X25519 for hybrid classical component
-use x25519_dalek::{
-    PublicKey as X25519PublicKey, StaticSecret as X25519StaticSecret,
-};
+use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret as X25519StaticSecret};
 
 type HmacSha512 = Hmac<Sha512>;
 

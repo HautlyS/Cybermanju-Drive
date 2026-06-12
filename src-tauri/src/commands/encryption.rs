@@ -3,9 +3,7 @@ use redb::ReadableTable;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::crypto::pqc::{
-    self, algorithm_from_str, EncryptedFileMeta, KeyPair, PqcEngine,
-};
+use crate::crypto::pqc::{self, algorithm_from_str, EncryptedFileMeta, KeyPair, PqcEngine};
 use crate::AppState;
 
 /// Status returned when encrypting/decrypting a file.

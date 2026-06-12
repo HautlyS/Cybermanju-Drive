@@ -275,7 +275,11 @@ fn handle_connection(dashboard: &WebDashboard, mut stream: TcpStream) {
 
     // ── Rate limiting check ──
     if !check_rate_limit(&dashboard.rate_limits, &client_ip) {
-        write_http_json(&mut stream, 429, r#"{"error":true,"status":429,"message":"Rate limit exceeded"}"#);
+        write_http_json(
+            &mut stream,
+            429,
+            r#"{"error":true,"status":429,"message":"Rate limit exceeded"}"#,
+        );
         return;
     }
 
@@ -283,7 +287,13 @@ fn handle_connection(dashboard: &WebDashboard, mut stream: TcpStream) {
     // The BufReader borrow ends when `parse_http_request` returns,
     // leaving `stream` available for writing the response.
     let parse_result = parse_http_request(&stream);
-    let ParsedRequest { method, path, body, auth_header, effective_origin } = match parse_result {
+    let ParsedRequest {
+        method,
+        path,
+        body,
+        auth_header,
+        effective_origin,
+    } = match parse_result {
         Ok(r) => r,
         Err((status, msg)) => {
             write_http_json(&mut stream, status, &msg);
@@ -330,13 +340,21 @@ fn parse_http_request(stream: &TcpStream) -> Result<ParsedRequest, (u16, String)
 
     // Read request line
     let mut request_line = String::new();
-    reader.read_line(&mut request_line).map_err(|_| (400, r#"{"error":true,"status":400,"message":"Bad Request"}"#.to_string()))?;
+    reader.read_line(&mut request_line).map_err(|_| {
+        (
+            400,
+            r#"{"error":true,"status":400,"message":"Bad Request"}"#.to_string(),
+        )
+    })?;
     let request_line = request_line.trim();
 
     // Parse method and path from "GET /path HTTP/1.1"
     let parts: Vec<&str> = request_line.splitn(3, ' ').collect();
     if parts.len() < 2 {
-        return Err((400, r#"{"error":true,"status":400,"message":"Bad Request"}"#.to_string()));
+        return Err((
+            400,
+            r#"{"error":true,"status":400,"message":"Bad Request"}"#.to_string(),
+        ));
     }
     let method = parts[0].to_string();
     let path = parts[1].to_string();
@@ -365,7 +383,10 @@ fn parse_http_request(stream: &TcpStream) -> Result<ParsedRequest, (u16, String)
 
     // ── Body size limit enforcement ──
     if content_length > MAX_BODY_SIZE {
-        return Err((413, r#"{"error":true,"status":413,"message":"Request body too large"}"#.to_string()));
+        return Err((
+            413,
+            r#"{"error":true,"status":413,"message":"Request body too large"}"#.to_string(),
+        ));
     }
 
     // Read body if present (capped to MAX_BODY_SIZE for safety)
@@ -389,7 +410,13 @@ fn parse_http_request(stream: &TcpStream) -> Result<ParsedRequest, (u16, String)
         .filter(|o| ALLOWED_ORIGINS.contains(o))
         .map(|o| o.to_string());
 
-    Ok(ParsedRequest { method, path, body, auth_header, effective_origin })
+    Ok(ParsedRequest {
+        method,
+        path,
+        body,
+        auth_header,
+        effective_origin,
+    })
 }
 
 /// Write a JSON HTTP response.
@@ -411,7 +438,10 @@ fn write_http_json(stream: &mut TcpStream, status: u16, body: &str) {
          Content-Length: {}\r\n\
          \r\n\
          {}",
-        status, reason, body.len(), body
+        status,
+        reason,
+        body.len(),
+        body
     );
     let _ = stream.write_all(resp.as_bytes());
 }

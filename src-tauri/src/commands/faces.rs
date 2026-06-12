@@ -618,7 +618,8 @@ pub fn merge_face_groups(
         wt.insert(target_group_id.as_str(), serialized.as_str())
             .map_err(|e| e.to_string())?;
         // Remove source group
-        wt.remove(source_group_id.as_str()).map_err(|e| e.to_string())?;
+        wt.remove(source_group_id.as_str())
+            .map_err(|e| e.to_string())?;
 
         // Update FileNode references: replace source_group_id with target_group_id
         let mut ft_table = tx
@@ -669,7 +670,9 @@ pub fn delete_face_group(group_id: String, state: State<'_, AppState>) -> Result
         let mut fg_table = tx
             .open_table(crate::db::Database::get_face_groups_table())
             .map_err(|e| e.to_string())?;
-        fg_table.remove(group_id.as_str()).map_err(|e| e.to_string())?;
+        fg_table
+            .remove(group_id.as_str())
+            .map_err(|e| e.to_string())?;
 
         // Remove face_group_id from referenced FileNodes
         let mut ft_table = tx
