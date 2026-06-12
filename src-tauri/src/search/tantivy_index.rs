@@ -366,56 +366,36 @@ impl SearchIndex {
         let mut suggestions: Vec<SearchSuggestion> = Vec::new();
         let mut seen = HashSet::new();
 
-        // Iterate the term dictionary for the file_name field
-        let terms = searcher.terms_for_field(self.file_name_field)?;
-
-        // Seek to the prefix and collect matching terms
-        for (term, _) in terms.range(prefix..)? {
-            let term_str = std::str::from_utf8(term.as_ref()).unwrap_or("").to_string();
-
-            if !term_str.starts_with(prefix) {
-                break; // Past the prefix range
-            }
-
-            // Only include complete words (split on whitespace in the term)
-            for word in term_str.split_whitespace() {
-                let word_lower = word.to_lowercase();
-                if word_lower.starts_with(prefix)
-                    && !seen.contains(&word_lower)
-                    && word_lower.len() > prefix.len()
-                {
-                    seen.insert(word_lower.clone());
-                    suggestions.push(SearchSuggestion {
-                        text: word_lower,
-                        r#type: "completion".to_string(),
-                    });
+        for field in [self.file_name_field, self.content_text_field] {
+            for segment_reader in searcher.segment_readers() {
+                if suggestions.len() >= limit {
+                    return Ok(suggestions);
+                }
+                let inverted_index = segment_reader.inverted_index(*field)?;
+                let term_dict = inverted_index.terms();
+                let mut stream = term_dict.range().ge(prefix.as_bytes()).into_stream()?;
+                while stream.advance() {
                     if suggestions.len() >= limit {
                         return Ok(suggestions);
                     }
-                }
-            }
-        }
-
-        // Also check content_text field for completions
-        if let Ok(content_terms) = searcher.terms_for_field(self.content_text_field) {
-            for (term, _) in content_terms.range(prefix..)? {
-                let term_str = std::str::from_utf8(term.as_ref()).unwrap_or("").to_string();
-                if !term_str.starts_with(prefix) {
-                    break;
-                }
-                for word in term_str.split_whitespace() {
-                    let word_lower = word.to_lowercase();
-                    if word_lower.starts_with(prefix)
-                        && !seen.contains(&word_lower)
-                        && word_lower.len() > prefix.len()
-                    {
-                        seen.insert(word_lower.clone());
-                        suggestions.push(SearchSuggestion {
-                            text: word_lower,
-                            r#type: "completion".to_string(),
-                        });
-                        if suggestions.len() >= limit {
-                            return Ok(suggestions);
+                    let term_str = std::str::from_utf8(stream.key()).unwrap_or("");
+                    if !term_str.starts_with(prefix) {
+                        break;
+                    }
+                    for word in term_str.split_whitespace() {
+                        let word_lower = word.to_lowercase();
+                        if word_lower.starts_with(prefix)
+                            && !seen.contains(&word_lower)
+                            && word_lower.len() > prefix.len()
+                        {
+                            seen.insert(word_lower.clone());
+                            suggestions.push(SearchSuggestion {
+                                text: word_lower,
+                                r#type: "completion".to_string(),
+                            });
+                            if suggestions.len() >= limit {
+                                return Ok(suggestions);
+                            }
                         }
                     }
                 }

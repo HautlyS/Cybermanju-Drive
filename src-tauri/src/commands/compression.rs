@@ -1,5 +1,4 @@
 use chrono::Utc;
-use redb::ReadableTable;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -302,6 +301,7 @@ pub fn decompress_file(
         .as_ref()
         .and_then(|ctx| ctx.get("original_path").and_then(|v| v.as_str()))
         .filter(|p| std::path::Path::new(p).exists())
+        .map(|s| s.to_string())
         .or_else(|| {
             // Check for compressed .cyb3 file
             file_node

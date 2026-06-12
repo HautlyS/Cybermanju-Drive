@@ -80,7 +80,7 @@ pub fn start_dashboard(
     let running_flag = Arc::new(AtomicBool::new(true));
     let running_for_thread = running_flag.clone();
     let connections_for_thread = Arc::new(AtomicU64::new(0));
-    let connections_for_handler = connections_for_thread.clone();
+    let _connections_for_handler = connections_for_thread.clone();
 
     state.running.store(true, Ordering::SeqCst);
 

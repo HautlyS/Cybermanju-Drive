@@ -9,7 +9,6 @@ use crate::AppState;
 use chrono::Utc;
 use log::{error, info, warn};
 use rayon::prelude::*;
-use redb::ReadableTable;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};

@@ -140,7 +140,7 @@ pub fn start_sync(
     {
         let mut progress = sync_state.progress.lock().map_err(|e| e.to_string())?;
         *progress = SyncProgress {
-            total_files: file_ids.len() as u64,
+            total_files: file_ids.len() as u32,
             processed_files: 0,
             current_file: Some("Starting sync...".to_string()),
             status: SyncStatus::Syncing,

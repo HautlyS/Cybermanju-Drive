@@ -279,11 +279,10 @@ pub fn encrypt_file(
     };
 
     let now = Utc::now().to_rfc3339();
+    let enc_algorithm = actual_algorithm_used
+        .unwrap_or_else(|| format!("{}+ChaCha20Poly1305", algorithm_info(&algorithm).0));
     file_node.encrypted = true;
-    file_node.encryption_algorithm = Some(
-        actual_algorithm_used
-            .unwrap_or_else(|| format!("{}+ChaCha20Poly1305", algorithm_info(&algorithm).0)),
-    );
+    file_node.encryption_algorithm = Some(enc_algorithm.clone());
     file_node.modified_at = now.clone();
 
     // Write back
@@ -302,10 +301,7 @@ pub fn encrypt_file(
     Ok(EncryptionStatus {
         file_id: file_id.clone(),
         encrypted: true,
-        algorithm: Some(
-            actual_algorithm_used
-                .unwrap_or_else(|| format!("{}+ChaCha20Poly1305", algorithm_info(&algorithm).0)),
-        ),
+        algorithm: Some(enc_algorithm),
         updated_at: now,
     })
 }

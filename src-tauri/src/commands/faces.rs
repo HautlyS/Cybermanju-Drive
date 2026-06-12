@@ -95,7 +95,7 @@ pub fn detect_faces(
         }
 
         if let Some(idx) = matched_group_idx {
-            let (_group_id, ref mut group) = existing_groups[idx];
+            let group = &mut existing_groups[idx].1;
 
             if !group.file_ids.contains(&file_id) {
                 group.file_ids.push(file_id.clone());
@@ -266,8 +266,10 @@ pub fn detect_faces_batch_cmd(state: State<'_, AppState>) -> Result<ReclusterRes
             .collect();
         for fid in &file_keys {
             if let Some(fv) = ft_table.get(fid.as_str()).map_err(|e| e.to_string())? {
+                let node_str = fv.value().to_string();
+                drop(fv);
                 let mut file_node: FileNode =
-                    serde_json::from_str(fv.value()).map_err(|e| e.to_string())?;
+                    serde_json::from_str(&node_str).map_err(|e| e.to_string())?;
                 if !file_node.face_group_ids.is_empty() {
                     file_node.face_group_ids.clear();
                     let file_serialized =
@@ -359,9 +361,6 @@ pub fn recluster_faces(
     let fg_table = tx_read
         .open_table(crate::db::Database::get_face_groups_table())
         .map_err(|e| e.to_string())?;
-    let file_table = tx_read
-        .open_table(crate::db::Database::get_files_table())
-        .map_err(|e| e.to_string())?;
 
     // Collect unique file IDs from all face groups
     let mut file_ids_seen: HashSet<String> = HashSet::new();
@@ -438,8 +437,10 @@ pub fn recluster_faces(
             .collect();
         for fid in &file_keys {
             if let Some(fv) = ft_table.get(fid.as_str()).map_err(|e| e.to_string())? {
+                let node_str = fv.value().to_string();
+                drop(fv);
                 let mut file_node: FileNode =
-                    serde_json::from_str(fv.value()).map_err(|e| e.to_string())?;
+                    serde_json::from_str(&node_str).map_err(|e| e.to_string())?;
                 if !file_node.face_group_ids.is_empty() {
                     file_node.face_group_ids.clear();
                     let file_serialized =
@@ -493,8 +494,10 @@ pub fn recluster_faces(
             // Update file nodes to reference this face group
             for file_id in &cluster.members {
                 if let Some(fv) = ft_table.get(file_id.as_str()).map_err(|e| e.to_string())? {
+                    let node_str = fv.value().to_string();
+                    drop(fv);
                     let mut file_node: FileNode =
-                        serde_json::from_str(fv.value()).map_err(|e| e.to_string())?;
+                        serde_json::from_str(&node_str).map_err(|e| e.to_string())?;
                     if !file_node.face_group_ids.contains(&group_id) {
                         file_node.face_group_ids.push(group_id.clone());
                     }
@@ -680,8 +683,10 @@ pub fn delete_face_group(group_id: String, state: State<'_, AppState>) -> Result
             .map_err(|e| e.to_string())?;
         for fid in &group.file_ids {
             if let Some(fv) = ft_table.get(fid.as_str()).map_err(|e| e.to_string())? {
+                let node_str = fv.value().to_string();
+                drop(fv);
                 let mut file_node: FileNode =
-                    serde_json::from_str(fv.value()).map_err(|e| e.to_string())?;
+                    serde_json::from_str(&node_str).map_err(|e| e.to_string())?;
                 file_node.face_group_ids.retain(|id| id != &group_id);
                 let file_serialized =
                     serde_json::to_string(&file_node).map_err(|e| e.to_string())?;

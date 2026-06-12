@@ -59,7 +59,7 @@ pub fn import_file(
         infer::get_from_path(path)
             .ok()
             .flatten()
-            .and_then(|m| m.mime_type())
+            .map(|m| m.mime_type())
             .map(|m| m.to_string())
             .or_else(|| mime_guess::from_path(path).first().map(|m| m.to_string()))
     };
@@ -279,7 +279,7 @@ pub fn scan_directory(
             infer::get_from_path(path)
                 .ok()
                 .flatten()
-                .and_then(|m| m.mime_type())
+                .map(|m| m.mime_type())
                 .map(|m| m.to_string())
                 .or_else(|| mime_guess::from_path(path).first().map(|m| m.to_string()))
         };
@@ -408,7 +408,7 @@ pub fn upload_file(
         return Err(format!("File not found: {}", file_path));
     }
 
-    let file_name = path
+    let _file_name = path
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("upload")
@@ -505,7 +505,7 @@ fn extract_gps_if_image(path: &std::path::Path) -> (Option<f64>, Option<f64>) {
     };
 
     let latitude = exif_data
-        .get_field(exif::Tag::GPS_GPSLatitude, exif::In::PRIMARY)
+        .get_field(exif::Tag::GPSLatitude, exif::In::PRIMARY)
         .and_then(|field| {
             if let exif::Value::Rational(ref rationals) = field.value {
                 if rationals.len() >= 3 {
@@ -522,7 +522,7 @@ fn extract_gps_if_image(path: &std::path::Path) -> (Option<f64>, Option<f64>) {
         });
 
     let longitude = exif_data
-        .get_field(exif::Tag::GPS_GPSLongitude, exif::In::PRIMARY)
+        .get_field(exif::Tag::GPSLongitude, exif::In::PRIMARY)
         .and_then(|field| {
             if let exif::Value::Rational(ref rationals) = field.value {
                 if rationals.len() >= 3 {
@@ -539,7 +539,7 @@ fn extract_gps_if_image(path: &std::path::Path) -> (Option<f64>, Option<f64>) {
         });
 
     let lat_ref = exif_data
-        .get_field(exif::Tag::GPS_GPSLatitudeRef, exif::In::PRIMARY)
+        .get_field(exif::Tag::GPSLatitudeRef, exif::In::PRIMARY)
         .and_then(|f| {
             if let exif::Value::Ascii(ref bytes) = f.value {
                 std::str::from_utf8(bytes).ok().map(|s| s.to_string())
@@ -549,10 +549,13 @@ fn extract_gps_if_image(path: &std::path::Path) -> (Option<f64>, Option<f64>) {
         });
 
     let lon_ref = exif_data
-        .get_field(exif::Tag::GPS_GPSLongitudeRef, exif::In::PRIMARY)
+        .get_field(exif::Tag::GPSLongitudeRef, exif::In::PRIMARY)
         .and_then(|f| {
             if let exif::Value::Ascii(ref bytes) = f.value {
-                std::str::from_utf8(bytes).ok().map(|s| s.to_string())
+                bytes
+                    .first()
+                    .and_then(|b| std::str::from_utf8(b).ok())
+                    .map(|s| s.to_string())
             } else {
                 None
             }

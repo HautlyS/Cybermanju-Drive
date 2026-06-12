@@ -523,12 +523,6 @@ const TreeNode = defineComponent({
 .ql-icon {
   font-size: 14px;
 }
-  font-family: monospace;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-}
 
 /* Content */
 .sidebar-content {

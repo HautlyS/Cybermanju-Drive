@@ -877,7 +877,8 @@ fn delete_by_id(
             Ok(t) => t,
             Err(e) => return json_error(500, &format!("Table open error: {}", e), origin),
         };
-        table.remove(id).is_ok()
+        let removed = table.remove(id).is_ok();
+        removed
     };
     if let Err(e) = tx.commit() {
         return json_error(500, &format!("Commit error: {}", e), origin);
