@@ -79,7 +79,9 @@ fn find_latest_key(
         let key: crate::db::schema::EncryptionKey =
             serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
         // Match the algorithm family (e.g. "kyber768" and "hybrid" both map to Hybrid)
-        if key.algorithm == algorithm && (best.is_none() || key.created_at > best.as_ref().unwrap().created_at) {
+        if key.algorithm == algorithm
+            && (best.is_none() || key.created_at > best.as_ref().unwrap().created_at)
+        {
             best = Some(key);
         }
     }
@@ -423,15 +425,10 @@ pub fn get_encryption_status(
             .map_err(|e| e.to_string())?;
         let mut found = false;
         for (_, value) in table.iter().map_err(|e| e.to_string())?.flatten() {
-            if let Ok(node) =
-                serde_json::from_str::<crate::db::schema::FileNode>(value.value())
-            {
+            if let Ok(node) = serde_json::from_str::<crate::db::schema::FileNode>(value.value()) {
                 if node.encrypted {
                     found = true;
                     break;
-                }
-            }
-        }
                 }
             }
         }
