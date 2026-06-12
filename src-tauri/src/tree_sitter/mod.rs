@@ -143,10 +143,9 @@ fn extract_symbols_heuristic(content: &str, language: &str) -> Vec<Value> {
 
         // Check for function definitions
         for kw in &fn_keywords {
-            if trimmed.starts_with(kw) {
-                let rest = &trimmed[kw.len()..];
+            if let Some(rest) = trimmed.strip_prefix(kw) {
                 let name = rest
-                    .split(|c: char| c == '(' || c == '<' || c == ':' || c == '{' || c == ' ')
+                    .split(['(', '<', ':', '{', ' '])
                     .next()
                     .unwrap_or("")
                     .trim();
@@ -182,30 +181,30 @@ fn extract_symbols_heuristic(content: &str, language: &str) -> Vec<Value> {
         }
 
         // Rust-specific: pub trait, pub struct, pub enum
-        if language == "rust" {
-            if trimmed.starts_with("pub trait ") || trimmed.starts_with("trait ") {
-                let name = trimmed
-                    .split_whitespace()
-                    .nth(if trimmed.starts_with("pub trait ") {
-                        2
-                    } else {
-                        1
-                    })
-                    .and_then(|n| n.split('<').next())
-                    .unwrap_or("anonymous")
-                    .split('{')
-                    .next()
-                    .unwrap_or("anonymous")
-                    .trim();
-                symbols.push(json!({
-                    "name": name,
-                    "kind": "interface",
-                    "start_line": line_num,
-                    "end_line": line_num,
-                    "detail": trimmed,
-                    "children": [],
-                }));
-            }
+        if language == "rust"
+            && (trimmed.starts_with("pub trait ") || trimmed.starts_with("trait "))
+        {
+            let name = trimmed
+                .split_whitespace()
+                .nth(if trimmed.starts_with("pub trait ") {
+                    2
+                } else {
+                    1
+                })
+                .and_then(|n| n.split('<').next())
+                .unwrap_or("anonymous")
+                .split('{')
+                .next()
+                .unwrap_or("anonymous")
+                .trim();
+            symbols.push(json!({
+                "name": name,
+                "kind": "interface",
+                "start_line": line_num,
+                "end_line": line_num,
+                "detail": trimmed,
+                "children": [],
+            }));
         }
     }
 

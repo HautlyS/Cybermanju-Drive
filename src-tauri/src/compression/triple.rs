@@ -253,7 +253,7 @@ impl TripleCompressor {
             algorithm: format!("zstd level {}", self.zstd_level),
             input_size: lz4_out.len() as u64,
             output_size: zstd_out.len() as u64,
-            ratio: if lz4_out.len() > 0 {
+            ratio: if !lz4_out.is_empty() {
                 zstd_out.len() as f64 / lz4_out.len() as f64
             } else {
                 1.0
@@ -268,7 +268,7 @@ impl TripleCompressor {
             algorithm: format!("brotli level {}", self.brotli_level),
             input_size: zstd_out.len() as u64,
             output_size: brotli_out.len() as u64,
-            ratio: if zstd_out.len() > 0 {
+            ratio: if !zstd_out.is_empty() {
                 brotli_out.len() as f64 / zstd_out.len() as f64
             } else {
                 1.0
@@ -317,5 +317,11 @@ impl TripleCompressor {
     /// Compute BLAKE3 hash for deduplication
     pub fn blake3_hash(data: &[u8]) -> String {
         blake3::hash(data).to_hex().to_string()
+    }
+}
+
+impl Default for TripleCompressor {
+    fn default() -> Self {
+        Self::new()
     }
 }

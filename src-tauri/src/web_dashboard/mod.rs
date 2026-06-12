@@ -395,10 +395,8 @@ fn parse_http_request(stream: &TcpStream) -> Result<ParsedRequest, (u16, String)
         let mut buf = vec![0u8; read_size];
         if std::io::Read::read_exact(&mut reader, &mut buf).is_err() {
             String::new()
-        } else if let Ok(s) = String::from_utf8(buf) {
-            s
         } else {
-            String::new()
+            String::from_utf8(buf).unwrap_or_default()
         }
     } else {
         String::new()
@@ -906,14 +904,12 @@ fn list_geo_files(db: &RedbDb, origin: Option<&str>) -> String {
         Ok(i) => i,
         Err(e) => return json_error(500, &format!("Iteration error: {}", e), origin),
     };
-    for entry in iter {
-        if let Ok((_, value)) = entry {
-            if let Ok(obj) = serde_json::from_str::<serde_json::Value>(&value.value()) {
-                let has_lat = obj.get("gpsLat").and_then(|v| v.as_f64()).is_some();
-                let has_lng = obj.get("gpsLon").and_then(|v| v.as_f64()).is_some();
-                if has_lat && has_lng {
-                    results.push(obj);
-                }
+    for (_, value) in iter.flatten() {
+        if let Ok(obj) = serde_json::from_str::<serde_json::Value>(value.value()) {
+            let has_lat = obj.get("gpsLat").and_then(|v| v.as_f64()).is_some();
+            let has_lng = obj.get("gpsLon").and_then(|v| v.as_f64()).is_some();
+            if has_lat && has_lng {
+                results.push(obj);
             }
         }
     }
@@ -942,31 +938,29 @@ fn search_files(db: &RedbDb, query: &str, origin: Option<&str>) -> String {
         Ok(i) => i,
         Err(e) => return json_error(500, &format!("Iteration error: {}", e), origin),
     };
-    for entry in iter {
-        if let Ok((_, value)) = entry {
-            if let Ok(obj) = serde_json::from_str::<serde_json::Value>(&value.value()) {
-                let name = obj
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_lowercase();
-                let path = obj
-                    .get("path")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_lowercase();
-                let content = obj
-                    .get("content_text")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_lowercase();
+    for (_, value) in iter.flatten() {
+        if let Ok(obj) = serde_json::from_str::<serde_json::Value>(value.value()) {
+            let name = obj
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_lowercase();
+            let path = obj
+                .get("path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_lowercase();
+            let content = obj
+                .get("content_text")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_lowercase();
 
-                if name.contains(&search_term)
-                    || path.contains(&search_term)
-                    || content.contains(&search_term)
-                {
-                    results.push(obj);
-                }
+            if name.contains(&search_term)
+                || path.contains(&search_term)
+                || content.contains(&search_term)
+            {
+                results.push(obj);
             }
         }
     }
@@ -992,16 +986,14 @@ fn list_users_safe(db: &RedbDb, origin: Option<&str>) -> String {
         Ok(i) => i,
         Err(e) => return json_error(500, &format!("Iteration error: {}", e), origin),
     };
-    for entry in iter {
-        if let Ok((_, value)) = entry {
-            if let Ok(mut obj) = serde_json::from_str::<serde_json::Value>(&value.value()) {
-                // Strip password hashes for safety
-                if let Some(map) = obj.as_object_mut() {
-                    map.remove("passwordHash");
-                    map.remove("password_hash");
-                }
-                results.push(obj);
+    for (_, value) in iter.flatten() {
+        if let Ok(mut obj) = serde_json::from_str::<serde_json::Value>(value.value()) {
+            // Strip password hashes for safety
+            if let Some(map) = obj.as_object_mut() {
+                map.remove("passwordHash");
+                map.remove("password_hash");
             }
+            results.push(obj);
         }
     }
     let body = serde_json::to_string(&results).unwrap_or_else(|_| "[]".to_string());
@@ -1038,13 +1030,11 @@ fn login_user(db: &RedbDb, body: &str, jwt_secret: &[u8; 32], origin: Option<&st
         Ok(i) => i,
         Err(e) => return json_error(500, &format!("Iteration error: {}", e), origin),
     };
-    for entry in iter {
-        if let Ok((_, value)) = entry {
-            if let Ok(user) = serde_json::from_str::<serde_json::Value>(&value.value()) {
-                if user.get("username").and_then(|v| v.as_str()) == Some(username) {
-                    found_user = Some(user);
-                    break;
-                }
+    for (_, value) in iter.flatten() {
+        if let Ok(user) = serde_json::from_str::<serde_json::Value>(value.value()) {
+            if user.get("username").and_then(|v| v.as_str()) == Some(username) {
+                found_user = Some(user);
+                break;
             }
         }
     }
@@ -1149,17 +1139,15 @@ fn register_user_web(db: &RedbDb, body: &str, origin: Option<&str>) -> String {
         Ok(i) => i,
         Err(e) => return json_error(500, &format!("Iteration error: {}", e), origin),
     };
-    for entry in iter {
-        if let Ok((_, value)) = entry {
-            if let Ok(user) = serde_json::from_str::<serde_json::Value>(&value.value()) {
-                if user.get("username").and_then(|v| v.as_str()) == Some(username) {
-                    drop(tx);
-                    return json_error(
-                        409,
-                        &format!("Username '{}' already exists", username),
-                        origin,
-                    );
-                }
+    for (_, value) in iter.flatten() {
+        if let Ok(user) = serde_json::from_str::<serde_json::Value>(value.value()) {
+            if user.get("username").and_then(|v| v.as_str()) == Some(username) {
+                drop(tx);
+                return json_error(
+                    409,
+                    &format!("Username '{}' already exists", username),
+                    origin,
+                );
             }
         }
     }
@@ -1309,7 +1297,7 @@ fn verify_access_web(db: &RedbDb, body: &str, origin: Option<&str>) -> String {
     };
 
     if let Ok(Some(val)) = users_table.get(user_id) {
-        if let Ok(user) = serde_json::from_str::<serde_json::Value>(&val.value()) {
+        if let Ok(user) = serde_json::from_str::<serde_json::Value>(val.value()) {
             if user.get("role").and_then(|v| v.as_str()) == Some("admin") {
                 let resp = serde_json::json!({
                     "userId": user_id,
@@ -1338,30 +1326,29 @@ fn verify_access_web(db: &RedbDb, body: &str, origin: Option<&str>) -> String {
         Ok(i) => i,
         Err(e) => return json_error(500, &format!("Iteration error: {}", e), origin),
     };
-    for entry in iter {
-        if let Ok((_, value)) = entry {
-            if let Ok(perm) = serde_json::from_str::<serde_json::Value>(&value.value()) {
-                let p_user = perm.get("userId").and_then(|v| v.as_str()).unwrap_or("");
-                let p_file = perm.get("fileId").and_then(|v| v.as_str()).unwrap_or("");
-                let p_access = perm.get("access").and_then(|v| v.as_str()).unwrap_or("");
+    for (_, value) in iter.flatten() {
+        if let Ok(perm) = serde_json::from_str::<serde_json::Value>(value.value()) {
+            let p_user = perm.get("userId").and_then(|v| v.as_str()).unwrap_or("");
+            let p_file = perm.get("fileId").and_then(|v| v.as_str()).unwrap_or("");
+            let p_access = perm.get("access").and_then(|v| v.as_str()).unwrap_or("");
 
-                if p_user == user_id && p_file == file_id {
-                    if access_level_sufficient(p_access, required_access) {
-                        let resp = serde_json::json!({
-                            "userId": user_id,
-                            "fileId": file_id,
-                            "requiredAccess": required_access,
-                            "granted": true,
-                            "reason": "permission_match"
-                        });
-                        return http_response(
-                            200,
-                            "application/json",
-                            &serde_json::to_string(&resp).unwrap_or_default(),
-                            origin,
-                        );
-                    }
-                }
+            if p_user == user_id
+                && p_file == file_id
+                && access_level_sufficient(p_access, required_access)
+            {
+                let resp = serde_json::json!({
+                    "userId": user_id,
+                    "fileId": file_id,
+                    "requiredAccess": required_access,
+                    "granted": true,
+                    "reason": "permission_match"
+                });
+                return http_response(
+                    200,
+                    "application/json",
+                    &serde_json::to_string(&resp).unwrap_or_default(),
+                    origin,
+                );
             }
         }
     }
@@ -1397,12 +1384,10 @@ fn get_permissions_for_file(db: &RedbDb, file_id: &str, origin: Option<&str>) ->
         Ok(i) => i,
         Err(e) => return json_error(500, &format!("Iteration error: {}", e), origin),
     };
-    for entry in iter {
-        if let Ok((_, value)) = entry {
-            if let Ok(perm) = serde_json::from_str::<serde_json::Value>(&value.value()) {
-                if perm.get("fileId").and_then(|v| v.as_str()) == Some(file_id) {
-                    results.push(perm);
-                }
+    for (_, value) in iter.flatten() {
+        if let Ok(perm) = serde_json::from_str::<serde_json::Value>(value.value()) {
+            if perm.get("fileId").and_then(|v| v.as_str()) == Some(file_id) {
+                results.push(perm);
             }
         }
     }

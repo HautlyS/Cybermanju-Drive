@@ -78,7 +78,7 @@ impl OAuthCredentials {
             .text()
             .map_err(|e| format!("Failed to read token refresh response: {}", e))?;
 
-        if status < 200 || status >= 300 {
+        if !(200..300).contains(&status) {
             return Err(format!("Token refresh failed ({}): {}", status, body));
         }
 

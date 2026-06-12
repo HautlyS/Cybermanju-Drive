@@ -265,7 +265,7 @@ impl GitHubBackend {
         });
 
         let resp = client
-            .post(&format!(
+            .post(format!(
                 "https://api.github.com/repos/{}/{}/releases",
                 owner, repo
             ))
@@ -280,7 +280,7 @@ impl GitHubBackend {
             .text()
             .map_err(|e| format!("Failed to read release response: {}", e))?;
 
-        if status < 200 || status >= 300 {
+        if !(200..300).contains(&status) {
             return Err(format!(
                 "GitHub release creation failed ({}): {}",
                 status, body
@@ -311,7 +311,7 @@ impl GitHubBackend {
         let up_status = up_resp.status().as_u16();
         let up_body = up_resp.text().unwrap_or_default();
 
-        if up_status < 200 || up_status >= 300 {
+        if !(200..300).contains(&up_status) {
             return Err(format!(
                 "GitHub release upload failed ({}): {}",
                 up_status, up_body
@@ -371,7 +371,7 @@ impl StorageBackend for GitHubBackend {
             .text()
             .map_err(|e| format!("Failed to read upload response: {}", e))?;
 
-        if status < 200 || status >= 300 {
+        if !(200..300).contains(&status) {
             return Err(format!("GitHub upload failed ({}): {}", status, body));
         }
 
@@ -401,7 +401,7 @@ impl StorageBackend for GitHubBackend {
             .map_err(|e| format!("GitHub download request failed: {}", e))?;
 
         let status = resp.status().as_u16();
-        if status < 200 || status >= 300 {
+        if !(200..300).contains(&status) {
             let body = resp.text().unwrap_or_default();
             return Err(format!("GitHub download failed ({}): {}", status, body));
         }
@@ -452,7 +452,7 @@ impl StorageBackend for GitHubBackend {
         if get_status == 404 {
             return Ok(());
         }
-        if get_status < 200 || get_status >= 300 {
+        if !(200..300).contains(&get_status) {
             let body = get_resp.text().unwrap_or_default();
             return Err(format!("GitHub get SHA failed ({}): {}", get_status, body));
         }
@@ -481,7 +481,7 @@ impl StorageBackend for GitHubBackend {
             .map_err(|e| format!("GitHub delete request failed: {}", e))?;
 
         let del_status = del_resp.status().as_u16();
-        if del_status < 200 || del_status >= 300 {
+        if !(200..300).contains(&del_status) {
             let del_body = del_resp.text().unwrap_or_default();
             return Err(format!(
                 "GitHub delete failed ({}): {}",
@@ -512,7 +512,7 @@ impl StorageBackend for GitHubBackend {
             .text()
             .map_err(|e| format!("Failed to read list response: {}", e))?;
 
-        if status < 200 || status >= 300 {
+        if !(200..300).contains(&status) {
             return Err(format!("GitHub list failed ({}): {}", status, body));
         }
 
@@ -685,7 +685,7 @@ impl StorageBackend for GitLabBackend {
             .text()
             .map_err(|e| format!("Failed to read upload response: {}", e))?;
 
-        if status < 200 || status >= 300 {
+        if !(200..300).contains(&status) {
             return Err(format!("GitLab upload failed ({}): {}", status, body));
         }
 
@@ -719,7 +719,7 @@ impl StorageBackend for GitLabBackend {
             .map_err(|e| format!("GitLab download request failed: {}", e))?;
 
         let status = resp.status().as_u16();
-        if status < 200 || status >= 300 {
+        if !(200..300).contains(&status) {
             let body = resp.text().unwrap_or_default();
             return Err(format!("GitLab download failed ({}): {}", status, body));
         }
@@ -795,7 +795,7 @@ impl StorageBackend for GitLabBackend {
             .text()
             .map_err(|e| format!("Failed to read list response: {}", e))?;
 
-        if status < 200 || status >= 300 {
+        if !(200..300).contains(&status) {
             return Err(format!("GitLab list failed ({}): {}", status, body));
         }
 
@@ -858,6 +858,7 @@ impl StorageBackend for GitLabBackend {
 pub struct GoogleDriveBackend {
     token: String,
     folder_id: Option<String>,
+    #[allow(dead_code)]
     credentials: Option<OAuthCredentials>,
 }
 
@@ -882,6 +883,7 @@ impl GoogleDriveBackend {
         }
     }
 
+    #[allow(dead_code)]
     fn get_valid_token(&mut self) -> Result<String, String> {
         if let Some(ref mut creds) = self.credentials {
             // Try to refresh if expired (with 5 minute buffer)
@@ -953,7 +955,7 @@ impl StorageBackend for GoogleDriveBackend {
             .text()
             .map_err(|e| format!("Failed to read upload response: {}", e))?;
 
-        if status < 200 || status >= 300 {
+        if !(200..300).contains(&status) {
             return Err(format!("Google Drive upload failed ({}): {}", status, body));
         }
 
@@ -982,7 +984,7 @@ impl StorageBackend for GoogleDriveBackend {
             .map_err(|e| format!("Google Drive download request failed: {}", e))?;
 
         let status = resp.status().as_u16();
-        if status < 200 || status >= 300 {
+        if !(200..300).contains(&status) {
             let body = resp.text().unwrap_or_default();
             return Err(format!(
                 "Google Drive download failed ({}): {}",
@@ -1046,7 +1048,7 @@ impl StorageBackend for GoogleDriveBackend {
             .text()
             .map_err(|e| format!("Failed to read list response: {}", e))?;
 
-        if status < 200 || status >= 300 {
+        if !(200..300).contains(&status) {
             return Err(format!("Google Drive list failed ({}): {}", status, body));
         }
 
@@ -1115,6 +1117,7 @@ impl StorageBackend for GoogleDriveBackend {
 pub struct GooglePhotosBackend {
     token: String,
     album_id: Option<String>,
+    #[allow(dead_code)]
     credentials: Option<OAuthCredentials>,
 }
 
@@ -1169,7 +1172,7 @@ impl StorageBackend for GooglePhotosBackend {
             .text()
             .map_err(|e| format!("Failed to read upload token response: {}", e))?;
 
-        if up_status < 200 || up_status >= 300 {
+        if !(200..300).contains(&up_status) {
             return Err(format!(
                 "Google Photos upload token failed ({}): {}",
                 up_status, up_body
@@ -1203,7 +1206,7 @@ impl StorageBackend for GooglePhotosBackend {
             .text()
             .map_err(|e| format!("Failed to read batchCreate response: {}", e))?;
 
-        if create_status < 200 || create_status >= 300 {
+        if !(200..300).contains(&create_status) {
             return Err(format!(
                 "Google Photos media item creation failed ({}): {}",
                 create_status, create_body
@@ -1232,7 +1235,7 @@ impl StorageBackend for GooglePhotosBackend {
             .map_err(|e| format!("Google Photos download request failed: {}", e))?;
 
         let status = resp.status().as_u16();
-        if status < 200 || status >= 300 {
+        if !(200..300).contains(&status) {
             let body = resp.text().unwrap_or_default();
             return Err(format!(
                 "Google Photos download failed ({}): {}",
@@ -1292,7 +1295,7 @@ impl StorageBackend for GooglePhotosBackend {
             .text()
             .map_err(|e| format!("Failed to read list response: {}", e))?;
 
-        if status < 200 || status >= 300 {
+        if !(200..300).contains(&status) {
             return Err(format!("Google Photos list failed ({}): {}", status, body));
         }
 
@@ -1344,7 +1347,7 @@ impl StorageBackend for GooglePhotosBackend {
             .text()
             .map_err(|e| format!("Failed to read response: {}", e))?;
 
-        if status < 200 || status >= 300 {
+        if !(200..300).contains(&status) {
             return Err(format!(
                 "Google Photos get URL failed ({}): {}",
                 status, body
@@ -1438,7 +1441,7 @@ impl StorageBackend for TelegramBackend {
             );
 
         let resp = client
-            .post(&self.api_url("sendDocument"))
+            .post(self.api_url("sendDocument"))
             .multipart(form)
             .send()
             .map_err(|e| format!("Telegram upload request failed: {}", e))?;
@@ -1448,7 +1451,7 @@ impl StorageBackend for TelegramBackend {
             .text()
             .map_err(|e| format!("Failed to read upload response: {}", e))?;
 
-        if status < 200 || status >= 300 {
+        if !(200..300).contains(&status) {
             return Err(format!("Telegram upload failed ({}): {}", status, body));
         }
 
@@ -1492,7 +1495,7 @@ impl StorageBackend for TelegramBackend {
             .text()
             .map_err(|e| format!("Failed to read response: {}", e))?;
 
-        if status < 200 || status >= 300 {
+        if !(200..300).contains(&status) {
             return Err(format!("Telegram getFile failed ({}): {}", status, body));
         }
 
@@ -1520,7 +1523,7 @@ impl StorageBackend for TelegramBackend {
             .map_err(|e| format!("Telegram file download request failed: {}", e))?;
 
         let dl_status = dl_resp.status().as_u16();
-        if dl_status < 200 || dl_status >= 300 {
+        if !(200..300).contains(&dl_status) {
             let dl_body = dl_resp.text().unwrap_or_default();
             return Err(format!(
                 "Telegram file download failed ({}): {}",
@@ -1575,7 +1578,7 @@ impl StorageBackend for TelegramBackend {
             .text()
             .map_err(|e| format!("Failed to read response: {}", e))?;
 
-        if status < 200 || status >= 300 {
+        if !(200..300).contains(&status) {
             return Err(format!("Telegram getFile failed ({}): {}", status, body));
         }
 
@@ -1600,7 +1603,7 @@ impl StorageBackend for TelegramBackend {
     fn test_connection(&self) -> Result<bool, String> {
         let client = http_client()?;
         let resp = client
-            .get(&self.api_url("getMe"))
+            .get(self.api_url("getMe"))
             .send()
             .map_err(|e| format!("Telegram connection test request failed: {}", e))?;
 

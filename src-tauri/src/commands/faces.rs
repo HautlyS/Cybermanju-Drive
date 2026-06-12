@@ -50,7 +50,7 @@ pub fn detect_faces(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
     let mut file_node: FileNode =
-        serde_json::from_str(&file_value.value()).map_err(|e| e.to_string())?;
+        serde_json::from_str(file_value.value()).map_err(|e| e.to_string())?;
     drop(tx_read);
 
     // Delegate to faces module for detection + embedding
@@ -68,7 +68,7 @@ pub fn detect_faces(
     let mut existing_groups: Vec<(String, FaceGroup)> = Vec::new();
     for entry in fg_table.iter().map_err(|e| e.to_string())? {
         let (key, value) = entry.map_err(|e| e.to_string())?;
-        let group: FaceGroup = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+        let group: FaceGroup = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
         existing_groups.push((key.value().to_string(), group));
     }
     drop(tx_read);
@@ -78,7 +78,7 @@ pub fn detect_faces(
     let mut face_group_ids = Vec::new();
 
     // Process each detected face
-    for (_face_index, embedding) in detected_faces.iter().enumerate() {
+    for embedding in detected_faces.iter() {
         // Try to match against existing face groups (in-memory)
         let mut matched_group_idx: Option<usize> = None;
 
@@ -205,7 +205,7 @@ pub fn detect_faces_batch_cmd(state: State<'_, AppState>) -> Result<ReclusterRes
     let mut image_files: Vec<FileNode> = Vec::new();
     for entry in file_table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
-        let node: FileNode = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+        let node: FileNode = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
         if node.file_type == "file" {
             if let Some(ref mime) = node.mime_type {
                 if mime.starts_with("image/") {
@@ -372,7 +372,7 @@ pub fn recluster_faces(
     let mut file_ids_seen: HashSet<String> = HashSet::new();
     for entry in fg_table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
-        let group: FaceGroup = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+        let group: FaceGroup = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
         for fid in &group.file_ids {
             file_ids_seen.insert(fid.clone());
         }
@@ -553,7 +553,7 @@ pub fn rename_face_group(
         .get(group_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Face group not found: {}", group_id))?;
-    let mut group: FaceGroup = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+    let mut group: FaceGroup = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
     drop(tx);
 
     group.name = new_name;
@@ -589,14 +589,14 @@ pub fn merge_face_groups(
         .get(source_group_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Source group not found: {}", source_group_id))?;
-    let source: FaceGroup = serde_json::from_str(&source_val.value()).map_err(|e| e.to_string())?;
+    let source: FaceGroup = serde_json::from_str(source_val.value()).map_err(|e| e.to_string())?;
 
     let target_val = table
         .get(target_group_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Target group not found: {}", target_group_id))?;
     let mut target: FaceGroup =
-        serde_json::from_str(&target_val.value()).map_err(|e| e.to_string())?;
+        serde_json::from_str(target_val.value()).map_err(|e| e.to_string())?;
     drop(tx);
 
     // Merge: add source file IDs to target (dedup)
@@ -733,7 +733,7 @@ pub fn find_similar_faces(
         .get(group_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Face group not found: {}", group_id))?;
-    let source: FaceGroup = serde_json::from_str(&source_val.value()).map_err(|e| e.to_string())?;
+    let source: FaceGroup = serde_json::from_str(source_val.value()).map_err(|e| e.to_string())?;
 
     let thresh = threshold.unwrap_or(DEFAULT_MATCH_THRESHOLD);
 
@@ -743,7 +743,7 @@ pub fn find_similar_faces(
         if key.value() == group_id {
             continue;
         }
-        let group: FaceGroup = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+        let group: FaceGroup = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
 
         if let (Some(ref src_emb), Some(ref grp_emb)) =
             (&source.centroid_embedding, &group.centroid_embedding)
@@ -770,7 +770,7 @@ pub fn list_face_groups(state: State<'_, AppState>) -> Result<Vec<FaceGroup>, St
     let mut results = Vec::new();
     for entry in table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
-        let group: FaceGroup = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+        let group: FaceGroup = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
         results.push(group);
     }
 
@@ -793,7 +793,7 @@ pub fn get_group_files(
         .get(group_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Face group not found: {}", group_id))?;
-    let group: FaceGroup = serde_json::from_str(&fg_value.value()).map_err(|e| e.to_string())?;
+    let group: FaceGroup = serde_json::from_str(fg_value.value()).map_err(|e| e.to_string())?;
 
     let file_table = tx_read
         .open_table(crate::db::Database::get_files_table())
@@ -803,7 +803,7 @@ pub fn get_group_files(
     for fid in &group.file_ids {
         if let Some(fv) = file_table.get(fid.as_str()).map_err(|e| e.to_string())? {
             let file_node: FileNode =
-                serde_json::from_str(&fv.value()).map_err(|e| e.to_string())?;
+                serde_json::from_str(fv.value()).map_err(|e| e.to_string())?;
             files.push(file_node);
         }
     }

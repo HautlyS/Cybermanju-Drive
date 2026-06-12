@@ -18,7 +18,7 @@ pub fn list_collections(state: State<'_, AppState>) -> Result<Vec<Collection>, S
     for entry in table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
         let collection: Collection =
-            serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+            serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
         results.push(collection);
     }
 
@@ -186,7 +186,7 @@ pub fn remove_from_collection(
     for entry in items_table.iter().map_err(|e| e.to_string())? {
         let (key, value) = entry.map_err(|e| e.to_string())?;
         let item: CollectionItem =
-            serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+            serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
         if item.collection_id == collection_id && item.file_id == file_id {
             item_id_to_remove = Some(key.value().to_string());
             break;
@@ -206,9 +206,9 @@ pub fn remove_from_collection(
 
     // Update collection
     collection.item_ids.retain(|id| {
-        item_id_to_remove
+        !item_id_to_remove
             .as_ref()
-            .map_or(true, |to_remove| id != to_remove)
+            .is_some_and(|to_remove| id == to_remove)
     });
     collection.updated_at = now.clone();
 

@@ -77,12 +77,10 @@ fn find_latest_key(
     for entry in table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
         let key: crate::db::schema::EncryptionKey =
-            serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+            serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
         // Match the algorithm family (e.g. "kyber768" and "hybrid" both map to Hybrid)
-        if key.algorithm == algorithm {
-            if best.is_none() || key.created_at > best.as_ref().unwrap().created_at {
-                best = Some(key);
-            }
+        if key.algorithm == algorithm && (best.is_none() || key.created_at > best.as_ref().unwrap().created_at) {
+            best = Some(key);
         }
     }
     Ok(best)
@@ -101,7 +99,7 @@ fn find_any_latest_key(
     for entry in table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
         let key: crate::db::schema::EncryptionKey =
-            serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+            serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
         if best.is_none() || key.created_at > best.as_ref().unwrap().created_at {
             best = Some(key);
         }
@@ -122,7 +120,7 @@ fn find_key_by_id(
     match table.get(key_id).map_err(|e| e.to_string())? {
         Some(value) => {
             let key: crate::db::schema::EncryptionKey =
-                serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+                serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
             Ok(Some(key))
         }
         None => Ok(None),
@@ -205,7 +203,7 @@ pub fn encrypt_file(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
     let mut file_node: crate::db::schema::FileNode =
-        serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+        serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
     drop(tx_read);
 
     // Find the latest key matching this algorithm
@@ -332,7 +330,7 @@ pub fn decrypt_file(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
     let mut file_node: crate::db::schema::FileNode =
-        serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+        serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
     drop(tx_read);
 
     // Attempt actual file decryption if a path is available
@@ -424,15 +422,16 @@ pub fn get_encryption_status(
             .open_table(crate::db::Database::get_files_table())
             .map_err(|e| e.to_string())?;
         let mut found = false;
-        for entry in table.iter().map_err(|e| e.to_string())? {
-            if let Ok((_, value)) = entry {
-                if let Ok(node) =
-                    serde_json::from_str::<crate::db::schema::FileNode>(&value.value())
-                {
-                    if node.encrypted {
-                        found = true;
-                        break;
-                    }
+        for (_, value) in table.iter().map_err(|e| e.to_string())?.flatten() {
+            if let Ok(node) =
+                serde_json::from_str::<crate::db::schema::FileNode>(value.value())
+            {
+                if node.encrypted {
+                    found = true;
+                    break;
+                }
+            }
+        }
                 }
             }
         }
@@ -544,7 +543,7 @@ pub fn list_keys(state: State<'_, AppState>) -> Result<Vec<FrontendKeyInfo>, Str
     for entry in table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
         let key: crate::db::schema::EncryptionKey =
-            serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+            serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
 
         let (display, nist_level, color) = algorithm_info(&key.algorithm);
 

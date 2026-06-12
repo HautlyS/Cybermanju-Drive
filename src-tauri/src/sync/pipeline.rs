@@ -161,7 +161,7 @@ impl SyncPipeline {
     fn sync_all_sequential(
         &self,
         file_ids: &[String],
-        backend: &Box<dyn StorageBackend>,
+        backend: &dyn StorageBackend,
         state: &AppState,
     ) -> Result<SyncResult, String> {
         let compressor = &state.compression;
@@ -222,7 +222,7 @@ impl SyncPipeline {
     fn sync_all_parallel(
         &self,
         file_ids: &[String],
-        backend: &Box<dyn StorageBackend>,
+        backend: &dyn StorageBackend,
         state: &AppState,
     ) -> Result<SyncResult, String> {
         let start = std::time::Instant::now();
@@ -351,7 +351,7 @@ impl SyncPipeline {
     fn sync_single_file_inner(
         &self,
         file_id: &str,
-        backend: &Box<dyn StorageBackend>,
+        backend: &dyn StorageBackend,
         compressor: &TripleCompressor,
         state: &AppState,
     ) -> Result<(u64, u64), String> {
@@ -527,7 +527,7 @@ impl SyncPipeline {
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("File not found: {}", file_id))?;
         let mut file_node: FileNode =
-            serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+            serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
         drop(tx_read);
 
         // Update context_data with sync link
@@ -632,7 +632,7 @@ impl SyncPipeline {
             .get(file_id)
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("File not found in DB: {}", file_id))?;
-        let node: FileNode = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+        let node: FileNode = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
         Ok(node)
     }
 }

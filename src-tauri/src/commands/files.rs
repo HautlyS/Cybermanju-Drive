@@ -35,7 +35,7 @@ pub fn list_files(
             .map_err(|e| e.to_string())?
         {
             Some(value) => {
-                match serde_json::from_str::<FileNode>(&value.value()) {
+                match serde_json::from_str::<FileNode>(value.value()) {
                     Ok(node) => results.push(node),
                     Err(_) => {
                         // Stale index entry — file was deleted but index wasn't updated.
@@ -68,7 +68,7 @@ pub fn get_file(file_id: String, state: State<'_, AppState>) -> Result<FileNode,
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
 
-    let file_node: FileNode = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+    let file_node: FileNode = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
     Ok(file_node)
 }
 
@@ -162,8 +162,7 @@ pub fn rename_file(
         .get(file_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
-    let mut file_node: FileNode =
-        serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+    let mut file_node: FileNode = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
 
     file_node.name = new_name;
     file_node.modified_at = Utc::now().to_rfc3339();
@@ -203,7 +202,7 @@ pub fn duplicate_file_context(
         .get(file_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
-    let original: FileNode = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+    let original: FileNode = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
 
     let new_id = uuid::Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
@@ -275,8 +274,7 @@ pub fn move_file(
         .get(file_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
-    let mut file_node: FileNode =
-        serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+    let mut file_node: FileNode = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
 
     // Update parent index: remove from old parent, add to new parent
     let old_parent = file_node.parent_id.clone();
@@ -313,7 +311,7 @@ pub fn get_preview(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
 
-    let file_node: FileNode = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+    let file_node: FileNode = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
 
     let preview = serde_json::json!({
         "file_id": file_node.id,
@@ -386,7 +384,7 @@ pub fn add_to_loose_group(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Loose group not found: {}", group_id))?;
     let mut group: LooseGroup =
-        serde_json::from_str(&group_value.value()).map_err(|e| e.to_string())?;
+        serde_json::from_str(group_value.value()).map_err(|e| e.to_string())?;
 
     if !group.file_ids.contains(&file_id) {
         group.file_ids.push(file_id.clone());
@@ -401,7 +399,7 @@ pub fn add_to_loose_group(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
     let mut file_node: FileNode =
-        serde_json::from_str(&file_value.value()).map_err(|e| e.to_string())?;
+        serde_json::from_str(file_value.value()).map_err(|e| e.to_string())?;
 
     if !file_node.loose_group_ids.contains(&group_id) {
         file_node.loose_group_ids.push(group_id.clone());
@@ -442,7 +440,7 @@ pub fn list_loose_groups(state: State<'_, AppState>) -> Result<Vec<LooseGroup>, 
     let mut results = Vec::new();
     for entry in table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
-        let group: LooseGroup = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+        let group: LooseGroup = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
         results.push(group);
     }
 

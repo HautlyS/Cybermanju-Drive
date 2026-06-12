@@ -35,6 +35,12 @@ impl DashboardState {
     }
 }
 
+impl Default for DashboardState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Get the current web dashboard status.
 #[tauri::command]
 pub fn dashboard_status(

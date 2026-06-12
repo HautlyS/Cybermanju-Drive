@@ -17,7 +17,7 @@ pub fn list_accounts(state: State<'_, AppState>) -> Result<Vec<Account>, String>
     let mut results = Vec::new();
     for entry in table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
-        let account: Account = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+        let account: Account = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
         results.push(account);
     }
 
@@ -94,7 +94,7 @@ pub fn switch_account(account_id: String, state: State<'_, AppState>) -> Result<
     for entry in read_table.iter().map_err(|e| e.to_string())? {
         let (key, value) = entry.map_err(|e| e.to_string())?;
         let mut account: Account =
-            serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+            serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
 
         if key.value() == account_id {
             account.is_active = true;
@@ -151,7 +151,7 @@ pub fn delete_account(account_id: String, state: State<'_, AppState>) -> Result<
         .get(account_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Account not found: {}", account_id))?;
-    let account: Account = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+    let account: Account = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
 
     if account.is_active {
         return Err(

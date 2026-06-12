@@ -80,7 +80,7 @@ pub fn compress_file(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
     let mut file_node: crate::db::schema::FileNode =
-        serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+        serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
     drop(tx_read);
 
     // Skip compression for already-compressed MIME types
@@ -281,7 +281,7 @@ pub fn decompress_file(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
     let mut file_node: crate::db::schema::FileNode =
-        serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+        serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
     drop(tx_read);
 
     if file_node.compression_layers.is_empty() {
@@ -431,7 +431,7 @@ pub fn get_compression_stats(
         .ok_or_else(|| format!("File not found: {}", file_id))?;
 
     let file_node: crate::db::schema::FileNode =
-        serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+        serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
 
     let layer_name = if file_node.compression_layers.is_empty() {
         "none".to_string()

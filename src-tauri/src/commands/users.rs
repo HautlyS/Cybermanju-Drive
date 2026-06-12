@@ -226,7 +226,7 @@ pub fn register_user(
         .map_err(|e| e.to_string())?;
     for entry in users_table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
-        let existing: User = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+        let existing: User = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
         if existing.username == username {
             return Err(format!("Username '{}' already exists", username));
         }
@@ -284,7 +284,7 @@ pub fn authenticate_user(
 
     for entry in table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
-        let user: User = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+        let user: User = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
         if user.username == username {
             if !user.is_active {
                 return Err("User account is disabled".to_string());
@@ -380,7 +380,7 @@ pub fn list_users(state: State<'_, AppState>) -> Result<Vec<User>, String> {
     let mut results = Vec::new();
     for entry in table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
-        let user: User = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+        let user: User = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
         results.push(user);
     }
 
@@ -428,7 +428,7 @@ pub fn set_file_permission(
     for entry in perms_table.iter().map_err(|e| e.to_string())? {
         let (key, value) = entry.map_err(|e| e.to_string())?;
         let perm: UserFilePermission =
-            serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+            serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
         if perm.user_id == user_id && perm.file_id == file_id {
             existing_id = Some(key.value().to_string());
             break;
@@ -512,11 +512,9 @@ pub fn verify_file_access(
     for entry in table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
         let perm: UserFilePermission =
-            serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
-        if perm.user_id == user_id && perm.file_id == file_id {
-            if level(&perm.access) >= required {
-                return Ok(true);
-            }
+            serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
+        if perm.user_id == user_id && perm.file_id == file_id && level(&perm.access) >= required {
+            return Ok(true);
         }
     }
 
@@ -526,7 +524,7 @@ pub fn verify_file_access(
         .map_err(|e| e.to_string())?;
     for entry in users_table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
-        let user: User = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+        let user: User = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
         if user.id == user_id && user.role == "admin" && user.is_active {
             return Ok(true);
         }
@@ -551,7 +549,7 @@ pub fn get_file_permissions(
     for entry in table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
         let perm: UserFilePermission =
-            serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+            serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
         if perm.file_id == file_id {
             results.push(perm);
         }

@@ -176,7 +176,7 @@ impl SimHashIndex {
                 })
                 .collect();
 
-            for (i, &(ref id, ref emb)) in entries.iter().enumerate() {
+            for (i, (id, emb)) in entries.iter().enumerate() {
                 let arr = Self::slice_to_array(emb);
                 let hash = hashes[i];
                 index.embeddings.push(arr);
@@ -213,7 +213,7 @@ impl SimHashIndex {
         (0..HASH_BITS)
             .map(|bit| {
                 let mut arr = [0.0f32; EMBEDDING_DIM];
-                for d in 0..EMBEDDING_DIM {
+                for (d, item) in arr.iter_mut().enumerate().take(EMBEDDING_DIM) {
                     // BLAKE3-based PRNG: hash(seed, bit, d) → uniform [0,1] → normal-like
                     let hash = blake3::hash(
                         format!(
@@ -231,7 +231,7 @@ impl SimHashIndex {
                     let u2 = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) as f32
                         / u32::MAX as f32;
                     let normal = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos();
-                    arr[d] = normal / scale;
+                    *item = normal / scale;
                 }
                 arr
             })
@@ -570,7 +570,7 @@ pub fn embedding_distance(a: &[f32], b: &[f32]) -> f32 {
         return 1.0;
     }
 
-    let cosine_similarity = (dot / (norm_a * norm_b)).max(-1.0).min(1.0);
+    let cosine_similarity = (dot / (norm_a * norm_b)).clamp(-1.0, 1.0);
     1.0 - cosine_similarity
 }
 
@@ -603,7 +603,7 @@ fn embedding_distance_arr(a: &[f32], b: &[f32; EMBEDDING_DIM]) -> f32 {
         return 1.0;
     }
 
-    let cosine_similarity = (dot / (norm_a * norm_b)).max(-1.0).min(1.0);
+    let cosine_similarity = (dot / (norm_a * norm_b)).clamp(-1.0, 1.0);
     1.0 - cosine_similarity
 }
 
@@ -935,8 +935,8 @@ pub fn cluster_simhash(embeddings: &[(String, Vec<f32>)], threshold: f32) -> Vec
     let mut uf = UnionFind::new(n);
 
     // For each embedding, find neighbors within threshold using LSH
-    for i in 0..n {
-        let candidates = index.range_query(&embeddings[i].1, threshold);
+    for (i, emb) in embeddings.iter().enumerate().take(n) {
+        let candidates = index.range_query(&emb.1, threshold);
         for (j, _) in candidates {
             if j > i {
                 uf.union(i, j);
@@ -992,8 +992,8 @@ pub fn cluster_chinese_whispers(
     // Weight = similarity = 1 - cosine_distance
     let mut adj: Vec<Vec<(usize, f32)>> = Vec::with_capacity(n);
 
-    for i in 0..n {
-        let neighbors = index.knn(&embeddings[i].1, k + 1); // +1 to exclude self
+    for (i, emb) in embeddings.iter().enumerate().take(n) {
+        let neighbors = index.knn(&emb.1, k + 1); // +1 to exclude self
         let filtered: Vec<(usize, f32)> = neighbors
             .into_iter()
             .filter(|(j, dist)| *j != i && *dist <= threshold)
@@ -1100,10 +1100,10 @@ pub fn cluster_hdbscan(embeddings: &[(String, Vec<f32>)], min_cluster_size: usiz
 
     // Compute core distances: distance to k-th nearest neighbor (excluding self)
     let mut core_distances: Vec<f32> = Vec::with_capacity(n);
-    for i in 0..n {
+    for (i, emb) in embeddings.iter().enumerate().take(n) {
         // Request k+1 then filter self — knn doesn't support exclude_idx
         let neighbors: Vec<(usize, f32)> = index
-            .knn(&embeddings[i].1, k + 1)
+            .knn(&emb.1, k + 1)
             .into_iter()
             .filter(|(j, _)| *j != i)
             .take(k)
@@ -1216,7 +1216,7 @@ pub fn cluster_auto(
     }
 
     let n = embeddings.len();
-    let strat = strategy.unwrap_or_else(|| {
+    let strat = strategy.unwrap_or({
         if n <= BRUTE_FORCE_THRESHOLD {
             ClusteringStrategy::BruteForce
         } else if n <= 1000 {
@@ -1231,7 +1231,7 @@ pub fn cluster_auto(
         ClusteringStrategy::SimHash => cluster_simhash(embeddings, threshold),
         ClusteringStrategy::ChineseWhispers => {
             // k = sqrt(n), clamped to [5, 20]
-            let k = ((n as f32).sqrt() as usize).max(5).min(20);
+            let k = ((n as f32).sqrt() as usize).clamp(5, 20);
             cluster_chinese_whispers(embeddings, threshold, k)
         }
         ClusteringStrategy::HDBSCAN => cluster_hdbscan(embeddings, HDBSCAN_MIN_CLUSTER_SIZE),
@@ -1349,7 +1349,7 @@ fn collect_clusters(embeddings: &[(String, Vec<f32>)], uf: &mut UnionFind) -> Ve
         .collect();
 
     // Sort by size descending (largest clusters first for UX)
-    clusters.sort_unstable_by(|a, b| b.members.len().cmp(&a.members.len()));
+    clusters.sort_unstable_by_key(|b| std::cmp::Reverse(b.members.len()));
     clusters
 }
 
@@ -1441,7 +1441,7 @@ fn collect_clusters_from_labels(
         })
         .collect();
 
-    clusters.sort_unstable_by(|a, b| b.members.len().cmp(&a.members.len()));
+    clusters.sort_unstable_by_key(|b| std::cmp::Reverse(b.members.len()));
     clusters
 }
 
@@ -1539,8 +1539,8 @@ fn seed_to_embedding(seed: &str) -> Vec<f32> {
     xof_output.fill(&mut hash_bytes);
 
     let mut embedding = Vec::with_capacity(EMBEDDING_DIM);
-    for i in 0..EMBEDDING_DIM {
-        let mixed = ((hash_bytes[i] as usize).wrapping_add(i * 7)) % 256;
+    for (i, item) in hash_bytes.iter().enumerate().take(EMBEDDING_DIM) {
+        let mixed = ((*item as usize).wrapping_add(i * 7)) % 256;
         let val = (mixed as f32) / 127.5 - 1.0;
         embedding.push(val);
     }

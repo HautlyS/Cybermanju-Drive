@@ -69,10 +69,10 @@ pub fn extract_preview_metadata(
         "size": size,
         "size_human": format_size_human(size),
         "mime_type": mime.unwrap_or("unknown"),
-        "is_image": mime.map_or(false, |m| m.starts_with("image/")),
-        "is_video": mime.map_or(false, |m| m.starts_with("video/")),
+        "is_image": mime.is_some_and(|m| m.starts_with("image/")),
+        "is_video": mime.is_some_and(|m| m.starts_with("video/")),
         "is_code": is_code_file(filename),
-        "is_audio": mime.map_or(false, |m| m.starts_with("audio/")),
+        "is_audio": mime.is_some_and(|m| m.starts_with("audio/")),
         "language": detect_language_for_preview(filename),
     })
 }

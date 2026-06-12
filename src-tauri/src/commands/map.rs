@@ -28,8 +28,7 @@ pub fn get_geo_files(state: State<'_, AppState>) -> Result<Vec<GeoFile>, String>
     let mut results = Vec::new();
     for entry in table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
-        let file_node: FileNode =
-            serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+        let file_node: FileNode = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
 
         if let (Some(lat), Some(lon)) = (file_node.gps_lat, file_node.gps_lon) {
             results.push(GeoFile {
@@ -72,8 +71,7 @@ pub fn extract_exif_gps(
         .get(file_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("File not found: {}", file_id))?;
-    let mut file_node: FileNode =
-        serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+    let mut file_node: FileNode = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
     drop(tx_read);
 
     // Get the actual file path from the file node's context_data or name
@@ -177,11 +175,7 @@ pub fn extract_exif_gps(
         .get_field(exif::Tag::GPSAltitude, exif::In::PRIMARY)
         .and_then(|field| {
             if let exif::Value::Rational(ref rationals) = field.value {
-                if let Some(r) = rationals.first() {
-                    Some(r.num as f64 / r.denom as f64)
-                } else {
-                    None
-                }
+                rationals.first().map(|r| r.num as f64 / r.denom as f64)
             } else {
                 None
             }

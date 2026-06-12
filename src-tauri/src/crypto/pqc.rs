@@ -116,7 +116,7 @@ impl EncryptionAlgo {
 /// For ML-DSA variants (`MlDsa44`, `MlDsa65`, `MlDsa87`):
 ///   - `public_key`  = ML-DSA encoded verifying key bytes (via `VerifyingKey::encode()`)
 ///   - `private_key` = ML-DSA 32-byte seed (via `SigningKey::to_seed()`)
-///                     Full signing key is reconstructed via `SigningKey::from_seed()`
+///     Full signing key is reconstructed via `SigningKey::from_seed()`
 ///
 /// For classical (`ClassicalSign`):
 ///   - `public_key`  = SHA-256 fingerprint (32 bytes) for identification
@@ -232,7 +232,15 @@ impl PqcEngine {
             active_key_id: None,
         }
     }
+}
 
+impl Default for PqcEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PqcEngine {
     /// Generate a new PQC keypair using real ML-KEM or ML-DSA key generation.
     ///
     /// - `Kyber1024`: real ML-KEM-1024 keypair via pqcrypto-mlkem

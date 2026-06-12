@@ -438,7 +438,7 @@ pub fn rebuild_search_index(state: State<'_, AppState>) -> Result<u32, String> {
 
     for entry in table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
-        let node: FileNode = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+        let node: FileNode = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
 
         // Read file content for text files (up to 64KB)
         let content_text = if node.file_type == "file" {

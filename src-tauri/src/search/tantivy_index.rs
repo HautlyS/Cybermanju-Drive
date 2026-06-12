@@ -62,6 +62,7 @@ pub struct SearchIndex {
     index: Index,
     reader: IndexReader,
     writer: RwLock<IndexWriter>,
+    #[allow(dead_code)]
     schema: Schema,
     // Schema field handles — used by add_document and search
     file_id_field: Field,
@@ -174,6 +175,7 @@ impl SearchIndex {
     /// avoiding the high overhead of per-document commits.
     ///
     /// The index is committed after each add for immediate searchability.
+    #[allow(clippy::too_many_arguments)]
     pub fn add_document(
         &self,
         file_id: &str,
@@ -229,6 +231,7 @@ impl SearchIndex {
     /// caller wants to add many documents and commit once at the end.
     ///
     /// The caller MUST call `commit()` afterward to make documents searchable.
+    #[allow(clippy::too_many_arguments)]
     pub fn add_document_no_commit(
         &self,
         file_id: &str,
@@ -252,7 +255,7 @@ impl SearchIndex {
             created_at,
             blake3_hash,
         };
-        let writer = self.writer.write().unwrap();
+        let writer = self.writer.read().unwrap();
         writer.delete_term(Term::from_field_text(self.file_id_field, file_id));
         let doc = self.build_document(&params);
         writer.add_document(doc)?;
@@ -274,7 +277,7 @@ impl SearchIndex {
     /// Useful for batch operations where the caller wants to delete multiple
     /// documents and commit once via a subsequent explicit commit or batch add.
     pub fn delete_term(&self, field: Field, term_text: &str) {
-        let writer = self.writer.write().unwrap();
+        let writer = self.writer.read().unwrap();
         writer.delete_term(Term::from_field_text(field, term_text));
     }
 

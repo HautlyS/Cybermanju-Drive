@@ -31,6 +31,12 @@ impl SyncState {
     }
 }
 
+impl Default for SyncState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tauri commands
 // ---------------------------------------------------------------------------
@@ -47,7 +53,7 @@ pub fn list_sync_configs(state: State<'_, AppState>) -> Result<Vec<SyncConfig>, 
     let mut configs = Vec::new();
     for entry in table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
-        let config: SyncConfig = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+        let config: SyncConfig = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
         configs.push(config);
     }
 
@@ -126,7 +132,7 @@ pub fn start_sync(
         .get(config_id.as_str())
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Sync config not found: {}", config_id))?;
-    let config: SyncConfig = serde_json::from_str(&value.value()).map_err(|e| e.to_string())?;
+    let config: SyncConfig = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
     drop(tx_read);
 
     if !config.enabled {
