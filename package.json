@@ -22,7 +22,7 @@
     "check:all": "npm run typecheck && npm run rust:check && npm run rust:clippy",
     "clean": "rm -rf dist src-tauri/target cybermanju.db tantivy_index",
     "db:reset": "rm -f cybermanju.db tantivy_index",
-    "build:wasm": "vite build --mode wasm --config vite.config.wasm.ts --outDir dist-wasm"
+    "build:wasm": "vite build --mode production --config vite.config.wasm.ts --outDir dist-wasm"
   },
   "dependencies": {
     "vue": "^3.5.13",
