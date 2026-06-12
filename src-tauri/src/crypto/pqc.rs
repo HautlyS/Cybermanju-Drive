@@ -634,8 +634,8 @@ pub fn sign_message(message: &[u8], keypair: &KeyPair) -> Result<Vec<u8>> {
             let seed = ml_dsa::Seed::<MlDsa44>::try_from(keypair.private_key.as_slice())
                 .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-44 seed: {:?}", e))?;
             let sk = ml_dsa::SigningKey::<MlDsa44>::from_seed(&seed);
-            let sig = sk
-                .sign_deterministic(message, b"")
+            let sig: ml_dsa::Signature<MlDsa44> = sk
+                .try_sign(message)
                 .map_err(|e| anyhow::anyhow!("ML-DSA-44 signing failed: {:?}", e))?;
             Ok(sig.to_vec())
         }
@@ -643,8 +643,8 @@ pub fn sign_message(message: &[u8], keypair: &KeyPair) -> Result<Vec<u8>> {
             let seed = ml_dsa::Seed::<MlDsa65>::try_from(keypair.private_key.as_slice())
                 .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-65 seed: {:?}", e))?;
             let sk = ml_dsa::SigningKey::<MlDsa65>::from_seed(&seed);
-            let sig = sk
-                .sign_deterministic(message, b"")
+            let sig: ml_dsa::Signature<MlDsa65> = sk
+                .try_sign(message)
                 .map_err(|e| anyhow::anyhow!("ML-DSA-65 signing failed: {:?}", e))?;
             Ok(sig.to_vec())
         }
@@ -652,8 +652,8 @@ pub fn sign_message(message: &[u8], keypair: &KeyPair) -> Result<Vec<u8>> {
             let seed = ml_dsa::Seed::<MlDsa87>::try_from(keypair.private_key.as_slice())
                 .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-87 seed: {:?}", e))?;
             let sk = ml_dsa::SigningKey::<MlDsa87>::from_seed(&seed);
-            let sig = sk
-                .sign_deterministic(message, b"")
+            let sig: ml_dsa::Signature<MlDsa87> = sk
+                .try_sign(message)
                 .map_err(|e| anyhow::anyhow!("ML-DSA-87 signing failed: {:?}", e))?;
             Ok(sig.to_vec())
         }
@@ -679,25 +679,28 @@ pub fn sign_message(message: &[u8], keypair: &KeyPair) -> Result<Vec<u8>> {
 pub fn verify_signature(message: &[u8], signature_bytes: &[u8], keypair: &KeyPair) -> Result<bool> {
     match &keypair.algorithm {
         EncryptionAlgo::MlDsa44 => {
-            let pk = ml_dsa::VerifyingKey::<MlDsa44>::decode(&keypair.public_key).map_err(|e| {
-                anyhow::anyhow!("Failed to decode ML-DSA-44 verifying key: {:?}", e)
-            })?;
+            let seed = ml_dsa::Seed::<MlDsa44>::try_from(keypair.private_key.as_slice())
+                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-44 seed: {:?}", e))?;
+            let sk = ml_dsa::SigningKey::<MlDsa44>::from_seed(&seed);
+            let pk = sk.verifying_key();
             let sig = ml_dsa::Signature::<MlDsa44>::try_from(signature_bytes)
                 .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-44 signature: {:?}", e))?;
             Ok(pk.verify(message, &sig).is_ok())
         }
         EncryptionAlgo::MlDsa65 => {
-            let pk = ml_dsa::VerifyingKey::<MlDsa65>::decode(&keypair.public_key).map_err(|e| {
-                anyhow::anyhow!("Failed to decode ML-DSA-65 verifying key: {:?}", e)
-            })?;
+            let seed = ml_dsa::Seed::<MlDsa65>::try_from(keypair.private_key.as_slice())
+                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-65 seed: {:?}", e))?;
+            let sk = ml_dsa::SigningKey::<MlDsa65>::from_seed(&seed);
+            let pk = sk.verifying_key();
             let sig = ml_dsa::Signature::<MlDsa65>::try_from(signature_bytes)
                 .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-65 signature: {:?}", e))?;
             Ok(pk.verify(message, &sig).is_ok())
         }
         EncryptionAlgo::MlDsa87 => {
-            let pk = ml_dsa::VerifyingKey::<MlDsa87>::decode(&keypair.public_key).map_err(|e| {
-                anyhow::anyhow!("Failed to decode ML-DSA-87 verifying key: {:?}", e)
-            })?;
+            let seed = ml_dsa::Seed::<MlDsa87>::try_from(keypair.private_key.as_slice())
+                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-87 seed: {:?}", e))?;
+            let sk = ml_dsa::SigningKey::<MlDsa87>::from_seed(&seed);
+            let pk = sk.verifying_key();
             let sig = ml_dsa::Signature::<MlDsa87>::try_from(signature_bytes)
                 .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-87 signature: {:?}", e))?;
             Ok(pk.verify(message, &sig).is_ok())
@@ -780,9 +783,10 @@ impl EncryptedFileMeta {
         let nonce_bytes = BASE64
             .decode(&self.nonce)
             .context("Failed to decode nonce from base64")?;
-        let nonce: [u8; 12] = nonce_bytes.try_into().map_err(|_| {
-            anyhow::anyhow!("Nonce must be exactly 12 bytes, got {}", nonce_bytes.len())
-        })?;
+        let nonce_len = nonce_bytes.len();
+        let nonce: [u8; 12] = nonce_bytes
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("Nonce must be exactly 12 bytes, got {}", nonce_len))?;
 
         let kem_ciphertext = if self.kem_ciphertext.is_empty() {
             Vec::new()

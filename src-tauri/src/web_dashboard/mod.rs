@@ -31,17 +31,26 @@ use serde::{Deserialize, Serialize};
 
 // ─── Table definitions (must match db/mod.rs) ────────────────────────
 
-const FILES_TABLE: TableDefinition<&str, &str> = TableDefinition::new("files");
-const ACCOUNTS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("accounts");
-const COLLECTIONS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("collections");
-const COLLECTION_ITEMS_TABLE: TableDefinition<&str, &str> =
+const FILES_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("files");
+const ACCOUNTS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("accounts");
+const COLLECTIONS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("collections");
+const COLLECTION_ITEMS_TABLE: TableDefinition<'static, &'static str, &'static str> =
     TableDefinition::new("collection_items");
-const FACE_GROUPS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("face_groups");
-const LOOSE_GROUPS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("loose_groups");
-const ENCRYPTION_KEYS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("encryption_keys");
-const LOCATIONS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("locations");
-const USERS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("users");
-const USER_FILE_PERMS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("user_file_perms");
+const FACE_GROUPS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("face_groups");
+const LOOSE_GROUPS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("loose_groups");
+const ENCRYPTION_KEYS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("encryption_keys");
+const LOCATIONS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("locations");
+const USERS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("users");
+const USER_FILE_PERMS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("user_file_perms");
 
 // ─── Security constants ─────────────────────────────────────────────
 
@@ -683,7 +692,7 @@ fn cors_preflight_response(origin: Option<&str>) -> String {
 /// List all JSON values from a table.
 fn list_all_json(
     db: &RedbDb,
-    table_def: TableDefinition<&str, &str>,
+    table_def: TableDefinition<'static, &'static str, &'static str>,
     origin: Option<&str>,
 ) -> String {
     let tx = match db.begin_read() {
@@ -778,7 +787,7 @@ fn list_encryption_keys_safe(db: &RedbDb, origin: Option<&str>) -> String {
 /// Get a single entry by key from a table.
 fn get_by_id(
     db: &RedbDb,
-    table_def: TableDefinition<&str, &str>,
+    table_def: TableDefinition<'static, &'static str, &'static str>,
     id: &str,
     origin: Option<&str>,
 ) -> String {
@@ -804,7 +813,7 @@ fn get_by_id(
 /// Delete an entry by key.
 fn delete_by_id(
     db: &RedbDb,
-    table_def: TableDefinition<&str, &str>,
+    table_def: TableDefinition<'static, &'static str, &'static str>,
     id: &str,
     origin: Option<&str>,
 ) -> String {
@@ -817,7 +826,10 @@ fn delete_by_id(
         Err(e) => return json_error(500, &format!("Table open error: {}", e), origin),
     };
     let result = match table.remove(id) {
-        Ok(_) => true,
+        Ok(opt) => {
+            drop(opt);
+            true
+        }
         Err(e) => {
             drop(table);
             return json_error(500, &format!("Remove error: {}", e), origin);

@@ -12,22 +12,33 @@ use redb::{Database as RedbDatabase, ReadTransaction, TableDefinition, WriteTran
 // redb table definitions  (&str key → &str JSON value)
 // ---------------------------------------------------------------------------
 
-const FILES_TABLE: TableDefinition<&str, &str> = TableDefinition::new("files");
-const ACCOUNTS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("accounts");
-const COLLECTIONS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("collections");
-const COLLECTION_ITEMS_TABLE: TableDefinition<&str, &str> =
+const FILES_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("files");
+const ACCOUNTS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("accounts");
+const COLLECTIONS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("collections");
+const COLLECTION_ITEMS_TABLE: TableDefinition<'static, &'static str, &'static str> =
     TableDefinition::new("collection_items");
-const FACE_GROUPS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("face_groups");
-const LOOSE_GROUPS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("loose_groups");
-const ENCRYPTION_KEYS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("encryption_keys");
-const LOCATIONS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("locations");
-const USERS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("users");
-const USER_FILE_PERMS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("user_file_perms");
-const SYNC_CONFIGS_TABLE: TableDefinition<&str, &str> = TableDefinition::new("sync_configs");
+const FACE_GROUPS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("face_groups");
+const LOOSE_GROUPS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("loose_groups");
+const ENCRYPTION_KEYS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("encryption_keys");
+const LOCATIONS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("locations");
+const USERS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("users");
+const USER_FILE_PERMS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("user_file_perms");
+const SYNC_CONFIGS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("sync_configs");
 
 /// Secondary index: parent_id → JSON array of file_ids.
 /// Makes `list_files(parent_path)` an O(1) lookup instead of O(N) full scan.
-const PARENT_INDEX_TABLE: TableDefinition<&str, &str> = TableDefinition::new("parent_index");
+const PARENT_INDEX_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("parent_index");
 
 // ---------------------------------------------------------------------------
 // Database wrapper
@@ -75,40 +86,40 @@ impl Database {
     //   Database::get_files_table()
     // -----------------------------------------------------------------------
 
-    pub fn get_files_table() -> TableDefinition<&str, &str> {
+    pub fn get_files_table() -> TableDefinition<'static, &'static str, &'static str> {
         FILES_TABLE
     }
-    pub fn get_accounts_table() -> TableDefinition<&str, &str> {
+    pub fn get_accounts_table() -> TableDefinition<'static, &'static str, &'static str> {
         ACCOUNTS_TABLE
     }
-    pub fn get_collections_table() -> TableDefinition<&str, &str> {
+    pub fn get_collections_table() -> TableDefinition<'static, &'static str, &'static str> {
         COLLECTIONS_TABLE
     }
-    pub fn get_collection_items_table() -> TableDefinition<&str, &str> {
+    pub fn get_collection_items_table() -> TableDefinition<'static, &'static str, &'static str> {
         COLLECTION_ITEMS_TABLE
     }
-    pub fn get_face_groups_table() -> TableDefinition<&str, &str> {
+    pub fn get_face_groups_table() -> TableDefinition<'static, &'static str, &'static str> {
         FACE_GROUPS_TABLE
     }
-    pub fn get_loose_groups_table() -> TableDefinition<&str, &str> {
+    pub fn get_loose_groups_table() -> TableDefinition<'static, &'static str, &'static str> {
         LOOSE_GROUPS_TABLE
     }
-    pub fn get_encryption_keys_table() -> TableDefinition<&str, &str> {
+    pub fn get_encryption_keys_table() -> TableDefinition<'static, &'static str, &'static str> {
         ENCRYPTION_KEYS_TABLE
     }
-    pub fn get_locations_table() -> TableDefinition<&str, &str> {
+    pub fn get_locations_table() -> TableDefinition<'static, &'static str, &'static str> {
         LOCATIONS_TABLE
     }
-    pub fn get_users_table() -> TableDefinition<&str, &str> {
+    pub fn get_users_table() -> TableDefinition<'static, &'static str, &'static str> {
         USERS_TABLE
     }
-    pub fn get_user_file_perms_table() -> TableDefinition<&str, &str> {
+    pub fn get_user_file_perms_table() -> TableDefinition<'static, &'static str, &'static str> {
         USER_FILE_PERMS_TABLE
     }
-    pub fn get_sync_configs_table() -> TableDefinition<&str, &str> {
+    pub fn get_sync_configs_table() -> TableDefinition<'static, &'static str, &'static str> {
         SYNC_CONFIGS_TABLE
     }
-    pub fn get_parent_index_table() -> TableDefinition<&str, &str> {
+    pub fn get_parent_index_table() -> TableDefinition<'static, &'static str, &'static str> {
         PARENT_INDEX_TABLE
     }
 

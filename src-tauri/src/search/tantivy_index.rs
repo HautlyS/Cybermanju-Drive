@@ -274,7 +274,7 @@ impl SearchIndex {
     /// Useful for batch operations where the caller wants to delete multiple
     /// documents and commit once via a subsequent explicit commit or batch add.
     pub fn delete_term(&self, field: Field, term_text: &str) {
-        let mut writer = self.writer.write().unwrap();
+        let writer = self.writer.write().unwrap();
         writer.delete_term(Term::from_field_text(field, term_text));
     }
 
