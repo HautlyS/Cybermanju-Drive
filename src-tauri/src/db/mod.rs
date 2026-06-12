@@ -6,7 +6,9 @@
 pub mod schema;
 
 use anyhow::Result;
-use redb::{Database as RedbDatabase, ReadTransaction, ReadableTable, TableDefinition, WriteTransaction};
+use redb::{
+    Database as RedbDatabase, ReadTransaction, ReadableTable, TableDefinition, WriteTransaction,
+};
 
 // ---------------------------------------------------------------------------
 // redb table definitions  (&str key → &str JSON value)

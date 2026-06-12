@@ -319,8 +319,16 @@ impl SearchIndex {
             .iter()
             .filter_map(|(score, doc_address)| {
                 let doc = searcher.doc(*doc_address).ok()?;
-                let fid = doc.get_first(self.file_id_field).and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let fname = doc.get_first(self.file_name_field).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let fid = doc
+                    .get_first(self.file_id_field)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let fname = doc
+                    .get_first(self.file_name_field)
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let content = doc
                     .get_first(self.content_text_field)
                     .and_then(|v| v.as_str())
