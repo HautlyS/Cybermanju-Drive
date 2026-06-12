@@ -35,7 +35,6 @@ pub struct SearchRequest {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 pub struct SearchFilters {
     pub file_type: Option<String>,
     pub location_id: Option<String>,

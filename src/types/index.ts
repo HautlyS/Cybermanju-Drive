@@ -110,10 +110,17 @@ export interface LooseGroup {
 }
 
 export interface SearchResult {
-  fileId: string                 // from mapped search command
-  fileName: string               // from mapped search command
+  file_id: string
+  file_name: string
   score: number
   snippet?: string
+}
+
+export interface SearchFilters {
+  file_type?: string
+  is_encrypted?: boolean
+  has_geo?: boolean
+  tags?: string[]
 }
 
 export interface GeoMarker {

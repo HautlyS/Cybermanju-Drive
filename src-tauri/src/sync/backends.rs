@@ -1483,6 +1483,283 @@ impl StorageBackend for GooglePhotosBackend {
 }
 
 // ===========================================================================
+// 6. TelegramBackend
+// ===========================================================================
+
+pub struct TelegramBackend {
+    bot_token: String,
+    chat_id: String,
+}
+
+impl TelegramBackend {
+    pub fn new(bot_token: &str, chat_id: &str) -> Self {
+        Self {
+            bot_token: bot_token.to_string(),
+            chat_id: chat_id.to_string(),
+        }
+    }
+
+    fn api_url(&self, method: &str) -> String {
+        format!(
+            "https://api.telegram.org/bot{}/{}",
+            self.bot_token, method
+        )
+    }
+}
+
+impl StorageBackend for TelegramBackend {
+    fn name(&self) -> &str {
+        "Telegram"
+    }
+
+    fn backend_type(&self) -> SyncBackendType {
+        SyncBackendType::Telegram
+    }
+
+    fn upload_file(&self, local_path: &str, _remote_path: &str) -> Result<String, String> {
+        let file_name = Path::new(local_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "upload".to_string());
+
+        let file_data = fs::read(local_path)
+            .map_err(|e| format!("Failed to read file '{}': {}", local_path, e))?;
+
+        let client = http_client()?;
+
+        // Telegram Bot API: sendDocument for files up to 50 MB
+        // For larger files, use sendPhoto/sendVideo which support up to 2 GB via local path
+        // but since we have bytes, we use multipart form with sendDocument
+        let form = reqwest::blocking::multipart::Form::new()
+            .text("chat_id", self.chat_id.clone())
+            .text("caption", format!("Sync upload: {}", file_name))
+            .part(
+                "document",
+                reqwest::blocking::multipart::Part::bytes(file_data)
+                    .file_name(file_name)
+                    .mime_str("application/octet-stream")
+                    .map_err(|e| format!("Invalid MIME: {}", e))?,
+            );
+
+        let resp = client
+            .post(&self.api_url("sendDocument"))
+            .multipart(form)
+            .send()
+            .map_err(|e| format!("Telegram upload request failed: {}", e))?;
+
+        let status = resp.status().as_u16();
+        let body = resp
+            .text()
+            .map_err(|e| format!("Failed to read upload response: {}", e))?;
+
+        if status < 200 || status >= 300 {
+            return Err(format!(
+                "Telegram upload failed ({}): {}",
+                status, body
+            ));
+        }
+
+        let resp_json: serde_json::Value = serde_json::from_str(&body)
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+        if !resp_json["ok"].as_bool().unwrap_or(false) {
+            let desc = resp_json["description"]
+                .as_str()
+                .unwrap_or("Unknown error");
+            return Err(format!("Telegram API error: {}", desc));
+        }
+
+        // Return the message link or a reference
+        let message_id = resp_json["result"]["message_id"]
+            .as_i64()
+            .unwrap_or(0);
+        let chat_id = resp_json["result"]["chat"]["id"]
+            .as_i64()
+            .map(|id| id.to_string())
+            .unwrap_or_else(|| self.chat_id.clone());
+
+        Ok(format!(
+            "https://t.me/c/{}/{}",
+            chat_id.trim_start_matches('-'),
+            message_id
+        ))
+    }
+
+    fn download_file(&self, remote_path: &str, local_path: &str) -> Result<(), String> {
+        // remote_path should be a file_id from a previous upload
+        let url = format!(
+            "https://api.telegram.org/bot{}/getFile?file_id={}",
+            self.bot_token, remote_path
+        );
+
+        let client = http_client()?;
+        let resp = client
+            .get(&url)
+            .send()
+            .map_err(|e| format!("Telegram getFile request failed: {}", e))?;
+
+        let status = resp.status().as_u16();
+        let body = resp
+            .text()
+            .map_err(|e| format!("Failed to read response: {}", e))?;
+
+        if status < 200 || status >= 300 {
+            return Err(format!(
+                "Telegram getFile failed ({}): {}",
+                status, body
+            ));
+        }
+
+        let resp_json: serde_json::Value = serde_json::from_str(&body)
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+        if !resp_json["ok"].as_bool().unwrap_or(false) {
+            let desc = resp_json["description"]
+                .as_str()
+                .unwrap_or("Unknown error");
+            return Err(format!("Telegram API error: {}", desc));
+        }
+
+        let file_path = resp_json["result"]["file_path"]
+            .as_str()
+            .ok_or("No file_path in getFile response")?;
+
+        // Download the file
+        let download_url = format!(
+            "https://api.telegram.org/file/bot{}/{}",
+            self.bot_token, file_path
+        );
+
+        let dl_resp = client
+            .get(&download_url)
+            .send()
+            .map_err(|e| format!("Telegram file download request failed: {}", e))?;
+
+        let dl_status = dl_resp.status().as_u16();
+        if dl_status < 200 || dl_status >= 300 {
+            let dl_body = dl_resp.text().unwrap_or_default();
+            return Err(format!(
+                "Telegram file download failed ({}): {}",
+                dl_status, dl_body
+            ));
+        }
+
+        let bytes = dl_resp
+            .bytes()
+            .map_err(|e| format!("Failed to read download body: {}", e))?;
+
+        if let Some(parent) = Path::new(local_path).parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create directory: {}", e))?;
+        }
+        fs::write(local_path, &bytes)
+            .map_err(|e| format!("Failed to write file: {}", e))?;
+
+        Ok(())
+    }
+
+    fn delete_file(&self, remote_path: &str) -> Result<(), String> {
+        // Telegram Bot API doesn't support deleting messages sent by bots in channels
+        // We can only delete messages in groups if the bot has admin rights
+        // For now, we return Ok as a no-op since Telegram is append-only for most use cases
+        let _ = remote_path;
+        info!(
+            "Telegram: delete_file is a no-op (Telegram is append-only for bot messages)"
+        );
+        Ok(())
+    }
+
+    fn list_files(&self, _prefix: &str) -> Result<Vec<RemoteFile>, String> {
+        // Telegram doesn't have a native file listing API for bot-sent messages
+        // We use getUpdates or getChatHistory to retrieve recent messages
+        // For simplicity, we return an empty list - Telegram is primarily for upload
+        // Users can view sent files in the Telegram chat directly
+        Ok(Vec::new())
+    }
+
+    fn get_file_url(&self, remote_path: &str) -> Result<String, String> {
+        // remote_path should be a file_id
+        let url = format!(
+            "https://api.telegram.org/bot{}/getFile?file_id={}",
+            self.bot_token, remote_path
+        );
+
+        let client = http_client()?;
+        let resp = client
+            .get(&url)
+            .send()
+            .map_err(|e| format!("Telegram getFile request failed: {}", e))?;
+
+        let status = resp.status().as_u16();
+        let body = resp
+            .text()
+            .map_err(|e| format!("Failed to read response: {}", e))?;
+
+        if status < 200 || status >= 300 {
+            return Err(format!(
+                "Telegram getFile failed ({}): {}",
+                status, body
+            ));
+        }
+
+        let resp_json: serde_json::Value = serde_json::from_str(&body)
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+        if !resp_json["ok"].as_bool().unwrap_or(false) {
+            let desc = resp_json["description"]
+                .as_str()
+                .unwrap_or("Unknown error");
+            return Err(format!("Telegram API error: {}", desc));
+        }
+
+        let file_path = resp_json["result"]["file_path"]
+            .as_str()
+            .ok_or("No file_path in getFile response")?;
+
+        Ok(format!(
+            "https://api.telegram.org/file/bot{}/{}",
+            self.bot_token, file_path
+        ))
+    }
+
+    fn test_connection(&self) -> Result<bool, String> {
+        let client = http_client()?;
+        let resp = client
+            .get(&self.api_url("getMe"))
+            .send()
+            .map_err(|e| format!("Telegram connection test request failed: {}", e))?;
+
+        let status = resp.status().as_u16();
+        let body = resp
+            .text()
+            .map_err(|e| format!("Failed to read response: {}", e))?;
+
+        if status != 200 {
+            return Err(format!(
+                "Telegram connection test failed (HTTP {}): {}",
+                status, body
+            ));
+        }
+
+        let resp_json: serde_json::Value = serde_json::from_str(&body)
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+        if resp_json["ok"].as_bool().unwrap_or(false) {
+            let bot_name = resp_json["result"]["username"]
+                .as_str()
+                .unwrap_or("unknown");
+            info!("Telegram bot connected: @{}", bot_name);
+            Ok(true)
+        } else {
+            let desc = resp_json["description"]
+                .as_str()
+                .unwrap_or("Unknown error");
+            Err(format!("Telegram API error: {}", desc))
+        }
+    }
+}
+
+// ===========================================================================
 // URL-encoding helper (simple, no external dependency)
 // ===========================================================================
 

@@ -189,5 +189,5 @@ pub fn run() {
 
     // ─── Clean shutdown: stop the dashboard before dropping the Arc ──
     dashboard.stop();
-    tracing::info!("Web Dashboard shut down cleanly");
+    log::info!("Web Dashboard shut down cleanly");
 }

@@ -16,6 +16,7 @@ pub enum SyncBackendType {
     GitLab,
     GoogleDrive,
     GooglePhotos,
+    Telegram,
 }
 
 /// Current status of a sync operation
@@ -33,6 +34,37 @@ pub enum SyncStatus {
     Syncing,
     Completed,
     Cancelled,
+}
+
+// ---------------------------------------------------------------------------
+// Multi-account support
+// ---------------------------------------------------------------------------
+
+/// Credentials for a single cloud account
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudAccount {
+    pub id: String,
+    pub name: String,
+    pub backend_type: SyncBackendType,
+    pub token: Option<String>,
+    /// OAuth credentials for token refresh
+    pub oauth_credentials: Option<OAuthCredentials>,
+    /// Provider-specific config fields stored as JSON
+    pub config: serde_json::Value,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// OAuth credentials stored with a cloud account
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthCredentials {
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub expires_at: Option<u64>,
+    pub client_id: String,
+    pub client_secret: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -64,17 +96,23 @@ pub struct SyncConfig {
     pub id: String,
     pub backend_type: SyncBackendType,
     pub enabled: bool,
-    /// Local: directory path, GitLab: instance URL (e.g., https://gitlab.com)
+    /// Cloud account ID for multi-account support (links to CloudAccount.id)
+    pub account_id: Option<String>,
+    /// Display name for this sync config
+    pub name: Option<String>,
+    /// Local: directory path, GitLab: instance URL, Telegram: not used
     pub base_path: Option<String>,
-    /// GitHub: owner/repo, GitLab: project ID or namespace/project path
+    /// GitHub: owner/repo, GitLab: project ID or path, Telegram: chat_id
     pub repo_name: Option<String>,
     pub branch: Option<String>,
-    /// GitHub: PAT, GitLab: PAT/OAuth, Google: OAuth2 Bearer token
+    /// GitHub: PAT, GitLab: PAT/OAuth, Google: Bearer token, Telegram: Bot token
     pub token: Option<String>,
     /// Google Drive: folder ID
     pub folder_id: Option<String>,
     /// Google Photos: album ID
     pub album_id: Option<String>,
+    /// Telegram: target chat ID (channel, group, or user)
+    pub chat_id: Option<String>,
     pub auto_sync: bool,
     pub compress_before_upload: bool,
     pub create_previews: bool,
