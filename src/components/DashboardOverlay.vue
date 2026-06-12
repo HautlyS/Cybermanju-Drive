@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { CYBER } from '@/types'
 import { Search, Folder, Map, Settings, Shield, Menu } from 'lucide-vue-next'
@@ -7,22 +7,29 @@ import { Search, Folder, Map, Settings, Shield, Menu } from 'lucide-vue-next'
 const store = useAppStore()
 const emit = defineEmits<{ close: [] }>()
 
-const searchQuery = ref('')
+const searchInput = ref('')
 const mobileMenuOpen = ref(false)
 const activeTab = ref<'files' | 'search' | 'map' | 'settings'>('files')
-
-const filteredFiles = computed(() => {
-  if (!searchQuery.value.trim()) return store.files
-  const q = searchQuery.value.toLowerCase()
-  return store.files.filter(
-    f => f.name.toLowerCase().includes(q) || (f.contentText ?? '').toLowerCase().includes(q)
-  )
-})
 
 const filesCount = computed(() => store.files.length)
 const accountName = computed(() => {
   const active = store.accounts.find(a => a.isActive)
   return active?.name ?? 'No Account'
+})
+
+let searchTimeout: ReturnType<typeof setTimeout> | null = null
+
+function onSearchInput() {
+  if (searchTimeout) clearTimeout(searchTimeout)
+  searchTimeout = setTimeout(() => {
+    if (searchInput.value.trim()) {
+      store.searchFiles(searchInput.value)
+    }
+  }, 300)
+}
+
+watch(() => store.searchQuery, (q) => {
+  searchInput.value = q
 })
 </script>
 
@@ -50,13 +57,14 @@ const accountName = computed(() => {
     <div v-if="activeTab === 'search'" class="search-bar">
       <Search :size="18" class="search-icon" />
       <input
-        v-model="searchQuery"
+        v-model="searchInput"
         class="search-input"
         placeholder="Search files, content, tags..."
         autofocus
         spellcheck="false"
+        @input="onSearchInput"
       />
-      <span v-if="searchQuery" class="result-count">{{ filteredFiles.length }} results</span>
+      <span v-if="searchInput" class="result-count">{{ store.searchResults.length }} results</span>
     </div>
 
     <!-- ═══════════ CONTENT AREA ═══════════ -->
@@ -89,26 +97,26 @@ const accountName = computed(() => {
 
       <!-- SEARCH TAB -->
       <template v-if="activeTab === 'search'">
-        <div v-if="!searchQuery.trim()" class="empty-state">
+        <div v-if="!searchInput.trim()" class="empty-state">
           <Search :size="48" class="empty-icon" />
           <p>Type to search your files</p>
         </div>
 
-        <div v-else-if="filteredFiles.length === 0" class="empty-state">
+        <div v-else-if="store.searchResults.length === 0" class="empty-state">
           <Search :size="48" class="empty-icon" />
-          <p>No results for "{{ searchQuery }}"</p>
+          <p>No results for "{{ searchInput }}"</p>
         </div>
 
         <div v-else class="search-results">
-          <div v-for="file in filteredFiles" :key="file.id" class="result-card">
+          <div v-for="result in store.searchResults" :key="result.fileId" class="result-card" @click="store.selectFile(result.fileId)">
             <div class="result-icon">
-              <Folder v-if="file.fileType === 'folder'" :size="18" />
-              <span v-else class="result-ext">{{ file.name.split('.').pop()?.slice(0, 4) ?? '?' }}</span>
+              <span class="result-ext">{{ result.matchType }}</span>
             </div>
             <div class="result-info">
-              <span class="result-name">{{ file.name }}</span>
-              <span class="result-path mono">{{ file.path }}</span>
+              <span class="result-name">{{ result.fileName }}</span>
+              <span class="result-path mono">{{ result.snippet }}</span>
             </div>
+            <span class="result-score">{{ result.score.toFixed(3) }}</span>
           </div>
         </div>
       </template>
@@ -442,6 +450,14 @@ const accountName = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.result-score {
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: #FFB800;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* ── Settings ── */

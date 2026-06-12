@@ -18,7 +18,7 @@ use commands::{
 use commands::faces as face_cmd;
 use commands::sync as sync_cmd;
 use db::Database;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 use tauri::Manager;
 
 pub struct AppState {
@@ -72,6 +72,12 @@ pub fn run() {
         hmac_secret,
     };
 
+    // Dashboard state for connection tracking and lifecycle
+    let dashboard_state = Arc::new(dashboard::DashboardState::new());
+
+    // Sync state for progress tracking and cancellation
+    let sync_state = Arc::new(sync_cmd::SyncState::new());
+
     // ─── Start Web Dashboard (localhost-only, JWT-authenticated) ────────
     let dashboard = std::sync::Arc::new(
         web_dashboard::WebDashboard::new(3456, "cybermanju.db")
@@ -94,6 +100,8 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_process::init())
         .manage(state)
+        .manage(dashboard_state)
+        .manage(sync_state)
         .invoke_handler(tauri::generate_handler![
             // File operations
             files::list_files,
@@ -124,6 +132,12 @@ pub fn run() {
             collections::remove_from_collection,
             // Face grouping (commands layer — delegates to crate::faces for ML)
             face_cmd::detect_faces,
+            face_cmd::detect_faces_batch_cmd,
+            face_cmd::recluster_faces,
+            face_cmd::rename_face_group,
+            face_cmd::merge_face_groups,
+            face_cmd::delete_face_group,
+            face_cmd::find_similar_faces,
             face_cmd::list_face_groups,
             face_cmd::get_group_files,
             // Map / GPS

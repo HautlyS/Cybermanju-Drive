@@ -29,6 +29,9 @@ pub enum SyncStatus {
     Cleaning,
     Error,
     Done,
+    Syncing,
+    Completed,
+    Cancelled,
 }
 
 // ---------------------------------------------------------------------------

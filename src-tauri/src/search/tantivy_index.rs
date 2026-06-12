@@ -334,6 +334,42 @@ impl SearchIndex {
                     .unwrap_or("");
                 let snippet: String = content.chars().take(200).collect();
 
+                // Apply filters if provided
+                if let Some(ref filters) = request.filters {
+                    if let Some(ref file_type) = filters.file_type {
+                        let doc_type = doc.get_first(self.file_type_field)
+                            .and_then(|v| v.as_text())
+                            .unwrap_or("");
+                        if doc_type != file_type.as_str() {
+                            return None;
+                        }
+                    }
+                    if let Some(encrypted) = filters.is_encrypted {
+                        let doc_encrypted = doc.get_first(self.is_encrypted_field)
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        if doc_encrypted != encrypted {
+                            return None;
+                        }
+                    }
+                    if let Some(geo) = filters.has_geo {
+                        let doc_geo = doc.get_first(self.has_geo_field)
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        if doc_geo != geo {
+                            return None;
+                        }
+                    }
+                    if let Some(ref tags) = filters.tags {
+                        let doc_tags = doc.get_first(self.tags_field)
+                            .and_then(|v| v.as_text())
+                            .unwrap_or("");
+                        if !tags.iter().any(|t| doc_tags.contains(t.as_str())) {
+                            return None;
+                        }
+                    }
+                }
+
                 // Determine match type by checking which field matched
                 let match_type = determine_match_type_from_query(
                     &doc,

@@ -68,7 +68,7 @@
           >
             <span class="dot" :style="{ background: account.color, boxShadow: `0 0 4px ${account.color}` }" />
             <span class="item-name truncate">{{ account.name }}</span>
-            <span class="item-meta text-muted">{{ account.type }}</span>
+            <span class="item-meta text-muted">{{ account.accountType }}</span>
           </div>
         </div>
       </div>
@@ -89,9 +89,9 @@
             <span class="dot" :style="{ background: col.color, boxShadow: `0 0 4px ${col.color}` }" />
             <div class="item-info">
               <span class="item-name truncate">{{ col.name }}</span>
-              <span class="item-meta text-muted">{{ col.type }}</span>
+              <span class="item-meta text-muted">{{ col.collectionType }}</span>
             </div>
-            <Star v-if="col.type === 'highlights'" :size="12" class="text-gold" />
+            <Star v-if="col.collectionType === 'highlights'" :size="12" class="text-gold" />
           </div>
         </div>
       </div>
@@ -127,14 +127,15 @@
           <span class="section-title">Tags</span>
         </div>
         <div class="tag-cloud">
-          <span class="tag-item badge badge-green">photo</span>
-          <span class="tag-item badge badge-cyan">document</span>
-          <span class="tag-item badge badge-purple">code</span>
-          <span class="tag-item badge badge-gold">archive</span>
-          <span class="tag-item badge badge-pink">media</span>
-          <span class="tag-item badge badge-orange">encrypted</span>
-          <span class="tag-item badge badge-green">compressed</span>
-          <span class="tag-item badge badge-cyan" style="opacity:0.5">No tags yet</span>
+          <span v-if="store.allTags.length === 0" class="tag-item badge badge-cyan" style="opacity:0.5">No tags yet</span>
+          <span
+            v-for="tag in store.allTags"
+            :key="tag"
+            class="tag-item badge badge-green"
+            @click="store.searchQuery = tag; store.currentPanel = 'search'; store.searchFiles(tag)"
+          >
+            {{ tag }}
+          </span>
         </div>
       </div>
 

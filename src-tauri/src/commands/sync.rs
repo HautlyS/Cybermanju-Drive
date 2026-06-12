@@ -1,8 +1,34 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use tauri::State;
 
 use crate::AppState;
 use crate::sync::backends::create_backend;
 use crate::sync::models::*;
+
+/// Shared sync progress state for tracking active sync operations.
+pub struct SyncState {
+    pub progress: Mutex<SyncProgress>,
+    pub cancel_flag: AtomicBool,
+}
+
+impl SyncState {
+    pub fn new() -> Self {
+        Self {
+            progress: Mutex::new(SyncProgress {
+                total_files: 0,
+                processed_files: 0,
+                current_file: None,
+                status: SyncStatus::Idle,
+                bytes_uploaded: 0,
+                errors: Vec::new(),
+                started_at: None,
+                estimated_remaining_seconds: None,
+            }),
+            cancel_flag: AtomicBool::new(false),
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Tauri commands
@@ -91,6 +117,7 @@ pub fn start_sync(
     config_id: String,
     file_ids: Vec<String>,
     state: State<'_, AppState>,
+    sync_state: State<'_, Arc<SyncState>>,
 ) -> Result<SyncResult, String> {
     // 1. Load the sync config from DB
     let db = state.db.read().map_err(|e| e.to_string())?;
@@ -113,28 +140,42 @@ pub fn start_sync(
     // Drop db read lock before calling pipeline which acquires its own locks
     drop(db);
 
-    // 2. Create pipeline and run sync
+    // 2. Update progress to syncing state
+    {
+        let mut progress = sync_state.progress.lock().map_err(|e| e.to_string())?;
+        *progress = SyncProgress {
+            total_files: file_ids.len() as u64,
+            processed_files: 0,
+            current_file: Some("Starting sync...".to_string()),
+            status: SyncStatus::Syncing,
+            bytes_uploaded: 0,
+            errors: Vec::new(),
+            started_at: Some(chrono::Utc::now().to_rfc3339()),
+            estimated_remaining_seconds: None,
+        };
+    }
+    sync_state.cancel_flag.store(false, Ordering::SeqCst);
+
+    // 3. Create pipeline and run sync
     let pipeline = crate::sync::SyncPipeline::new(config, "cybermanju.db".to_string());
     let result = pipeline.sync_all(file_ids, &state)?;
+
+    // 4. Update progress to completed
+    {
+        let mut progress = sync_state.progress.lock().map_err(|e| e.to_string())?;
+        progress.status = SyncStatus::Completed;
+        progress.current_file = None;
+        progress.processed_files = progress.total_files;
+    }
 
     Ok(result)
 }
 
 /// Get the current sync progress.
 #[tauri::command]
-pub fn get_sync_progress(_state: State<'_, AppState>) -> Result<SyncProgress, String> {
-    // Since we run syncs synchronously, if no active pipeline exists,
-    // return an idle progress.
-    Ok(SyncProgress {
-        total_files: 0,
-        processed_files: 0,
-        current_file: None,
-        status: SyncStatus::Idle,
-        bytes_uploaded: 0,
-        errors: Vec::new(),
-        started_at: None,
-        estimated_remaining_seconds: None,
-    })
+pub fn get_sync_progress(sync_state: State<'_, Arc<SyncState>>) -> Result<SyncProgress, String> {
+    let progress = sync_state.progress.lock().map_err(|e| e.to_string())?;
+    Ok(progress.clone())
 }
 
 /// Test the connection for a sync configuration.
@@ -146,10 +187,13 @@ pub fn test_sync_connection(config: SyncConfig) -> Result<bool, String> {
 
 /// Cancel the current sync operation.
 #[tauri::command]
-pub fn cancel_sync(_state: State<'_, AppState>) -> Result<bool, String> {
-    // Since we run syncs synchronously on the main thread, cancellation
-    // is a no-op in the current architecture. If async is added later,
-    // this would signal the active pipeline to stop.
+pub fn cancel_sync(sync_state: State<'_, Arc<SyncState>>) -> Result<bool, String> {
+    sync_state.cancel_flag.store(true, Ordering::SeqCst);
+
+    // Update progress to cancelled
+    let mut progress = sync_state.progress.lock().map_err(|e| e.to_string())?;
+    progress.status = SyncStatus::Cancelled;
+    progress.current_file = None;
     Ok(true)
 }
 

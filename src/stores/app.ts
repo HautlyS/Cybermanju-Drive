@@ -322,6 +322,64 @@ export const useAppStore = defineStore('cybermanju', () => {
     }
   }
 
+  async function detectFacesBatch() {
+    try {
+      const result = await invoke<{ clustersCreated: number; totalFaces: number; noiseFaces: number; avgCohesion: number; strategyUsed: string }>('detect_faces_batch_cmd')
+      await fetchFaceGroups()
+      return result
+    } catch (e) {
+      setError('Batch face detection failed', e)
+      return null
+    }
+  }
+
+  async function reclusterFaces(strategy?: string) {
+    try {
+      const result = await invoke<{ clustersCreated: number; totalFaces: number; noiseFaces: number; avgCohesion: number; strategyUsed: string }>('recluster_faces', { strategy })
+      await fetchFaceGroups()
+      return result
+    } catch (e) {
+      setError('Re-clustering failed', e)
+      return null
+    }
+  }
+
+  async function renameFaceGroup(groupId: string, newName: string) {
+    try {
+      await invoke('rename_face_group', { groupId, newName })
+      await fetchFaceGroups()
+    } catch (e) {
+      setError('Failed to rename face group', e)
+    }
+  }
+
+  async function mergeFaceGroups(sourceGroupId: string, targetGroupId: string) {
+    try {
+      await invoke('merge_face_groups', { sourceGroupId, targetGroupId })
+      await fetchFaceGroups()
+    } catch (e) {
+      setError('Failed to merge face groups', e)
+    }
+  }
+
+  async function deleteFaceGroup(groupId: string) {
+    try {
+      await invoke('delete_face_group', { groupId })
+      await fetchFaceGroups()
+    } catch (e) {
+      setError('Failed to delete face group', e)
+    }
+  }
+
+  async function findSimilarFaces(groupId: string, threshold?: number) {
+    try {
+      return await invoke<FaceGroup[]>('find_similar_faces', { groupId, threshold })
+    } catch (e) {
+      setError('Failed to find similar faces', e)
+      return []
+    }
+  }
+
   // ── Actions: Accounts ─────────────────────────────────────
   async function fetchAccounts() {
     try {
@@ -488,7 +546,8 @@ export const useAppStore = defineStore('cybermanju', () => {
     fetchFiles, getFile, createFolder, deleteFile, renameFile, duplicateFileContext,
     searchFiles, fetchEncryptionStatus, generateKeypair, listKeys, encryptFile, decryptFile,
     compressFile, decompressFile, fetchCollections, createCollection, addToCollection, removeFromCollection,
-    fetchFaceGroups, detectFaces,
+    fetchFaceGroups, detectFaces, detectFacesBatch, reclusterFaces,
+    renameFaceGroup, mergeFaceGroups, deleteFaceGroup, findSimilarFaces,
     fetchAccounts, createAccount, switchAccount, fetchGeoFiles,
     parseFileCode, fetchLooseGroups,
     fetchSyncConfigs, createSyncConfig, deleteSyncConfig, startSync,

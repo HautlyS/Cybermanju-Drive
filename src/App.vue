@@ -105,6 +105,9 @@ onMounted(() => {
           <!-- Default file grid -->
           <FileGrid v-if="store.currentPanel === 'files'" />
 
+          <!-- Web Dashboard overlay -->
+          <DashboardOverlay v-else-if="store.currentPanel === 'webdash'" @close="store.currentPanel = 'files'" />
+
           <!-- Search results -->
           <div v-else-if="store.currentPanel === 'search'" class="panel-search">
             <div class="neobrutalism-card" style="padding: 16px; margin-bottom: 16px;">

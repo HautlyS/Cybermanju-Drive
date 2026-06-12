@@ -55,12 +55,10 @@ jobs:
       - name: Run Clippy
         working-directory: src-tauri
         run: cargo clippy -- -W clippy::all -D warnings
-        continue-on-error: true
 
       - name: Run tests
         working-directory: src-tauri
         run: cargo test --no-fail-fast
-        continue-on-error: true
 
   # ─── Docker: Build Image ──────────────────────────────────────────
   docker-build:
@@ -114,7 +112,6 @@ jobs:
 
       - name: Type check
         run: npx vue-tsc --noEmit
-        continue-on-error: true
 
       - name: Build WASM
         run: npm run build:wasm
@@ -124,6 +121,82 @@ jobs:
         with:
           name: dist-wasm
           path: dist-wasm/
+          retention-days: 7
+
+  # ─── Windows: Build Desktop ──────────────────────────────────────
+  windows-build:
+    name: Build Windows
+    runs-on: windows-latest
+    needs: rust-check
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Tauri app
+        run: npm run tauri build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows
+          path: src-tauri/target/release/bundle/**/*
+          retention-days: 7
+
+  # ─── Android: Build APK ──────────────────────────────────────────
+  android-build:
+    name: Build Android
+    runs-on: ubuntu-latest
+    needs: rust-check
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Rust targets
+        run: |
+          rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+
+      - name: Install Android NDK
+        run: sdkmanager "ndk;26.1.10909125"
+
+      - name: Build Android APK
+        run: npm run tauri android build
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/26.1.10909125
+
+      - name: Upload Android artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-android
+          path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
           retention-days: 7
 
   # ─── Deploy: GitHub Pages ─────────────────────────────────────────

@@ -503,7 +503,6 @@ type HmacSha512 = Hmac<Sha512>;
 /// For ML-KEM keypairs, this uses the ML-KEM decapsulation key bytes as the
 /// HMAC key. In a production system, you would use ML-DSA (Dilithium) for
 /// PQC signatures instead.
-#[allow(dead_code)]
 pub fn sign_message(message: &[u8], keypair: &KeyPair) -> Result<Vec<u8>> {
     let mut mac =
         HmacSha512::new_from_slice(&keypair.private_key).context("Invalid HMAC key")?;
@@ -516,7 +515,6 @@ pub fn sign_message(message: &[u8], keypair: &KeyPair) -> Result<Vec<u8>> {
 ///
 /// Returns `Ok(true)` if the signature is valid, `Ok(false)` if it is not,
 /// and `Err` only for unexpected failures (e.g., wrong key length).
-#[allow(dead_code)]
 pub fn verify_signature(
     message: &[u8],
     signature_bytes: &[u8],

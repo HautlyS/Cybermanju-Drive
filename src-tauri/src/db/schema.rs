@@ -95,6 +95,14 @@ pub struct FaceGroup {
     pub name: String,
     pub file_ids: Vec<String>,
     pub centroid_embedding: Option<Vec<f32>>,
+    /// 64-bit SimHash binary code for fast Hamming-distance pre-filtering.
+    pub binary_hash: Option<u64>,
+    /// Average intra-cluster cosine distance (lower = tighter cluster).
+    pub cohesion: Option<f32>,
+    /// Number of face embeddings stored for this group.
+    pub embedding_count: u32,
+    /// Clustering algorithm that produced this group.
+    pub algorithm: Option<String>,
     pub created_at: String,
 }
 

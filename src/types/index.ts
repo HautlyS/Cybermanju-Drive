@@ -2,7 +2,7 @@
 // Neobrutalism × Buddhist-Nepalese × Matrix × Cyberpunk
 
 export type ViewMode = 'grid' | 'list' | 'masonry'
-export type PanelType = 'files' | 'preview' | 'encryption' | 'compression' | 'collections' | 'faces' | 'map' | 'code' | 'search' | 'style' | 'accounts' | 'loose-groups' | 'sync'
+export type PanelType = 'files' | 'preview' | 'encryption' | 'compression' | 'collections' | 'faces' | 'map' | 'code' | 'search' | 'style' | 'accounts' | 'loose-groups' | 'sync' | 'webdash'
 export type SidebarSection = 'tree' | 'locations' | 'collections' | 'people' | 'styles' | 'loose'
 export type EncryptionAlgo = 'kyber1024' | 'dilithium5' | 'frodokem1344' | 'hybrid' | 'aes256'
 export type CompressionType = 'none' | 'lz4' | 'zstd' | 'triple'
@@ -75,6 +75,10 @@ export interface FaceGroup {
   name: string
   fileIds: string[]              // Rust: file_ids
   centroidEmbedding?: number[]   // Rust: centroid_embedding
+  binaryHash?: number            // Rust: binary_hash — 64-bit SimHash code
+  cohesion?: number              // Rust: cohesion — avg intra-cluster cosine distance
+  embeddingCount: number         // Rust: embedding_count
+  algorithm?: string             // Rust: algorithm — clustering algorithm used
   createdAt: string              // Rust: created_at
 }
 

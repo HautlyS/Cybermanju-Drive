@@ -140,7 +140,6 @@ impl TripleCompressor {
     /// `layer` must be one of: "lz4", "zstd", "brotli".
     pub fn compress_data(&self, data: &[u8], layer: &str) -> Result<(Vec<u8>, LayerDetail)> {
         let input_size = data.len() as u64;
-        let start = std::time::Instant::now();
 
         let (output, name, algorithm, color) = match layer {
             "lz4" => (
@@ -179,8 +178,6 @@ impl TripleCompressor {
             ratio,
             color,
         };
-
-        let _duration_ms = start.elapsed().as_millis() as u64;
 
         Ok((output, detail))
     }

@@ -19,7 +19,7 @@ pub struct PreviewMeta {
 
 /// Generate a thumbnail preview for an image file
 /// In production: uses the image crate for images, auto-thumbnail for videos/PDFs
-pub fn generate_thumbnail(data: &[u8], max_size: u32) -> Result<PreviewMeta> {
+pub fn generate_thumbnail(data: &[u8], max_size: u32, file_id: &str, preview_dir: &str) -> Result<PreviewMeta> {
     let img = image::load_from_memory(data)?;
     let (w, h) = (img.width(), img.height());
 
@@ -34,9 +34,13 @@ pub fn generate_thumbnail(data: &[u8], max_size: u32) -> Result<PreviewMeta> {
     let mut cursor = std::io::Cursor::new(&mut buf);
     thumbnail.write_to(&mut cursor, image::ImageFormat::Png)?;
 
+    let preview_path = format!("{}/{}_thumb.png", preview_dir, file_id);
+    std::fs::create_dir_all(preview_dir)?;
+    std::fs::write(&preview_path, &buf)?;
+
     Ok(PreviewMeta {
-        original_file_id: String::new(),
-        preview_path: String::new(),
+        original_file_id: file_id.to_string(),
+        preview_path,
         thumbnail_path: None,
         width: new_w,
         height: new_h,
