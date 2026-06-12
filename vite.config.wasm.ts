@@ -10,7 +10,7 @@ const base =
   process.env.VITE_BASE ||
   (process.env.NODE_ENV === "production" &&
   process.env.DOCKER_BUILD !== "true"
-    ? "/cybermanju-drive/"
+    ? "/Cybermanju-Drive/"
     : "/");
 
 export default defineConfig({
