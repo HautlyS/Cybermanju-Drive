@@ -113,7 +113,7 @@ impl SearchIndex {
 
         let reader = index
             .reader_builder()
-            .reload_policy(ReloadPolicy::OnCommit)
+            .reload_policy(ReloadPolicy::OnCommitWithDelay)
             .try_into()?;
 
         Ok(Self {
@@ -319,11 +319,11 @@ impl SearchIndex {
             .iter()
             .filter_map(|(score, doc_address)| {
                 let doc = searcher.doc(*doc_address).ok()?;
-                let fid = doc.get_first(self.file_id_field)?.as_text()?.to_string();
-                let fname = doc.get_first(self.file_name_field)?.as_text()?.to_string();
+                let fid = doc.get_first(self.file_id_field).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let fname = doc.get_first(self.file_name_field).and_then(|v| v.as_str()).unwrap_or("").to_string();
                 let content = doc
                     .get_first(self.content_text_field)
-                    .and_then(|v| v.as_text())
+                    .and_then(|v| v.as_str())
                     .unwrap_or("");
                 let snippet: String = content.chars().take(200).collect();
 
@@ -359,7 +359,7 @@ impl SearchIndex {
         let mut seen = HashSet::new();
 
         // Iterate the term dictionary for the file_name field
-        let terms = self.reader.terms_for_field(self.file_name_field)?;
+        let terms = searcher.terms_for_field(self.file_name_field)?;
 
         // Seek to the prefix and collect matching terms
         for (term, _) in terms.range(prefix..)? {
@@ -389,7 +389,7 @@ impl SearchIndex {
         }
 
         // Also check content_text field for completions
-        if let Ok(content_terms) = self.reader.terms_for_field(self.content_text_field) {
+        if let Ok(content_terms) = searcher.terms_for_field(self.content_text_field) {
             for (term, _) in content_terms.range(prefix..)? {
                 let term_str = std::str::from_utf8(term.as_ref()).unwrap_or("").to_string();
                 if !term_str.starts_with(prefix) {
@@ -441,7 +441,7 @@ fn determine_match_type_from_query(
     let terms: Vec<&str> = query_str.split_whitespace().collect();
 
     // Check file_name
-    if let Some(val) = doc.get_first(*file_name_field).and_then(|v| v.as_text()) {
+    if let Some(val) = doc.get_first(*file_name_field).and_then(|v| v.as_str()) {
         if terms
             .iter()
             .any(|t| val.to_lowercase().contains(&t.to_lowercase()))
@@ -451,7 +451,7 @@ fn determine_match_type_from_query(
     }
 
     // Check tags
-    if let Some(val) = doc.get_first(*tags_field).and_then(|v| v.as_text()) {
+    if let Some(val) = doc.get_first(*tags_field).and_then(|v| v.as_str()) {
         if terms
             .iter()
             .any(|t| val.to_lowercase().contains(&t.to_lowercase()))

@@ -176,13 +176,14 @@ impl SimHashIndex {
                 })
                 .collect();
 
-            for (i, ((id, emb), hash)) in entries.iter().enumerate().zip(hashes.iter()) {
+            for (i, &(ref id, ref emb)) in entries.iter().enumerate() {
                 let arr = Self::slice_to_array(emb);
+                let hash = hashes[i];
                 index.embeddings.push(arr);
                 index.ids.push(id.clone());
-                index.binary_hashes.push(*hash);
+                index.binary_hashes.push(hash);
                 for table in &mut index.tables {
-                    table.entry(*hash).or_default().push(i);
+                    table.entry(hash).or_default().push(i);
                 }
             }
         } else {

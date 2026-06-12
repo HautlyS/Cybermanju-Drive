@@ -6,7 +6,7 @@
 pub mod schema;
 
 use anyhow::Result;
-use redb::{Database as RedbDatabase, ReadTransaction, TableDefinition, WriteTransaction};
+use redb::{Database as RedbDatabase, ReadTransaction, ReadableTable, TableDefinition, WriteTransaction};
 
 // ---------------------------------------------------------------------------
 // redb table definitions  (&str key → &str JSON value)
@@ -143,7 +143,7 @@ impl Database {
                 ids.push(file_id.to_string());
             }
 
-            table.insert(parent_id, serde_json::to_string(&ids)?)?;
+            table.insert(parent_id, serde_json::to_string(&ids)?.as_str())?;
         }
         tx.commit()?;
         Ok(())
@@ -166,7 +166,7 @@ impl Database {
                 // Remove the key entirely if no children remain
                 table.remove(parent_id)?;
             } else {
-                table.insert(parent_id, serde_json::to_string(&ids)?)?;
+                table.insert(parent_id, serde_json::to_string(&ids)?.as_str())?;
             }
         }
         tx.commit()?;
@@ -211,7 +211,7 @@ impl Database {
                 if !ids.contains(&file_id.to_string()) {
                     ids.push(file_id.to_string());
                 }
-                index_table.insert(pid, serde_json::to_string(&ids)?)?;
+                index_table.insert(pid, serde_json::to_string(&ids)?.as_str())?;
             }
         }
         tx.commit()?;
@@ -239,7 +239,7 @@ impl Database {
                 if ids.is_empty() {
                     index_table.remove(pid)?;
                 } else {
-                    index_table.insert(pid, serde_json::to_string(&ids)?)?;
+                    index_table.insert(pid, serde_json::to_string(&ids)?.as_str())?;
                 }
             }
         }
@@ -274,7 +274,7 @@ impl Database {
                 if ids.is_empty() {
                     index_table.remove(old_pid)?;
                 } else {
-                    index_table.insert(old_pid, serde_json::to_string(&ids)?)?;
+                    index_table.insert(old_pid, serde_json::to_string(&ids)?.as_str())?;
                 }
             }
 
@@ -288,7 +288,7 @@ impl Database {
             if !ids.contains(&file_id.to_string()) {
                 ids.push(file_id.to_string());
             }
-            index_table.insert(new_parent_id, serde_json::to_string(&ids)?)?;
+            index_table.insert(new_parent_id, serde_json::to_string(&ids)?.as_str())?;
         }
         tx.commit()?;
         Ok(())

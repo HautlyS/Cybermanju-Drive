@@ -825,17 +825,7 @@ fn delete_by_id(
         Ok(t) => t,
         Err(e) => return json_error(500, &format!("Table open error: {}", e), origin),
     };
-    let result = match table.remove(id) {
-        Ok(opt) => {
-            drop(opt);
-            true
-        }
-        Err(e) => {
-            drop(table);
-            return json_error(500, &format!("Remove error: {}", e), origin);
-        }
-    };
-    drop(table);
+    let result = table.remove(id).is_ok();
     if let Err(e) = tx.commit() {
         return json_error(500, &format!("Commit error: {}", e), origin);
     }
