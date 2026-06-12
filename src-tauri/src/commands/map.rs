@@ -211,7 +211,7 @@ pub fn extract_exif_gps(
             .open_table(crate::db::Database::get_files_table())
             .map_err(|e| e.to_string())?;
         table
-            .insert(&file_id, serialized.as_str())
+            .insert(file_id.as_str(), serialized.as_str())
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;

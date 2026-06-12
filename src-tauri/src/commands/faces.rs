@@ -178,7 +178,7 @@ pub fn detect_faces(
         let mut ft = tx
             .open_table(crate::db::Database::get_files_table())
             .map_err(|e| e.to_string())?;
-        ft.insert(&file_id, file_serialized.as_str())
+        ft.insert(file_id.as_str(), file_serialized.as_str())
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
@@ -309,7 +309,7 @@ pub fn detect_faces_batch_cmd(state: State<'_, AppState>) -> Result<ReclusterRes
 
             let serialized = serde_json::to_string(&face_group).map_err(|e| e.to_string())?;
             fg_table
-                .insert(&group_id, serialized.as_str())
+                .insert(group_id.as_str(), serialized.as_str())
                 .map_err(|e| e.to_string())?;
 
             // Update file nodes to reference this face group
@@ -487,7 +487,7 @@ pub fn recluster_faces(
 
             let serialized = serde_json::to_string(&face_group).map_err(|e| e.to_string())?;
             fg_table
-                .insert(&group_id, serialized.as_str())
+                .insert(group_id.as_str(), serialized.as_str())
                 .map_err(|e| e.to_string())?;
 
             // Update file nodes to reference this face group
@@ -551,7 +551,7 @@ pub fn rename_face_group(
         let mut wt = tx
             .open_table(crate::db::Database::get_face_groups_table())
             .map_err(|e| e.to_string())?;
-        wt.insert(&group_id, serialized.as_str())
+        wt.insert(group_id.as_str(), serialized.as_str())
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
@@ -615,10 +615,10 @@ pub fn merge_face_groups(
         let mut wt = tx
             .open_table(crate::db::Database::get_face_groups_table())
             .map_err(|e| e.to_string())?;
-        wt.insert(&target_group_id, serialized.as_str())
+        wt.insert(target_group_id.as_str(), serialized.as_str())
             .map_err(|e| e.to_string())?;
         // Remove source group
-        wt.remove(&source_group_id).map_err(|e| e.to_string())?;
+        wt.remove(source_group_id.as_str()).map_err(|e| e.to_string())?;
 
         // Update FileNode references: replace source_group_id with target_group_id
         let mut ft_table = tx
@@ -669,7 +669,7 @@ pub fn delete_face_group(group_id: String, state: State<'_, AppState>) -> Result
         let mut fg_table = tx
             .open_table(crate::db::Database::get_face_groups_table())
             .map_err(|e| e.to_string())?;
-        fg_table.remove(&group_id).map_err(|e| e.to_string())?;
+        fg_table.remove(group_id.as_str()).map_err(|e| e.to_string())?;
 
         // Remove face_group_id from referenced FileNodes
         let mut ft_table = tx
@@ -777,7 +777,7 @@ pub fn get_group_files(
 
     let mut files = Vec::new();
     for fid in &group.file_ids {
-        if let Some(fv) = file_table.get(fid).map_err(|e| e.to_string())? {
+        if let Some(fv) = file_table.get(fid.as_str()).map_err(|e| e.to_string())? {
             let file_node: FileNode =
                 serde_json::from_str(&fv.value()).map_err(|e| e.to_string())?;
             files.push(file_node);

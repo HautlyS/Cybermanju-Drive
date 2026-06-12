@@ -4,8 +4,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::crypto::pqc::{
-    self, algorithm_from_str, EncryptedFileMeta, EncryptionAlgo, FileEncryptedData, KeyPair,
-    PqcEngine,
+    self, algorithm_from_str, EncryptedFileMeta, KeyPair, PqcEngine,
 };
 use crate::AppState;
 
@@ -297,7 +296,7 @@ pub fn encrypt_file(
             .open_table(crate::db::Database::get_files_table())
             .map_err(|e| e.to_string())?;
         table
-            .insert(&file_id, serialized.as_str())
+            .insert(file_id.as_str(), serialized.as_str())
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
@@ -398,7 +397,7 @@ pub fn decrypt_file(
             .open_table(crate::db::Database::get_files_table())
             .map_err(|e| e.to_string())?;
         table
-            .insert(&file_id, serialized.as_str())
+            .insert(file_id.as_str(), serialized.as_str())
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
@@ -527,7 +526,7 @@ pub fn generate_keypair(
             .open_table(crate::db::Database::get_encryption_keys_table())
             .map_err(|e| e.to_string())?;
         table
-            .insert(&keypair.id, serialized.as_str())
+            .insert(keypair.id.as_str(), serialized.as_str())
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;

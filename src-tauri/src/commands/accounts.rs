@@ -67,7 +67,7 @@ pub fn create_account(
             .open_table(crate::db::Database::get_accounts_table())
             .map_err(|e| e.to_string())?;
         table
-            .insert(&account_id, serialized.as_str())
+            .insert(account_id.as_str(), serialized.as_str())
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
@@ -167,7 +167,7 @@ pub fn delete_account(account_id: String, state: State<'_, AppState>) -> Result<
             .open_table(crate::db::Database::get_accounts_table())
             .map_err(|e| e.to_string())?;
         let removed = table
-            .remove(&account_id)
+            .remove(account_id.as_str())
             .map_err(|e| e.to_string())?
             .is_some();
 

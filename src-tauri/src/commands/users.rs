@@ -257,7 +257,7 @@ pub fn register_user(
             .open_table(crate::db::Database::get_users_table())
             .map_err(|e| e.to_string())?;
         table
-            .insert(&user_id, serialized.as_str())
+            .insert(user_id.as_str(), serialized.as_str())
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
@@ -312,7 +312,7 @@ pub fn authenticate_user(
                             .open_table(crate::db::Database::get_users_table())
                             .map_err(|e| e.to_string())?;
                         table
-                            .insert(&user.id, serialized.as_str())
+                            .insert(user.id.as_str(), serialized.as_str())
                             .map_err(|e| e.to_string())?;
                     }
                     tx_write.commit().map_err(|e| e.to_string())?;
@@ -455,7 +455,7 @@ pub fn set_file_permission(
             table.remove(eid.as_str()).map_err(|e| e.to_string())?;
         }
         table
-            .insert(&perm_id, serialized.as_str())
+            .insert(perm_id.as_str(), serialized.as_str())
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
@@ -476,7 +476,7 @@ pub fn revoke_file_permission(
             .open_table(crate::db::Database::get_user_file_perms_table())
             .map_err(|e| e.to_string())?;
         let removed = table
-            .remove(&permission_id)
+            .remove(permission_id.as_str())
             .map_err(|e| e.to_string())?
             .is_some();
         if !removed {

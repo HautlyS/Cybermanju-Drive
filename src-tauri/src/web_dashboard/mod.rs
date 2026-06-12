@@ -275,44 +275,71 @@ fn handle_connection(dashboard: &WebDashboard, mut stream: TcpStream) {
 
     // ── Rate limiting check ──
     if !check_rate_limit(&dashboard.rate_limits, &client_ip) {
-        let body = r#"{"error":true,"status":429,"message":"Rate limit exceeded"}"#;
-        let resp = format!(
-            "HTTP/1.1 429 Too Many Requests\r\n\
-             Content-Type: application/json\r\n\
-             Content-Length: {}\r\n\
-             \r\n\
-             {}",
-            body.len(),
-            body
-        );
-        let _ = stream.write_all(resp.as_bytes());
+        write_http_json(&mut stream, 429, r#"{"error":true,"status":429,"message":"Rate limit exceeded"}"#);
         return;
     }
 
-    let mut reader = BufReader::new(&stream);
+    // Parse the HTTP request using a fresh BufReader over a shared reference.
+    // The BufReader borrow ends when `parse_http_request` returns,
+    // leaving `stream` available for writing the response.
+    let parse_result = parse_http_request(&stream);
+    let ParsedRequest { method, path, body, auth_header, effective_origin } = match parse_result {
+        Ok(r) => r,
+        Err((status, msg)) => {
+            write_http_json(&mut stream, status, &msg);
+            return;
+        }
+    };
+
+    let effective_origin = effective_origin.as_deref();
+
+    // Handle the request — use the shared DB handle
+    let db_guard = match dashboard.db.lock() {
+        Ok(g) => g,
+        Err(_) => {
+            let _ = stream
+                .write_all(json_error(500, "Database lock poisoned", effective_origin).as_bytes());
+            return;
+        }
+    };
+    let response = handle_request(
+        dashboard,
+        &db_guard,
+        &method,
+        &path,
+        &body,
+        auth_header.as_deref(),
+        effective_origin,
+    );
+    drop(db_guard);
+
+    let _ = stream.write_all(response.as_bytes());
+}
+
+struct ParsedRequest {
+    method: String,
+    path: String,
+    body: String,
+    auth_header: Option<String>,
+    effective_origin: Option<String>,
+}
+
+/// Parse an HTTP request from a TcpStream without writing to it.
+fn parse_http_request(stream: &TcpStream) -> Result<ParsedRequest, (u16, String)> {
+    let mut reader = BufReader::new(stream);
 
     // Read request line
     let mut request_line = String::new();
-    if reader.read_line(&mut request_line).is_err() {
-        let _ = write!(
-            stream,
-            "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n"
-        );
-        return;
-    }
+    reader.read_line(&mut request_line).map_err(|_| (400, r#"{"error":true,"status":400,"message":"Bad Request"}"#.to_string()))?;
     let request_line = request_line.trim();
 
     // Parse method and path from "GET /path HTTP/1.1"
     let parts: Vec<&str> = request_line.splitn(3, ' ').collect();
     if parts.len() < 2 {
-        let _ = write!(
-            stream,
-            "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n"
-        );
-        return;
+        return Err((400, r#"{"error":true,"status":400,"message":"Bad Request"}"#.to_string()));
     }
-    let method = parts[0];
-    let path = parts[1];
+    let method = parts[0].to_string();
+    let path = parts[1].to_string();
 
     // Read headers — extract Content-Length, Authorization, Origin
     let mut content_length: usize = 0;
@@ -338,18 +365,7 @@ fn handle_connection(dashboard: &WebDashboard, mut stream: TcpStream) {
 
     // ── Body size limit enforcement ──
     if content_length > MAX_BODY_SIZE {
-        let body = r#"{"error":true,"status":413,"message":"Request body too large"}"#;
-        let resp = format!(
-            "HTTP/1.1 413 Payload Too Large\r\n\
-             Content-Type: application/json\r\n\
-             Content-Length: {}\r\n\
-             \r\n\
-             {}",
-            body.len(),
-            body
-        );
-        let _ = stream.write_all(resp.as_bytes());
-        return;
+        return Err((413, r#"{"error":true,"status":413,"message":"Request body too large"}"#.to_string()));
     }
 
     // Read body if present (capped to MAX_BODY_SIZE for safety)
@@ -370,29 +386,34 @@ fn handle_connection(dashboard: &WebDashboard, mut stream: TcpStream) {
     // Determine effective CORS origin for response headers
     let effective_origin = origin_header
         .as_deref()
-        .filter(|o| ALLOWED_ORIGINS.contains(o));
+        .filter(|o| ALLOWED_ORIGINS.contains(o))
+        .map(|o| o.to_string());
 
-    // Handle the request — use the shared DB handle
-    let db_guard = match dashboard.db.lock() {
-        Ok(g) => g,
-        Err(_) => {
-            let _ = stream
-                .write_all(json_error(500, "Database lock poisoned", effective_origin).as_bytes());
-            return;
-        }
+    Ok(ParsedRequest { method, path, body, auth_header, effective_origin })
+}
+
+/// Write a JSON HTTP response.
+fn write_http_json(stream: &mut TcpStream, status: u16, body: &str) {
+    let reason = match status {
+        200 => "OK",
+        201 => "Created",
+        204 => "No Content",
+        400 => "Bad Request",
+        404 => "Not Found",
+        413 => "Payload Too Large",
+        429 => "Too Many Requests",
+        500 => "Internal Server Error",
+        _ => "Error",
     };
-    let response = handle_request(
-        dashboard,
-        &db_guard,
-        method,
-        path,
-        &body,
-        auth_header.as_deref(),
-        effective_origin,
+    let resp = format!(
+        "HTTP/1.1 {} {}\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         \r\n\
+         {}",
+        status, reason, body.len(), body
     );
-    drop(db_guard);
-
-    let _ = stream.write_all(response.as_bytes());
+    let _ = stream.write_all(resp.as_bytes());
 }
 
 // ─── Request router ──────────────────────────────────────────────────
@@ -821,11 +842,13 @@ fn delete_by_id(
         Ok(tx) => tx,
         Err(e) => return json_error(500, &format!("Write error: {}", e), origin),
     };
-    let mut table = match tx.open_table(table_def) {
-        Ok(t) => t,
-        Err(e) => return json_error(500, &format!("Table open error: {}", e), origin),
+    let result = {
+        let mut table = match tx.open_table(table_def) {
+            Ok(t) => t,
+            Err(e) => return json_error(500, &format!("Table open error: {}", e), origin),
+        };
+        table.remove(id).is_ok()
     };
-    let result = table.remove(id).is_ok();
     if let Err(e) = tx.commit() {
         return json_error(500, &format!("Commit error: {}", e), origin);
     }

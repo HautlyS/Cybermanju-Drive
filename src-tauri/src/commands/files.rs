@@ -176,7 +176,7 @@ pub fn rename_file(
             .open_table(crate::db::Database::get_files_table())
             .map_err(|e| e.to_string())?;
         table
-            .insert(&file_id, serialized.as_str())
+            .insert(file_id.as_str(), serialized.as_str())
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
@@ -359,7 +359,7 @@ pub fn create_loose_group(
             .open_table(crate::db::Database::get_loose_groups_table())
             .map_err(|e| e.to_string())?;
         table
-            .insert(&group_id, serialized.as_str())
+            .insert(group_id.as_str(), serialized.as_str())
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
@@ -416,13 +416,13 @@ pub fn add_to_loose_group(
         let mut gt = tx
             .open_table(crate::db::Database::get_loose_groups_table())
             .map_err(|e| e.to_string())?;
-        gt.insert(&group_id, group_serialized.as_str())
+        gt.insert(group_id.as_str(), group_serialized.as_str())
             .map_err(|e| e.to_string())?;
 
         let mut ft = tx
             .open_table(crate::db::Database::get_files_table())
             .map_err(|e| e.to_string())?;
-        ft.insert(&file_id, file_serialized.as_str())
+        ft.insert(file_id.as_str(), file_serialized.as_str())
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;

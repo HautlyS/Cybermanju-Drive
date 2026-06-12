@@ -56,7 +56,7 @@ pub fn create_collection(
             .open_table(crate::db::Database::get_collections_table())
             .map_err(|e| e.to_string())?;
         table
-            .insert(&collection_id, serialized.as_str())
+            .insert(collection_id.as_str(), serialized.as_str())
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
@@ -134,21 +134,21 @@ pub fn add_to_collection(
         let mut ct = tx
             .open_table(crate::db::Database::get_collections_table())
             .map_err(|e| e.to_string())?;
-        ct.insert(&collection_id, coll_serialized.as_str())
+        ct.insert(collection_id.as_str(), coll_serialized.as_str())
             .map_err(|e| e.to_string())?;
 
         // Update file node
         let mut ft = tx
             .open_table(crate::db::Database::get_files_table())
             .map_err(|e| e.to_string())?;
-        ft.insert(&file_id, file_serialized.as_str())
+        ft.insert(file_id.as_str(), file_serialized.as_str())
             .map_err(|e| e.to_string())?;
 
         // Store collection item
         let mut it = tx
             .open_table(crate::db::Database::get_collection_items_table())
             .map_err(|e| e.to_string())?;
-        it.insert(&item_id, item_serialized.as_str())
+        it.insert(item_id.as_str(), item_serialized.as_str())
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
@@ -220,7 +220,7 @@ pub fn remove_from_collection(
         let mut ct = tx
             .open_table(crate::db::Database::get_collections_table())
             .map_err(|e| e.to_string())?;
-        ct.insert(&collection_id, coll_serialized.as_str())
+        ct.insert(collection_id.as_str(), coll_serialized.as_str())
             .map_err(|e| e.to_string())?;
 
         // Remove collection item if found
@@ -241,7 +241,7 @@ pub fn remove_from_collection(
             let mut ft = tx
                 .open_table(crate::db::Database::get_files_table())
                 .map_err(|e| e.to_string())?;
-            ft.insert(&file_id, file_serialized.as_str())
+            ft.insert(file_id.as_str(), file_serialized.as_str())
                 .map_err(|e| e.to_string())?;
         }
     }

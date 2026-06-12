@@ -225,7 +225,8 @@ impl Database {
         let tx = self.db.begin_write()?;
         let removed = {
             let mut files_table = tx.open_table(FILES_TABLE)?;
-            files_table.remove(file_id)?.is_some()
+            let result = files_table.remove(file_id)?.is_some();
+            result
         };
 
         if removed {

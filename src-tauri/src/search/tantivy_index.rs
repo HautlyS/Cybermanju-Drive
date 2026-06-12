@@ -252,7 +252,7 @@ impl SearchIndex {
             created_at,
             blake3_hash,
         };
-        let mut writer = self.writer.write().unwrap();
+        let writer = self.writer.write().unwrap();
         writer.delete_term(Term::from_field_text(self.file_id_field, file_id));
         let doc = self.build_document(&params);
         writer.add_document(doc)?;
@@ -274,7 +274,7 @@ impl SearchIndex {
     /// Useful for batch operations where the caller wants to delete multiple
     /// documents and commit once via a subsequent explicit commit or batch add.
     pub fn delete_term(&self, field: Field, term_text: &str) {
-        let writer = self.writer.write().unwrap();
+        let mut writer = self.writer.write().unwrap();
         writer.delete_term(Term::from_field_text(field, term_text));
     }
 
@@ -442,7 +442,7 @@ fn determine_match_type_from_query(
     doc: &TantivyDocument,
     query_str: &str,
     file_name_field: &Field,
-    content_field: &Field,
+    _content_field: &Field,
     tags_field: &Field,
 ) -> String {
     // Normalize and tokenize the user's query string

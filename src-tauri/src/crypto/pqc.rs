@@ -22,13 +22,13 @@ use pqcrypto_mlkem::mlkem1024;
 use pqcrypto_mlkem::mlkem768;
 
 // Real ML-DSA from ml-dsa (FIPS 204, formerly CRYSTALS-Dilithium)
-use ml_dsa::{KeyGen, MlDsa44, MlDsa65, MlDsa87};
+use ml_dsa::{Generate, Keypair, MlDsa44, MlDsa65, MlDsa87, SigningKey, SignatureEncoding, Verifier};
 use pqcrypto_traits::kem::{Ciphertext as _, PublicKey as _, SecretKey as _, SharedSecret as _};
-use signature::{Signer, Verifier};
+use signature::Signer;
 
 // X25519 for hybrid classical component
 use x25519_dalek::{
-    EphemeralSecret, PublicKey as X25519PublicKey, StaticSecret as X25519StaticSecret,
+    PublicKey as X25519PublicKey, StaticSecret as X25519StaticSecret,
 };
 
 type HmacSha512 = Hmac<Sha512>;
@@ -259,25 +259,25 @@ impl PqcEngine {
             }
             EncryptionAlgo::MlDsa44 => {
                 // Real ML-DSA-44 key generation (FIPS 204, NIST Level 2)
-                let kp = MlDsa44::key_gen(&mut rand_core::OsRng);
-                // SigningKey: store 32-byte seed (reconstruct via from_seed)
-                let sk_bytes = kp.signing_key().to_seed().to_vec();
-                // VerifyingKey: store encoded public key bytes
-                let pk_bytes = kp.verifying_key().to_bytes().to_vec();
+                let sk = SigningKey::<MlDsa44>::generate();
+                // Store full signing key bytes (reconstruct via from_bytes)
+                let sk_bytes = sk.to_bytes().to_vec();
+                // Verifying key bytes
+                let pk_bytes = sk.verifying_key().to_bytes().to_vec();
                 (pk_bytes, sk_bytes)
             }
             EncryptionAlgo::MlDsa65 => {
                 // Real ML-DSA-65 key generation (FIPS 204, NIST Level 3)
-                let kp = MlDsa65::key_gen(&mut rand_core::OsRng);
-                let sk_bytes = kp.signing_key().to_seed().to_vec();
-                let pk_bytes = kp.verifying_key().to_bytes().to_vec();
+                let sk = SigningKey::<MlDsa65>::generate();
+                let sk_bytes = sk.to_bytes().to_vec();
+                let pk_bytes = sk.verifying_key().to_bytes().to_vec();
                 (pk_bytes, sk_bytes)
             }
             EncryptionAlgo::MlDsa87 => {
                 // Real ML-DSA-87 key generation (FIPS 204, NIST Level 5)
-                let kp = MlDsa87::key_gen(&mut rand_core::OsRng);
-                let sk_bytes = kp.signing_key().to_seed().to_vec();
-                let pk_bytes = kp.verifying_key().to_bytes().to_vec();
+                let sk = SigningKey::<MlDsa87>::generate();
+                let sk_bytes = sk.to_bytes().to_vec();
+                let pk_bytes = sk.verifying_key().to_bytes().to_vec();
                 (pk_bytes, sk_bytes)
             }
             EncryptionAlgo::ClassicalSign => {
@@ -658,25 +658,22 @@ fn decrypt_with_symmetric_key(encrypted: &FileEncryptedData, keypair: &KeyPair) 
 pub fn sign_message(message: &[u8], keypair: &KeyPair) -> Result<Vec<u8>> {
     match &keypair.algorithm {
         EncryptionAlgo::MlDsa44 => {
-            let seed = ml_dsa::Seed::<MlDsa44>::try_from(keypair.private_key.as_slice())
-                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-44 seed: {:?}", e))?;
-            let sk = ml_dsa::SigningKey::<MlDsa44>::from_seed(&seed);
+            let sk = SigningKey::<MlDsa44>::from_bytes(keypair.private_key.as_slice())
+                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-44 key: {:?}", e))?;
             let sig = sk.sign(message);
-            Ok(sig.as_ref().to_vec())
+            Ok(sig.to_bytes().to_vec())
         }
         EncryptionAlgo::MlDsa65 => {
-            let seed = ml_dsa::Seed::<MlDsa65>::try_from(keypair.private_key.as_slice())
-                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-65 seed: {:?}", e))?;
-            let sk = ml_dsa::SigningKey::<MlDsa65>::from_seed(&seed);
+            let sk = SigningKey::<MlDsa65>::from_bytes(keypair.private_key.as_slice())
+                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-65 key: {:?}", e))?;
             let sig = sk.sign(message);
-            Ok(sig.as_ref().to_vec())
+            Ok(sig.to_bytes().to_vec())
         }
         EncryptionAlgo::MlDsa87 => {
-            let seed = ml_dsa::Seed::<MlDsa87>::try_from(keypair.private_key.as_slice())
-                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-87 seed: {:?}", e))?;
-            let sk = ml_dsa::SigningKey::<MlDsa87>::from_seed(&seed);
+            let sk = SigningKey::<MlDsa87>::from_bytes(keypair.private_key.as_slice())
+                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-87 key: {:?}", e))?;
             let sig = sk.sign(message);
-            Ok(sig.as_ref().to_vec())
+            Ok(sig.to_bytes().to_vec())
         }
         EncryptionAlgo::ClassicalSign => {
             // HMAC-SHA512 fallback (classical, not post-quantum)
@@ -700,29 +697,26 @@ pub fn sign_message(message: &[u8], keypair: &KeyPair) -> Result<Vec<u8>> {
 pub fn verify_signature(message: &[u8], signature_bytes: &[u8], keypair: &KeyPair) -> Result<bool> {
     match &keypair.algorithm {
         EncryptionAlgo::MlDsa44 => {
-            let seed = ml_dsa::Seed::<MlDsa44>::try_from(keypair.private_key.as_slice())
-                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-44 seed: {:?}", e))?;
-            let sk = ml_dsa::SigningKey::<MlDsa44>::from_seed(&seed);
+            let sk = SigningKey::<MlDsa44>::from_bytes(keypair.private_key.as_slice())
+                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-44 key: {:?}", e))?;
             let pk = sk.verifying_key();
-            let sig = ml_dsa::Signature::<MlDsa44>::try_from(signature_bytes)
+            let sig = ml_dsa::Signature::try_from(signature_bytes)
                 .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-44 signature: {:?}", e))?;
             Ok(pk.verify(message, &sig).is_ok())
         }
         EncryptionAlgo::MlDsa65 => {
-            let seed = ml_dsa::Seed::<MlDsa65>::try_from(keypair.private_key.as_slice())
-                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-65 seed: {:?}", e))?;
-            let sk = ml_dsa::SigningKey::<MlDsa65>::from_seed(&seed);
+            let sk = SigningKey::<MlDsa65>::from_bytes(keypair.private_key.as_slice())
+                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-65 key: {:?}", e))?;
             let pk = sk.verifying_key();
-            let sig = ml_dsa::Signature::<MlDsa65>::try_from(signature_bytes)
+            let sig = ml_dsa::Signature::try_from(signature_bytes)
                 .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-65 signature: {:?}", e))?;
             Ok(pk.verify(message, &sig).is_ok())
         }
         EncryptionAlgo::MlDsa87 => {
-            let seed = ml_dsa::Seed::<MlDsa87>::try_from(keypair.private_key.as_slice())
-                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-87 seed: {:?}", e))?;
-            let sk = ml_dsa::SigningKey::<MlDsa87>::from_seed(&seed);
+            let sk = SigningKey::<MlDsa87>::from_bytes(keypair.private_key.as_slice())
+                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-87 key: {:?}", e))?;
             let pk = sk.verifying_key();
-            let sig = ml_dsa::Signature::<MlDsa87>::try_from(signature_bytes)
+            let sig = ml_dsa::Signature::try_from(signature_bytes)
                 .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-87 signature: {:?}", e))?;
             Ok(pk.verify(message, &sig).is_ok())
         }
