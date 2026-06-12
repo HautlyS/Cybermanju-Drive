@@ -320,7 +320,7 @@ pub fn decompress_file(
                         decompressed.len() as u64,
                         blake3::hash(&decompressed).to_hex().to_string(),
                     ),
-                    Err(e) => {
+                    Err(_e) => {
                         // If triple decompression fails, try single-layer based on compression_layers
                         let mut result_data = data.clone();
                         let mut current_size = data.len() as u64;

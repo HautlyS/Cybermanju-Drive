@@ -371,7 +371,7 @@ impl SearchIndex {
                 if suggestions.len() >= limit {
                     return Ok(suggestions);
                 }
-                let inverted_index = segment_reader.inverted_index(*field)?;
+                let inverted_index = segment_reader.inverted_index(field)?;
                 let term_dict = inverted_index.terms();
                 let mut stream = term_dict.range().ge(prefix.as_bytes()).into_stream()?;
                 while stream.advance() {

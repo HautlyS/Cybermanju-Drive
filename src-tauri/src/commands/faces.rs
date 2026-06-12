@@ -348,7 +348,7 @@ pub fn detect_faces_batch_cmd(state: State<'_, AppState>) -> Result<ReclusterRes
         total_faces,
         noise_faces,
         avg_cohesion,
-        strategy_used: format!("{:?}", strat.unwrap_or(ClusteringStrategy::HDBSCAN)),
+        strategy_used: "adaptive".to_string(),
     })
 }
 
@@ -440,11 +440,13 @@ pub fn recluster_faces(
             .filter_map(|entry| entry.ok().map(|(k, _)| k.value().to_string()))
             .collect();
         for fid in &file_keys {
-            if let Some(fv) = ft_table.get(fid.as_str()).map_err(|e| e.to_string())? {
-                let node_str = fv.value().to_string();
-                drop(fv);
+            let node_str = ft_table
+                .get(fid.as_str())
+                .map_err(|e| e.to_string())?
+                .map(|fv| fv.value().to_string());
+            if let Some(ref node_str) = node_str {
                 let mut file_node: FileNode =
-                    serde_json::from_str(&node_str).map_err(|e| e.to_string())?;
+                    serde_json::from_str(node_str).map_err(|e| e.to_string())?;
                 if !file_node.face_group_ids.is_empty() {
                     file_node.face_group_ids.clear();
                     let file_serialized =
@@ -497,11 +499,13 @@ pub fn recluster_faces(
 
             // Update file nodes to reference this face group
             for file_id in &cluster.members {
-                if let Some(fv) = ft_table.get(file_id.as_str()).map_err(|e| e.to_string())? {
-                    let node_str = fv.value().to_string();
-                    drop(fv);
+                let node_str = ft_table
+                    .get(file_id.as_str())
+                    .map_err(|e| e.to_string())?
+                    .map(|fv| fv.value().to_string());
+                if let Some(ref node_str) = node_str {
                     let mut file_node: FileNode =
-                        serde_json::from_str(&node_str).map_err(|e| e.to_string())?;
+                        serde_json::from_str(node_str).map_err(|e| e.to_string())?;
                     if !file_node.face_group_ids.contains(&group_id) {
                         file_node.face_group_ids.push(group_id.clone());
                     }
@@ -633,12 +637,13 @@ pub fn merge_face_groups(
             .open_table(crate::db::Database::get_files_table())
             .map_err(|e| e.to_string())?;
         for fid in &source.file_ids {
-            let entry = ft_table.get(fid.as_str()).map_err(|e| e.to_string())?;
-            if let Some(fv) = entry {
-                let node_str = fv.value().to_string();
-                drop(fv);
+            let node_str = ft_table
+                .get(fid.as_str())
+                .map_err(|e| e.to_string())?
+                .map(|fv| fv.value().to_string());
+            if let Some(ref node_str) = node_str {
                 let mut file_node: FileNode =
-                    serde_json::from_str(&node_str).map_err(|e| e.to_string())?;
+                    serde_json::from_str(node_str).map_err(|e| e.to_string())?;
                 // Remove source reference, add target reference
                 file_node.face_group_ids.retain(|id| id != &source_group_id);
                 if !file_node.face_group_ids.contains(&target_group_id) {
@@ -689,12 +694,13 @@ pub fn delete_face_group(group_id: String, state: State<'_, AppState>) -> Result
             .open_table(crate::db::Database::get_files_table())
             .map_err(|e| e.to_string())?;
         for fid in &group.file_ids {
-            let entry = ft_table.get(fid.as_str()).map_err(|e| e.to_string())?;
-            if let Some(fv) = entry {
-                let node_str = fv.value().to_string();
-                drop(fv);
+            let node_str = ft_table
+                .get(fid.as_str())
+                .map_err(|e| e.to_string())?
+                .map(|fv| fv.value().to_string());
+            if let Some(ref node_str) = node_str {
                 let mut file_node: FileNode =
-                    serde_json::from_str(&node_str).map_err(|e| e.to_string())?;
+                    serde_json::from_str(node_str).map_err(|e| e.to_string())?;
                 file_node.face_group_ids.retain(|id| id != &group_id);
                 let file_serialized =
                     serde_json::to_string(&file_node).map_err(|e| e.to_string())?;
