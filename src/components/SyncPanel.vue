@@ -8,7 +8,7 @@ import type { SyncBackendType, SyncConfig } from '@/types'
 import {
   HardDrive, Github, FolderSync, Camera, Plus, Trash2, Play, X,
   CheckCircle, AlertCircle, RefreshCw, Zap, Image, FileTrash2,
-  CloudUpload, Wifi, WifiOff, Loader2,
+  CloudUpload, Wifi, WifiOff, Loader2, GitBranch,
 } from 'lucide-vue-next'
 
 const store = useAppStore()
@@ -17,6 +17,7 @@ const store = useAppStore()
 const backendIcons: Record<SyncBackendType, any> = {
   local: HardDrive,
   github: Github,
+  gitlab: GitBranch,
   googleDrive: FolderSync,
   googlePhotos: Camera,
 }
@@ -434,6 +435,38 @@ onMounted(() => {
                 type="password"
                 class="form-input"
                 placeholder="ghp_xxxxxxxxxxxx"
+              />
+            </template>
+
+            <!-- GitLab: project ID + branch + token + base URL -->
+            <template v-if="formBackendType === 'gitlab'">
+              <label class="form-label">Project ID or Path (namespace/project)</label>
+              <input
+                v-model="formRepoName"
+                type="text"
+                class="form-input"
+                placeholder="my-group/my-project or 12345"
+              />
+              <label class="form-label">Branch</label>
+              <input
+                v-model="formBranch"
+                type="text"
+                class="form-input"
+                placeholder="main"
+              />
+              <label class="form-label">GitLab Instance URL (optional)</label>
+              <input
+                v-model="formBasePath"
+                type="text"
+                class="form-input"
+                placeholder="https://gitlab.com"
+              />
+              <label class="form-label">Personal Access Token or OAuth Token</label>
+              <input
+                v-model="formToken"
+                type="password"
+                class="form-input"
+                placeholder="glpat-xxxxxxxxxxxxxxxxxxxx"
               />
             </template>
 

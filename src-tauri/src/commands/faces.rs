@@ -52,45 +52,45 @@ pub fn detect_faces(file_id: String, state: State<'_, AppState>) -> Result<FaceD
         .map_err(|e| e.to_string())?;
 
     let now = Utc::now().to_rfc3339();
+
+    // Load all existing face groups once (avoid per-face DB roundtrips)
+    let tx_read = db.begin_read().map_err(|e| e.to_string())?;
+    let fg_table = tx_read.open_table(crate::db::Database::get_face_groups_table())
+        .map_err(|e| e.to_string())?;
+
+    let mut existing_groups: Vec<(String, FaceGroup)> = Vec::new();
+    for entry in fg_table.iter().map_err(|e| e.to_string())? {
+        let (key, value) = entry.map_err(|e| e.to_string())?;
+        let group: FaceGroup = serde_json::from_str(&value.value())
+            .map_err(|e| e.to_string())?;
+        existing_groups.push((key.value().to_string(), group));
+    }
+    drop(tx_read);
+
+    // Track which groups need updating and any new groups to create
+    let mut updates: Vec<(String, FaceGroup)> = Vec::new();
+    let mut new_groups: Vec<FaceGroup> = Vec::new();
     let mut face_group_ids = Vec::new();
 
     // Process each detected face
     for (_face_index, embedding) in detected_faces.iter().enumerate() {
-        // Try to match against existing face groups
-        let tx_read = db.begin_read().map_err(|e| e.to_string())?;
-        let fg_table = tx_read.open_table(crate::db::Database::get_face_groups_table())
-            .map_err(|e| e.to_string())?;
-        let mut matched_group_id: Option<String> = None;
+        // Try to match against existing face groups (in-memory)
+        let mut matched_group_idx: Option<usize> = None;
 
-        for entry in fg_table.iter().map_err(|e| e.to_string())? {
-            let (key, value) = entry.map_err(|e| e.to_string())?;
-            let group: FaceGroup = serde_json::from_str(&value.value())
-                .map_err(|e| e.to_string())?;
-
+        for (idx, (_group_id, group)) in existing_groups.iter().enumerate() {
             if let Some(ref centroid) = group.centroid_embedding {
                 let dist = embedding_distance(embedding, centroid);
-                // Adaptive: use tighter threshold for larger groups
                 let group_threshold = DEFAULT_MATCH_THRESHOLD
                     - (group.file_ids.len() as f32 * 0.005).min(0.1);
                 if dist < group_threshold {
-                    matched_group_id = Some(key.value().to_string());
+                    matched_group_idx = Some(idx);
                     break;
                 }
             }
         }
-        drop(tx_read);
 
-        if let Some(group_id) = matched_group_id {
-            // Add file to existing group and update medoid
-            let tx_r2 = db.begin_read().map_err(|e| e.to_string())?;
-            let gt = tx_r2.open_table(crate::db::Database::get_face_groups_table())
-                .map_err(|e| e.to_string())?;
-            let gv = gt.get(&group_id)
-                .map_err(|e| e.to_string())?
-                .ok_or_else(|| format!("Face group not found: {}", group_id))?;
-            let mut group: FaceGroup = serde_json::from_str(&gv.value())
-                .map_err(|e| e.to_string())?;
-            drop(tx_r2);
+        if let Some(idx) = matched_group_idx {
+            let (_group_id, ref mut group) = existing_groups[idx];
 
             if !group.file_ids.contains(&file_id) {
                 group.file_ids.push(file_id.clone());
@@ -100,7 +100,7 @@ pub fn detect_faces(file_id: String, state: State<'_, AppState>) -> Result<FaceD
             if let Some(ref current_medoid) = group.centroid_embedding {
                 group.centroid_embedding = Some(update_medoid_incremental(
                     current_medoid,
-                    &[], // We don't store all embeddings in the group, use centroid
+                    &[],
                     embedding,
                 ));
             } else {
@@ -113,17 +113,7 @@ pub fn detect_faces(file_id: String, state: State<'_, AppState>) -> Result<FaceD
             }
             group.embedding_count += 1;
 
-            face_group_ids.push(group_id.clone());
-
-            let serialized = serde_json::to_string(&group).map_err(|e| e.to_string())?;
-            let tx = db.begin_write().map_err(|e| e.to_string())?;
-            {
-                let mut wt = tx.open_table(crate::db::Database::get_face_groups_table())
-                    .map_err(|e| e.to_string())?;
-                wt.insert(&group_id, serialized.as_str())
-                    .map_err(|e| e.to_string())?;
-            }
-            tx.commit().map_err(|e| e.to_string())?;
+            face_group_ids.push(existing_groups[idx].0.clone());
         } else {
             // Create a new face group
             let new_group_id = uuid::Uuid::new_v4().to_string();
@@ -143,18 +133,31 @@ pub fn detect_faces(file_id: String, state: State<'_, AppState>) -> Result<FaceD
             };
 
             face_group_ids.push(new_group_id.clone());
-
-            let serialized = serde_json::to_string(&new_group).map_err(|e| e.to_string())?;
-            let tx = db.begin_write().map_err(|e| e.to_string())?;
-            {
-                let mut wt = tx.open_table(crate::db::Database::get_face_groups_table())
-                    .map_err(|e| e.to_string())?;
-                wt.insert(&new_group_id, serialized.as_str())
-                    .map_err(|e| e.to_string())?;
-            }
-            tx.commit().map_err(|e| e.to_string())?;
+            new_groups.push(new_group);
         }
     }
+
+    // Single write transaction for all updates
+    let tx = db.begin_write().map_err(|e| e.to_string())?;
+    {
+        let mut fg_table = tx.open_table(crate::db::Database::get_face_groups_table())
+            .map_err(|e| e.to_string())?;
+
+        // Write updated existing groups
+        for (group_id, group) in &existing_groups {
+            let serialized = serde_json::to_string(group).map_err(|e| e.to_string())?;
+            fg_table.insert(group_id.as_str(), serialized.as_str())
+                .map_err(|e| e.to_string())?;
+        }
+
+        // Write new groups
+        for group in &new_groups {
+            let serialized = serde_json::to_string(group).map_err(|e| e.to_string())?;
+            fg_table.insert(group.id.as_str(), serialized.as_str())
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    tx.commit().map_err(|e| e.to_string())?;
 
     // Update the file node with face group references
     for gid in &face_group_ids {
@@ -307,26 +310,45 @@ pub fn recluster_faces(
 ) -> Result<ReclusterResult, String> {
     let db = state.db.write().map_err(|e| e.to_string())?;
 
-    // Collect all existing face group embeddings
+    // Collect all image file nodes from face groups
     let tx_read = db.begin_read().map_err(|e| e.to_string())?;
     let fg_table = tx_read.open_table(crate::db::Database::get_face_groups_table())
         .map_err(|e| e.to_string())?;
+    let file_table = tx_read.open_table(crate::db::Database::get_files_table())
+        .map_err(|e| e.to_string())?;
 
-    let mut all_embeddings: Vec<(String, Vec<f32>)> = Vec::new();
-    let mut all_file_ids: Vec<String> = Vec::new();
-
+    // Collect unique file IDs from all face groups
+    let mut file_ids_seen: HashSet<String> = HashSet::new();
     for entry in fg_table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
         let group: FaceGroup = serde_json::from_str(&value.value())
             .map_err(|e| e.to_string())?;
-        if let Some(ref centroid) = group.centroid_embedding {
-            for file_id in &group.file_ids {
-                all_embeddings.push((file_id.clone(), centroid.clone()));
-                all_file_ids.push(file_id.clone());
-            }
+        for fid in &group.file_ids {
+            file_ids_seen.insert(fid.clone());
         }
     }
     drop(tx_read);
+
+    // Re-detect faces for each file to get actual per-face embeddings
+    let mut all_embeddings: Vec<(String, Vec<f32>)> = Vec::new();
+    for fid in &file_ids_seen {
+        let tx_read = db.begin_read().map_err(|e| e.to_string())?;
+        let ft = tx_read.open_table(crate::db::Database::get_files_table())
+            .map_err(|e| e.to_string())?;
+        if let Some(fv) = ft.get(fid.as_str()).map_err(|e| e.to_string())? {
+            let file_node: FileNode = serde_json::from_str(fv.value())
+                .map_err(|e| e.to_string())?;
+            drop(tx_read);
+
+            if let Ok(embeddings) = crate::faces::detect_faces_in_file(&file_node) {
+                for emb in embeddings {
+                    all_embeddings.push((fid.clone(), emb));
+                }
+            }
+        } else {
+            drop(tx_read);
+        }
+    }
 
     // Parse strategy
     let strat = match strategy.as_deref() {
@@ -466,23 +488,12 @@ pub fn merge_face_groups(
     }
     target.embedding_count = target.file_ids.len() as u32;
 
-    // Update medoid from all members (approximate: use existing centroid + source centroid)
-    if let Some(ref src_centroid) = source.centroid_embedding {
-        if let Some(ref tgt_centroid) = target.centroid_embedding {
-            // Average the two centroids as approximation
-            let merged: Vec<f32> = tgt_centroid
-                .iter()
-                .zip(src_centroid.iter())
-                .map(|(a, b)| (a + b) / 2.0)
-                .collect();
-            // L2-normalize
-            let norm: f32 = merged.iter().map(|v| v * v).sum::<f32>().sqrt();
-            if norm > 0.0 {
-                target.centroid_embedding = Some(merged.iter().map(|v| v / norm).collect());
-            }
-        } else {
-            target.centroid_embedding = Some(src_centroid.clone());
-        }
+    // Update centroid: pick the group with more members (more representative medoid)
+    if target.file_ids.len() >= source.file_ids.len() {
+        // Keep target centroid (larger group = more representative)
+    } else {
+        // Source is larger, use its centroid
+        target.centroid_embedding = source.centroid_embedding;
     }
 
     // Update binary hash

@@ -32,6 +32,11 @@ blake3 = "1"
 redb = "2"
 # Post-quantum cryptography — real ML-KEM (FIPS 203)
 pqcrypto-mlkem = "0.1"
+# Post-quantum digital signatures — real ML-DSA (FIPS 204)
+ml-dsa = { version = "0.1.1", features = ["rand_core"] }
+signature = "3"
+# ml-dsa depends on rand_core v0.10; we need it in scope for OsRng with ML-DSA keygen
+rand_core_v10 = { package = "rand_core", version = "0.10" }
 # Hybrid classical component
 x25519-dalek = "2"
 # Key derivation

@@ -48,12 +48,19 @@ fn algorithm_info(algo: &str) -> (&'static str, u8, &'static str) {
     match algo {
         "kyber1024" => ("ML-KEM-1024 — FIPS 203", 5, "#00FF41"),
         "kyber768" | "hybrid" | "kyber512" => ("Hybrid ML-KEM-768 + X25519", 5, "#FFB800"),
-        "dilithium5" | "dilithium3" | "dilithium2"
-        | "sphincsplus" | "sphincs+"
-        | "classical_sign" | "hmac" => (
+        "ml_dsa44" | "ml-dsa44" | "ml-dsa-44" | "dilithium2" => {
+            ("ML-DSA-44 — FIPS 204 (NIST Level 2)", 2, "#00D4FF")
+        }
+        "ml_dsa65" | "ml-dsa65" | "ml-dsa-65" | "dilithium3" => {
+            ("ML-DSA-65 — FIPS 204 (NIST Level 3)", 3, "#A855F7")
+        }
+        "ml_dsa87" | "ml-dsa87" | "ml-dsa-87" | "dilithium5" => {
+            ("ML-DSA-87 — FIPS 204 (NIST Level 5)", 5, "#FF2D6F")
+        }
+        "classical_sign" | "hmac" | "sphincsplus" | "sphincs+" => (
             "HMAC-SHA512 (Classical — NOT post-quantum)",
             0,
-            "#00D4FF",
+            "#6B7280",
         ),
         "aes256" | "chacha20" => ("ChaCha20Poly1305 (Classical)", 0, "#FF6B2B"),
         _ => ("Unknown", 0, "#6B7280"),
@@ -172,6 +179,9 @@ pub fn encrypt_file(
         "kyber768",
         "kyber1024",
         "hybrid",
+        "ml_dsa44",
+        "ml_dsa65",
+        "ml_dsa87",
         "dilithium2",
         "dilithium3",
         "dilithium5",
@@ -477,7 +487,7 @@ pub fn generate_keypair(
 ) -> Result<crate::db::schema::EncryptionKey, String> {
     let algo_enum = algorithm_from_str(&algorithm).ok_or_else(|| {
         format!(
-            "Unsupported algorithm: {}. Supported: kyber1024, kyber768, kyber512, hybrid, dilithium5, sphincsplus, aes256",
+            "Unsupported algorithm: {}. Supported: kyber1024, hybrid, ml_dsa44, ml_dsa65, ml_dsa87, classical_sign, aes256",
             algorithm
         )
     })?;

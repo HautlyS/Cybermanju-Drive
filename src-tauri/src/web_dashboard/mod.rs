@@ -446,8 +446,8 @@ fn handle_request(
         ["api", "encryption", "status"] if method == "GET" => {
             let status = serde_json::json!({
                 "available": true,
-                "supported_algorithms": ["kyber512", "kyber768", "kyber1024", "classical_sign"],
-                "engine": "pqcrypto-mlkem (ML-KEM FIPS 203 post-quantum cryptography)"
+                "supported_algorithms": ["kyber512", "kyber768", "kyber1024", "hybrid", "ml_dsa44", "ml_dsa65", "ml_dsa87", "classical_sign"],
+                "engine": "pqcrypto-mlkem (ML-KEM FIPS 203) + ml-dsa (ML-DSA FIPS 204) post-quantum cryptography"
             });
             http_response(
                 200,

@@ -1,13 +1,13 @@
 // Cybermanju Drive — Real Post-Quantum Cryptography Implementation
 // ML-KEM (FIPS 203) via pqcrypto-mlkem — actual lattice-based key encapsulation
+// ML-DSA (FIPS 204) via ml-dsa — actual lattice-based digital signatures
 // Hybrid mode: ML-KEM-768 + X25519 for defense-in-depth
 // Symmetric layer: ChaCha20Poly1305 (AEAD) with HKDF-SHA256 derived keys
-// Sign/verify: HMAC-SHA512 as a real signature fallback
 
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use chacha20poly1305::{
-    aead::{Aead, KeyInit, OsRng},
+    aead::{Aead, KeyInit, OsRng as AeadOsRng},
     ChaCha20Poly1305, Nonce,
 };
 use hkdf::Hkdf;
@@ -20,6 +20,13 @@ use std::collections::HashMap;
 // Real ML-KEM from pqcrypto-mlkem
 use pqcrypto_mlkem::mlkem768 as mlkem768;
 use pqcrypto_mlkem::mlkem1024 as mlkem1024;
+
+// Real ML-DSA from ml-dsa (FIPS 204, formerly CRYSTALS-Dilithium)
+use ml_dsa::{KeyGen, MlDsa44, MlDsa65, MlDsa87};
+use signature::{Signer, Verifier};
+
+// rand_core v0.10 for ml-dsa KeyGen (ml-dsa depends on rand_core ^0.10)
+use rand_core_v10::OsRng;
 
 // X25519 for hybrid classical component
 use x25519_dalek::{PublicKey as X25519PublicKey, StaticSecret as X25519StaticSecret};
@@ -36,8 +43,13 @@ pub enum EncryptionAlgo {
     Kyber1024,
     /// Hybrid: ML-KEM-768 (NIST Level 3) + X25519 (classical) for transitional security
     Hybrid,
-    /// Classical HMAC-SHA512 signing — NOT post-quantum.
-    /// Placeholder until pqcrypto-ml-dsa is stable.
+    /// ML-DSA-44 (FIPS 204) — Lattice-based digital signatures, NIST Level 2
+    MlDsa44,
+    /// ML-DSA-65 (FIPS 204) — Lattice-based digital signatures, NIST Level 3
+    MlDsa65,
+    /// ML-DSA-87 (FIPS 204) — Lattice-based digital signatures, NIST Level 5
+    MlDsa87,
+    /// Classical HMAC-SHA512 signing — NOT post-quantum, backward compatibility
     ClassicalSign,
     /// ChaCha20Poly1305 — Classical only, for backward compatibility
     Aes256,
@@ -48,6 +60,9 @@ impl EncryptionAlgo {
         match self {
             Self::Kyber1024 => 5,
             Self::Hybrid => 5,
+            Self::MlDsa44 => 2,
+            Self::MlDsa65 => 3,
+            Self::MlDsa87 => 5,
             Self::ClassicalSign | Self::Aes256 => 0,
         }
     }
@@ -56,6 +71,9 @@ impl EncryptionAlgo {
         match self {
             Self::Kyber1024 => "ML-KEM-1024 — FIPS 203",
             Self::Hybrid => "Hybrid ML-KEM-768 + X25519",
+            Self::MlDsa44 => "ML-DSA-44 — FIPS 204 (NIST Level 2)",
+            Self::MlDsa65 => "ML-DSA-65 — FIPS 204 (NIST Level 3)",
+            Self::MlDsa87 => "ML-DSA-87 — FIPS 204 (NIST Level 5)",
             Self::ClassicalSign => "HMAC-SHA512 (Classical — NOT post-quantum)",
             Self::Aes256 => "ChaCha20Poly1305 (Classical)",
         }
@@ -65,9 +83,21 @@ impl EncryptionAlgo {
         match self {
             Self::Kyber1024 => "#00FF41",
             Self::Hybrid => "#FFB800",
-            Self::ClassicalSign => "#00D4FF",
+            Self::MlDsa44 => "#00D4FF",
+            Self::MlDsa65 => "#A855F7",
+            Self::MlDsa87 => "#FF2D6F",
+            Self::ClassicalSign => "#6B7280",
             Self::Aes256 => "#FF6B2B",
         }
+    }
+
+    /// Returns true if this algorithm is a signature-only variant (ML-DSA or HMAC).
+    /// These are used for signing/verification, not for key encapsulation.
+    pub fn is_signature_only(&self) -> bool {
+        matches!(
+            self,
+            Self::MlDsa44 | Self::MlDsa65 | Self::MlDsa87 | Self::ClassicalSign
+        )
     }
 }
 
@@ -81,9 +111,14 @@ impl EncryptionAlgo {
 ///   - `public_key`  = actual ML-KEM encapsulation key bytes
 ///   - `private_key` = actual ML-KEM decapsulation key bytes
 ///
-    /// For signature-only variants (`ClassicalSign`):
-    ///   - `public_key`  = SHA-256 fingerprint (32 bytes) for identification
-    ///   - `private_key` = 64-byte HMAC-SHA512 key
+/// For ML-DSA variants (`MlDsa44`, `MlDsa65`, `MlDsa87`):
+///   - `public_key`  = ML-DSA encoded verifying key bytes (via `VerifyingKey::encode()`)
+///   - `private_key` = ML-DSA 32-byte seed (via `SigningKey::to_seed()`)
+///                     Full signing key is reconstructed via `SigningKey::from_seed()`
+///
+/// For classical (`ClassicalSign`):
+///   - `public_key`  = SHA-256 fingerprint (32 bytes) for identification
+///   - `private_key` = 64-byte HMAC-SHA512 key
 ///
 /// For classical (`Aes256`):
 ///   - `public_key`  = 32-byte ChaCha20Poly1305 key
@@ -199,10 +234,13 @@ impl PqcEngine {
         }
     }
 
-    /// Generate a new PQC keypair using real ML-KEM key generation.
+    /// Generate a new PQC keypair using real ML-KEM or ML-DSA key generation.
     ///
     /// - `Kyber1024`: real ML-KEM-1024 keypair via pqcrypto-mlkem
     /// - `Hybrid`: real ML-KEM-768 keypair (X25519 derived at encrypt/decrypt time)
+    /// - `MlDsa44`: real ML-DSA-44 keypair via ml-dsa (FIPS 204, NIST Level 2)
+    /// - `MlDsa65`: real ML-DSA-65 keypair via ml-dsa (FIPS 204, NIST Level 3)
+    /// - `MlDsa87`: real ML-DSA-87 keypair via ml-dsa (FIPS 204, NIST Level 5)
     /// - `ClassicalSign`: 64-byte HMAC-SHA512 key with SHA-256 fingerprint
     /// - `Aes256`: 32-byte random ChaCha20Poly1305 key
     pub fn generate_keypair(&mut self, algorithm: EncryptionAlgo) -> Result<KeyPair> {
@@ -220,9 +258,33 @@ impl PqcEngine {
                 let (pk, sk) = mlkem768::keypair();
                 (pk.as_bytes().to_vec(), sk.as_bytes().to_vec())
             }
+            EncryptionAlgo::MlDsa44 => {
+                // Real ML-DSA-44 key generation (FIPS 204, NIST Level 2)
+                let kp = MlDsa44::key_gen(&mut OsRng);
+                // SigningKey: store 32-byte seed (reconstruct via from_seed)
+                let sk_bytes = kp.signing_key().to_seed().to_vec();
+                // VerifyingKey: store encoded public key bytes
+                let pk_bytes = kp.verifying_key().encode().as_ref().to_vec();
+                (pk_bytes, sk_bytes)
+            }
+            EncryptionAlgo::MlDsa65 => {
+                // Real ML-DSA-65 key generation (FIPS 204, NIST Level 3)
+                let kp = MlDsa65::key_gen(&mut OsRng);
+                let sk_bytes = kp.signing_key().to_seed().to_vec();
+                let pk_bytes = kp.verifying_key().encode().as_ref().to_vec();
+                (pk_bytes, sk_bytes)
+            }
+            EncryptionAlgo::MlDsa87 => {
+                // Real ML-DSA-87 key generation (FIPS 204, NIST Level 5)
+                let kp = MlDsa87::key_gen(&mut OsRng);
+                let sk_bytes = kp.signing_key().to_seed().to_vec();
+                let pk_bytes = kp.verifying_key().encode().as_ref().to_vec();
+                (pk_bytes, sk_bytes)
+            }
             EncryptionAlgo::ClassicalSign => {
                 // HMAC-SHA512 fallback: 64-byte key for signing
                 let mut hmac_key = [0u8; 64];
+                use rand_core_v10::RngCore as RngCoreV10;
                 OsRng.fill_bytes(&mut hmac_key);
                 // Public key = SHA-256 fingerprint for identification (not a real public key)
                 let pub_fingerprint = blake3::hash(&hmac_key).as_bytes()[..32].to_vec();
@@ -230,7 +292,7 @@ impl PqcEngine {
             }
             EncryptionAlgo::Aes256 => {
                 // 32-byte random key for ChaCha20Poly1305
-                let key = ChaCha20Poly1305::generate_key(OsRng);
+                let key = ChaCha20Poly1305::generate_key(AeadOsRng);
                 (key.clone().to_vec(), key.to_vec())
             }
         };
@@ -299,7 +361,7 @@ impl PqcEngine {
 /// astronomically unlikely.
 pub fn generate_random_nonce() -> [u8; 12] {
     let mut nonce = [0u8; 12];
-    let mut rng = OsRng;
+    let mut rng = AeadOsRng;
     rng.fill_bytes(&mut nonce);
     nonce
 }
@@ -316,6 +378,13 @@ pub fn generate_random_nonce() -> [u8; 12] {
 /// The `kem_ciphertext` must be stored alongside the encrypted file — it is
 /// required for decapsulation during decryption.
 pub fn encrypt_data(plaintext: &[u8], keypair: &KeyPair) -> Result<FileEncryptedData> {
+    // ML-DSA variants are signature-only; they don't do key encapsulation.
+    // For signing-only keypairs, we derive the symmetric key directly from
+    // the first 32 bytes of the private key (same as ClassicalSign/Aes256).
+    if keypair.algorithm.is_signature_only() {
+        return encrypt_with_symmetric_key(plaintext, keypair);
+    }
+
     let nonce = generate_random_nonce();
 
     let (derived_key, kem_ciphertext, x25519_ephemeral_pk) = match &keypair.algorithm {
@@ -349,7 +418,7 @@ pub fn encrypt_data(plaintext: &[u8], keypair: &KeyPair) -> Result<FileEncrypted
             let x25519_static_secret = derive_x25519_static_secret(&keypair.private_key);
 
             // Generate ephemeral X25519 keypair for this encryption
-            let ephemeral_secret = X25519StaticSecret::random_from_rng(OsRng);
+            let ephemeral_secret = X25519StaticSecret::random_from_rng(AeadOsRng);
             let ephemeral_public = X25519PublicKey::from(&ephemeral_secret);
 
             // Perform X25519 Diffie-Hellman: ephemeral × static
@@ -364,19 +433,7 @@ pub fn encrypt_data(plaintext: &[u8], keypair: &KeyPair) -> Result<FileEncrypted
 
             (key, kem_ct.as_bytes().to_vec(), Some(ephemeral_public.as_bytes().to_vec()))
         }
-        EncryptionAlgo::ClassicalSign | EncryptionAlgo::Aes256 => {
-            // Sign-only or classical: use the first 32 bytes of private_key directly
-            if keypair.private_key.len() < 32 {
-                anyhow::bail!(
-                    "Private key too short for ChaCha20Poly1305: {} bytes",
-                    keypair.private_key.len()
-                );
-            }
-            let key_bytes: [u8; 32] = keypair.private_key[..32]
-                .try_into()
-                .context("Failed to extract 32-byte ChaCha20Poly1305 key from private_key")?;
-            (key_bytes, Vec::new(), None)
-        }
+        _ => unreachable!("is_signature_only() checked above"),
     };
 
     let cipher = ChaCha20Poly1305::new_from_slice(&derived_key)
@@ -401,6 +458,44 @@ pub fn encrypt_data(plaintext: &[u8], keypair: &KeyPair) -> Result<FileEncrypted
     })
 }
 
+/// Encrypt with a symmetric key derived directly from the private key.
+/// Used for signature-only algorithms (ML-DSA, ClassicalSign) that don't
+/// perform key encapsulation.
+fn encrypt_with_symmetric_key(plaintext: &[u8], keypair: &KeyPair) -> Result<FileEncryptedData> {
+    let nonce = generate_random_nonce();
+
+    if keypair.private_key.len() < 32 {
+        anyhow::bail!(
+            "Private key too short for ChaCha20Poly1305: {} bytes",
+            keypair.private_key.len()
+        );
+    }
+    let derived_key: [u8; 32] = keypair.private_key[..32]
+        .try_into()
+        .context("Failed to extract 32-byte ChaCha20Poly1305 key from private_key")?;
+
+    let cipher = ChaCha20Poly1305::new_from_slice(&derived_key)
+        .context("Failed to create ChaCha20Poly1305 cipher from derived key")?;
+
+    let nonce_obj = Nonce::from_slice(&nonce);
+    let ciphertext = cipher
+        .encrypt(nonce_obj, plaintext)
+        .context("ChaCha20Poly1305 encryption failed")?;
+
+    let original_hash = blake3::hash(plaintext);
+
+    Ok(FileEncryptedData {
+        ciphertext,
+        nonce,
+        algorithm: format!("{}+ChaCha20Poly1305", keypair.algorithm.display_name()),
+        key_id: keypair.id.clone(),
+        kem_ciphertext: Vec::new(),
+        x25519_ephemeral_pk: None,
+        blake3_original: original_hash.to_hex().to_string(),
+        encrypted_at: chrono::Utc::now().to_rfc3339(),
+    })
+}
+
 /// Decrypt data from a `FileEncryptedData` package using real ML-KEM decapsulation.
 ///
 /// Decryption flow:
@@ -410,6 +505,11 @@ pub fn encrypt_data(plaintext: &[u8], keypair: &KeyPair) -> Result<FileEncrypted
 ///   4. Decrypt with ChaCha20Poly1305 using the stored nonce
 ///   5. Verify BLAKE3 integrity hash of the decrypted plaintext
 pub fn decrypt_data(encrypted: &FileEncryptedData, keypair: &KeyPair) -> Result<Vec<u8>> {
+    // ML-DSA and ClassicalSign use symmetric decryption
+    if keypair.algorithm.is_signature_only() || matches!(keypair.algorithm, EncryptionAlgo::Aes256) {
+        return decrypt_with_symmetric_key(encrypted, keypair);
+    }
+
     let derived_key = match &keypair.algorithm {
         EncryptionAlgo::Kyber1024 => {
             // --- Pure ML-KEM-1024 decapsulation ---
@@ -453,18 +553,7 @@ pub fn decrypt_data(encrypted: &FileEncryptedData, keypair: &KeyPair) -> Result<
                 Some(x25519_shared.as_bytes()),
             )?
         }
-        EncryptionAlgo::ClassicalSign | EncryptionAlgo::Aes256 => {
-            // Sign-only or classical: use first 32 bytes of private_key directly
-            if keypair.private_key.len() < 32 {
-                anyhow::bail!(
-                    "Private key too short for ChaCha20Poly1305: {} bytes",
-                    keypair.private_key.len()
-                );
-            }
-            keypair.private_key[..32]
-                .try_into()
-                .context("Failed to extract 32-byte ChaCha20Poly1305 key from private_key")?
-        }
+        _ => unreachable!(),
     };
 
     let cipher = ChaCha20Poly1305::new_from_slice(&derived_key)
@@ -488,44 +577,141 @@ pub fn decrypt_data(encrypted: &FileEncryptedData, keypair: &KeyPair) -> Result<
     Ok(plaintext)
 }
 
-// ---------------------------------------------------------------------------
-// Sign / Verify — HMAC-SHA512 real signatures
-// ---------------------------------------------------------------------------
+/// Decrypt with a symmetric key derived directly from the private key.
+fn decrypt_with_symmetric_key(encrypted: &FileEncryptedData, keypair: &KeyPair) -> Result<Vec<u8>> {
+    if keypair.private_key.len() < 32 {
+        anyhow::bail!(
+            "Private key too short for ChaCha20Poly1305: {} bytes",
+            keypair.private_key.len()
+        );
+    }
+    let derived_key: [u8; 32] = keypair.private_key[..32]
+        .try_into()
+        .context("Failed to extract 32-byte ChaCha20Poly1305 key from private_key")?;
 
-type HmacSha512 = Hmac<Sha512>;
+    let cipher = ChaCha20Poly1305::new_from_slice(&derived_key)
+        .context("Failed to create ChaCha20Poly1305 cipher from derived key")?;
 
-/// Sign a message using HMAC-SHA512.
-///
-/// This is a real cryptographic signature using the keypair's private_key as
-/// the HMAC key. While not post-quantum secure (HMAC-SHA512 is classical),
-/// it provides actual integrity and authentication — unlike a hash.
-///
-/// For ML-KEM keypairs, this uses the ML-KEM decapsulation key bytes as the
-/// HMAC key. In a production system, you would use ML-DSA (Dilithium) for
-/// PQC signatures instead.
-pub fn sign_message(message: &[u8], keypair: &KeyPair) -> Result<Vec<u8>> {
-    let mut mac =
-        HmacSha512::new_from_slice(&keypair.private_key).context("Invalid HMAC key")?;
-    mac.update(message);
-    let result = mac.finalize();
-    Ok(result.into_bytes().to_vec())
+    let nonce_obj = Nonce::from_slice(&encrypted.nonce);
+    let plaintext = cipher
+        .decrypt(nonce_obj, encrypted.ciphertext.as_ref())
+        .context("ChaCha20Poly1305 decryption failed — wrong key or corrupted data")?;
+
+    // Verify BLAKE3 integrity hash
+    let decrypted_hash = blake3::hash(&plaintext);
+    if decrypted_hash.to_hex() != encrypted.blake3_original {
+        anyhow::bail!(
+            "BLAKE3 integrity check failed — decrypted data does not match original (expected {}, got {})",
+            encrypted.blake3_original,
+            decrypted_hash.to_hex(),
+        );
+    }
+
+    Ok(plaintext)
 }
 
-/// Verify an HMAC-SHA512 signature.
+// ---------------------------------------------------------------------------
+// Sign / Verify — Real ML-DSA (FIPS 204) post-quantum digital signatures
+// ---------------------------------------------------------------------------
+
+/// Sign a message using the keypair's algorithm.
 ///
-/// Returns `Ok(true)` if the signature is valid, `Ok(false)` if it is not,
-/// and `Err` only for unexpected failures (e.g., wrong key length).
+/// For ML-DSA variants (`MlDsa44`, `MlDsa65`, `MlDsa87`):
+///   Uses real FIPS 204 lattice-based digital signatures via the ml-dsa crate.
+///   The signing key is decoded from `keypair.private_key` and used to produce
+///   a deterministic ML-DSA signature.
+///
+/// For `ClassicalSign`:
+///   Uses HMAC-SHA512 as a classical fallback (NOT post-quantum).
+pub fn sign_message(message: &[u8], keypair: &KeyPair) -> Result<Vec<u8>> {
+    match &keypair.algorithm {
+        EncryptionAlgo::MlDsa44 => {
+            let seed = ml_dsa::Seed::<MlDsa44>::try_from(keypair.private_key.as_slice())
+                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-44 seed: {:?}", e))?;
+            let sk = ml_dsa::SigningKey::<MlDsa44>::from_seed(&seed);
+            let sig = sk.sign_deterministic(message, b"")
+                .map_err(|e| anyhow::anyhow!("ML-DSA-44 signing failed: {:?}", e))?;
+            Ok(sig.to_vec())
+        }
+        EncryptionAlgo::MlDsa65 => {
+            let seed = ml_dsa::Seed::<MlDsa65>::try_from(keypair.private_key.as_slice())
+                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-65 seed: {:?}", e))?;
+            let sk = ml_dsa::SigningKey::<MlDsa65>::from_seed(&seed);
+            let sig = sk.sign_deterministic(message, b"")
+                .map_err(|e| anyhow::anyhow!("ML-DSA-65 signing failed: {:?}", e))?;
+            Ok(sig.to_vec())
+        }
+        EncryptionAlgo::MlDsa87 => {
+            let seed = ml_dsa::Seed::<MlDsa87>::try_from(keypair.private_key.as_slice())
+                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-87 seed: {:?}", e))?;
+            let sk = ml_dsa::SigningKey::<MlDsa87>::from_seed(&seed);
+            let sig = sk.sign_deterministic(message, b"")
+                .map_err(|e| anyhow::anyhow!("ML-DSA-87 signing failed: {:?}", e))?;
+            Ok(sig.to_vec())
+        }
+        EncryptionAlgo::ClassicalSign => {
+            // HMAC-SHA512 fallback (classical, not post-quantum)
+            let mut mac =
+                HmacSha512::new_from_slice(&keypair.private_key).context("Invalid HMAC key")?;
+            mac.update(message);
+            let result = mac.finalize();
+            Ok(result.into_bytes().to_vec())
+        }
+        _ => anyhow::bail!(
+            "Algorithm {:?} does not support signing",
+            keypair.algorithm
+        ),
+    }
+}
+
+/// Verify a digital signature.
+///
+/// For ML-DSA variants: uses real FIPS 204 lattice-based verification.
+/// For `ClassicalSign`: uses HMAC-SHA512 verification.
+///
+/// Returns `Ok(true)` if the signature is valid, `Ok(false)` if invalid,
+/// and `Err` for unexpected failures (e.g., wrong key length).
 pub fn verify_signature(
     message: &[u8],
     signature_bytes: &[u8],
     keypair: &KeyPair,
 ) -> Result<bool> {
-    let mut mac =
-        HmacSha512::new_from_slice(&keypair.private_key).context("Invalid HMAC key")?;
-    mac.update(message);
-    match mac.verify_slice(signature_bytes) {
-        Ok(()) => Ok(true),
-        Err(_) => Ok(false),
+    match &keypair.algorithm {
+        EncryptionAlgo::MlDsa44 => {
+            let pk = ml_dsa::VerifyingKey::<MlDsa44>::decode(&keypair.public_key)
+                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-44 verifying key: {:?}", e))?;
+            let sig = ml_dsa::Signature::<MlDsa44>::try_from(signature_bytes)
+                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-44 signature: {:?}", e))?;
+            Ok(pk.verify(message, &sig).is_ok())
+        }
+        EncryptionAlgo::MlDsa65 => {
+            let pk = ml_dsa::VerifyingKey::<MlDsa65>::decode(&keypair.public_key)
+                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-65 verifying key: {:?}", e))?;
+            let sig = ml_dsa::Signature::<MlDsa65>::try_from(signature_bytes)
+                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-65 signature: {:?}", e))?;
+            Ok(pk.verify(message, &sig).is_ok())
+        }
+        EncryptionAlgo::MlDsa87 => {
+            let pk = ml_dsa::VerifyingKey::<MlDsa87>::decode(&keypair.public_key)
+                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-87 verifying key: {:?}", e))?;
+            let sig = ml_dsa::Signature::<MlDsa87>::try_from(signature_bytes)
+                .map_err(|e| anyhow::anyhow!("Failed to decode ML-DSA-87 signature: {:?}", e))?;
+            Ok(pk.verify(message, &sig).is_ok())
+        }
+        EncryptionAlgo::ClassicalSign => {
+            // HMAC-SHA512 verification (classical)
+            let mut mac =
+                HmacSha512::new_from_slice(&keypair.private_key).context("Invalid HMAC key")?;
+            mac.update(message);
+            match mac.verify_slice(signature_bytes) {
+                Ok(()) => Ok(true),
+                Err(_) => Ok(false),
+            }
+        }
+        _ => anyhow::bail!(
+            "Algorithm {:?} does not support signature verification",
+            keypair.algorithm
+        ),
     }
 }
 
@@ -539,9 +725,10 @@ pub fn algorithm_from_str(s: &str) -> Option<EncryptionAlgo> {
     match s {
         "kyber1024" => Some(EncryptionAlgo::Kyber1024),
         "kyber768" | "kyber512" | "hybrid" => Some(EncryptionAlgo::Hybrid),
-        "dilithium5" | "dilithium3" | "dilithium2"
-        | "sphincsplus" | "sphincs+"
-        | "classical_sign" | "hmac" => Some(EncryptionAlgo::ClassicalSign),
+        "ml_dsa44" | "ml-dsa44" | "ml-dsa-44" | "dilithium2" => Some(EncryptionAlgo::MlDsa44),
+        "ml_dsa65" | "ml-dsa65" | "ml-dsa-65" | "dilithium3" => Some(EncryptionAlgo::MlDsa65),
+        "ml_dsa87" | "ml-dsa87" | "ml-dsa-87" | "dilithium5" => Some(EncryptionAlgo::MlDsa87),
+        "classical_sign" | "hmac" | "sphincsplus" | "sphincs+" => Some(EncryptionAlgo::ClassicalSign),
         "aes256" | "chacha20" => Some(EncryptionAlgo::Aes256),
         _ => None,
     }

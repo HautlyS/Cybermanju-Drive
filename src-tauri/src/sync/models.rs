@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 pub enum SyncBackendType {
     Local,
     GitHub,
+    GitLab,
     GoogleDrive,
     GooglePhotos,
 }

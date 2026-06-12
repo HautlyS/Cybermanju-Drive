@@ -604,7 +604,263 @@ impl StorageBackend for GitHubBackend {
 }
 
 // ===========================================================================
-// 3. GoogleDriveBackend
+// 3. GitLabBackend
+// ===========================================================================
+
+pub struct GitLabBackend {
+    token: String,
+    project_id: String,
+    branch: String,
+    base_url: String,
+}
+
+impl GitLabBackend {
+    pub fn new(token: &str, project_id: &str, branch: &str, base_url: Option<&str>) -> Self {
+        Self {
+            token: token.to_string(),
+            project_id: project_id.to_string(),
+            branch: branch.to_string(),
+            base_url: base_url
+                .unwrap_or("https://gitlab.com")
+                .trim_end_matches('/')
+                .to_string(),
+        }
+    }
+
+    fn api_url(&self, endpoint: &str) -> String {
+        format!("{}/api/v4/projects/{}/{}", self.base_url, self.project_id, endpoint)
+    }
+}
+
+impl StorageBackend for GitLabBackend {
+    fn name(&self) -> &str {
+        "GitLab"
+    }
+
+    fn backend_type(&self) -> SyncBackendType {
+        SyncBackendType::GitLab
+    }
+
+    fn upload_file(&self, local_path: &str, remote_path: &str) -> Result<String, String> {
+        let file_name = Path::new(local_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "upload".to_string());
+
+        let data = fs::read(local_path)
+            .map_err(|e| format!("Failed to read file '{}': {}", local_path, e))?;
+        let b64 = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            &data,
+        );
+
+        let encoded_path = urlencoding(remote_path);
+        let url = format!(
+            "{}/repository/files/{}",
+            self.api_url("repository"),
+            encoded_path
+        );
+
+        let put_body = serde_json::json!({
+            "branch": self.branch,
+            "content": b64,
+            "encoding": "base64",
+            "commit_message": format!("Sync upload: {}", remote_path),
+        });
+
+        let client = http_client()?;
+        let resp = client
+            .post(&url)
+            .header("PRIVATE-TOKEN", &self.token)
+            .header("Content-Type", "application/json")
+            .json(&put_body)
+            .send()
+            .map_err(|e| format!("GitLab upload request failed: {}", e))?;
+
+        let status = resp.status().as_u16();
+        let body = resp
+            .text()
+            .map_err(|e| format!("Failed to read upload response: {}", e))?;
+
+        if status < 200 || status >= 300 {
+            return Err(format!("GitLab upload failed ({}): {}", status, body));
+        }
+
+        let resp_json: serde_json::Value = serde_json::from_str(&body)
+            .map_err(|e| format!("Failed to parse upload response: {}", e))?;
+        let file_path = resp_json["file_path"]
+            .as_str()
+            .unwrap_or(&file_name)
+            .to_string();
+
+        Ok(format!(
+            "{}/-/blob/{}/{}",
+            self.base_url, self.branch, file_path
+        ))
+    }
+
+    fn download_file(&self, remote_path: &str, local_path: &str) -> Result<(), String> {
+        let encoded_path = urlencoding(remote_path);
+        let url = format!(
+            "{}/repository/files/{}/raw?ref={}",
+            self.api_url("repository"),
+            encoded_path,
+            urlencoding(&self.branch)
+        );
+
+        let client = http_client()?;
+        let resp = client
+            .get(&url)
+            .header("PRIVATE-TOKEN", &self.token)
+            .send()
+            .map_err(|e| format!("GitLab download request failed: {}", e))?;
+
+        let status = resp.status().as_u16();
+        if status < 200 || status >= 300 {
+            let body = resp.text().unwrap_or_default();
+            return Err(format!("GitLab download failed ({}): {}", status, body));
+        }
+
+        let bytes = resp
+            .bytes()
+            .map_err(|e| format!("Failed to read download body: {}", e))?;
+
+        if let Some(parent) = Path::new(local_path).parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create directory: {}", e))?;
+        }
+        fs::write(local_path, &bytes)
+            .map_err(|e| format!("Failed to write file: {}", e))?;
+
+        Ok(())
+    }
+
+    fn delete_file(&self, remote_path: &str) -> Result<(), String> {
+        let encoded_path = urlencoding(remote_path);
+        let url = format!(
+            "{}/repository/files/{}",
+            self.api_url("repository"),
+            encoded_path
+        );
+
+        let client = http_client()?;
+        let resp = client
+            .delete(&url)
+            .header("PRIVATE-TOKEN", &self.token)
+            .query(&[
+                ("branch", self.branch.as_str()),
+                ("commit_message", &format!("Sync delete: {}", remote_path)),
+            ])
+            .send()
+            .map_err(|e| format!("GitLab delete request failed: {}", e))?;
+
+        let status = resp.status().as_u16();
+        if status == 204 || status == 200 {
+            Ok(())
+        } else {
+            let body = resp.text().unwrap_or_default();
+            Err(format!("GitLab delete failed ({}): {}", status, body))
+        }
+    }
+
+    fn list_files(&self, prefix: &str) -> Result<Vec<RemoteFile>, String> {
+        let url = if prefix.is_empty() {
+            format!(
+                "{}/repository/tree?ref={}&per_page=100",
+                self.api_url("repository"),
+                urlencoding(&self.branch)
+            )
+        } else {
+            format!(
+                "{}/repository/tree?ref={}&path={}&per_page=100",
+                self.api_url("repository"),
+                urlencoding(&self.branch),
+                urlencoding(prefix)
+            )
+        };
+
+        let client = http_client()?;
+        let resp = client
+            .get(&url)
+            .header("PRIVATE-TOKEN", &self.token)
+            .send()
+            .map_err(|e| format!("GitLab list request failed: {}", e))?;
+
+        let status = resp.status().as_u16();
+        let body = resp
+            .text()
+            .map_err(|e| format!("Failed to read list response: {}", e))?;
+
+        if status < 200 || status >= 300 {
+            return Err(format!("GitLab list failed ({}): {}", status, body));
+        }
+
+        let items: Vec<serde_json::Value> = serde_json::from_str(&body)
+            .map_err(|e| format!("Failed to parse listing: {}", e))?;
+
+        let mut files = Vec::new();
+        for item in &items {
+            // Skip directories
+            if item["type"].as_str() == Some("tree") {
+                continue;
+            }
+            let name = item["name"]
+                .as_str()
+                .unwrap_or("unknown")
+                .to_string();
+            let path = item["path"]
+                .as_str()
+                .unwrap_or(&name)
+                .to_string();
+            let id = item["id"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
+
+            files.push(RemoteFile {
+                name,
+                path,
+                size_bytes: 0, // GitLab tree API doesn't return size
+                modified_at: String::new(),
+                url: format!("{}/-/blob/{}/{}", self.base_url, self.branch, id),
+            });
+        }
+
+        Ok(files)
+    }
+
+    fn get_file_url(&self, remote_path: &str) -> Result<String, String> {
+        Ok(format!(
+            "{}/-/raw/{}/{}",
+            self.base_url, self.branch, remote_path
+        ))
+    }
+
+    fn test_connection(&self) -> Result<bool, String> {
+        let client = http_client()?;
+        let url = format!(
+            "{}/api/v4/projects/{}",
+            self.base_url, self.project_id
+        );
+        let resp = client
+            .get(&url)
+            .header("PRIVATE-TOKEN", &self.token)
+            .send()
+            .map_err(|e| format!("GitLab connection test request failed: {}", e))?;
+
+        if resp.status().as_u16() == 200 {
+            Ok(true)
+        } else {
+            Err(format!(
+                "GitLab connection test failed (HTTP {})",
+                resp.status()
+            ))
+        }
+    }
+}
+
+// ===========================================================================
+// 4. GoogleDriveBackend
 // ===========================================================================
 
 pub struct GoogleDriveBackend {
@@ -863,7 +1119,7 @@ impl StorageBackend for GoogleDriveBackend {
 }
 
 // ===========================================================================
-// 4. GooglePhotosBackend
+// 5. GooglePhotosBackend
 // ===========================================================================
 
 pub struct GooglePhotosBackend {
@@ -1184,6 +1440,19 @@ pub fn create_backend(config: &SyncConfig) -> Result<Box<dyn StorageBackend>, St
                 .ok_or("GitHub backend requires repo_name")?;
             let branch = config.branch.as_deref().unwrap_or("main");
             Ok(Box::new(GitHubBackend::new(token, repo, branch)))
+        }
+        SyncBackendType::GitLab => {
+            let token = config
+                .token
+                .as_deref()
+                .ok_or("GitLab backend requires token")?;
+            let project_id = config
+                .repo_name
+                .as_deref()
+                .ok_or("GitLab backend requires project_id (use repo_name field)")?;
+            let branch = config.branch.as_deref().unwrap_or("main");
+            let base_url = config.base_path.as_deref();
+            Ok(Box::new(GitLabBackend::new(token, project_id, branch, base_url)))
         }
         SyncBackendType::GoogleDrive => {
             let token = config

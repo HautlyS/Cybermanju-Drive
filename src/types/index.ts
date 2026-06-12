@@ -282,7 +282,7 @@ export const COMPRESSION_INFO: Record<CompressionType, { name: string; descripti
 }
 
 // Storage Sync Types
-export type SyncBackendType = 'local' | 'github' | 'googleDrive' | 'googlePhotos'
+export type SyncBackendType = 'local' | 'github' | 'gitlab' | 'googleDrive' | 'googlePhotos'
 export type SyncStatusType = 'idle' | 'scanning' | 'compressing' | 'uploading' | 'linking' | 'cleaning' | 'error' | 'done'
 
 export interface SyncConfig {
@@ -358,6 +358,12 @@ export const SYNC_BACKEND_INFO: Record<SyncBackendType, { name: string; descript
     description: 'Sync files to a GitHub repository using the Contents API. Supports releases for large files.',
     color: '#F5F5F4',
     icon: 'Github',
+  },
+  gitlab: {
+    name: 'GitLab',
+    description: 'Sync files to a GitLab project repository. Full CRUD via GitLab API v4.',
+    color: '#FC6D26',
+    icon: 'GitBranch',
   },
   googleDrive: {
     name: 'Google Drive',
