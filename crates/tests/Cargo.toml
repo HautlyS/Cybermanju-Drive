@@ -1,0 +1,19 @@
+[package]
+name = "cybermanju-tests"
+version = "0.1.0"
+edition = "2021"
+description = "Comprehensive test suite for all Cybermanju Drive crates"
+
+[dev-dependencies]
+cybermanju-types = { path = "../types" }
+cybermanju-compression = { path = "../compression" }
+cybermanju-crypto = { path = "../crypto" }
+cybermanju-db = { path = "../db" }
+cybermanju-search = { path = "../search" }
+cybermanju-web = { path = "../web" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+blake3 = "1"
+redb = "2"
+tempfile = "3"

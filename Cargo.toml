@@ -1,0 +1,12 @@
+[workspace]
+members = [
+    "crates/types",
+    "crates/crypto",
+    "crates/compression",
+    "crates/search",
+    "crates/db",
+    "crates/web",
+    "crates/faces",
+    "crates/tests",
+]
+resolver = "2"
