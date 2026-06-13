@@ -17,9 +17,32 @@ modules:
   - name: cybermanju-drive
     buildsystem: simple
     build-commands:
-      - ar x artifacts/cybermanju-drive.deb --output=deb-extracted
-      - tar -xf deb-extracted/data.tar.* -C /
-      - ln -s /opt/Cybermanju\ Drive/cybermanju-drive /app/bin/cybermanju-drive
+      - |
+        set -e
+        deb_file=$(find . -name '*.deb' -type f | head -1)
+        if [ -z "$deb_file" ]; then
+          echo "ERROR: No .deb file found"
+          exit 1
+        fi
+        echo "Extracting: $deb_file"
+        ar x "$deb_file" --output=deb-extracted
+        # Handle different compression formats (xz, zst, gz)
+        data_tar=$(ls deb-extracted/data.tar.* 2>/dev/null | head -1)
+        if [ -z "$data_tar" ]; then
+          echo "ERROR: No data.tar.* found in deb"
+          exit 1
+        fi
+        echo "Extracting data: $data_tar"
+        tar -xf "$data_tar" -C /
+        # Find and symlink the binary
+        binary_path=$(find /opt -name 'cybermanju-drive' -type f 2>/dev/null | head -1)
+        if [ -n "$binary_path" ]; then
+          mkdir -p /app/bin
+          ln -sf "$binary_path" /app/bin/cybermanju-drive
+        else
+          echo "ERROR: Binary not found in /opt"
+          exit 1
+        fi
     sources:
       - type: dir
         path: ../../artifacts

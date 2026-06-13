@@ -342,9 +342,7 @@ jobs:
           sudo -u builder bash -c 'source $HOME/.cargo/env && rustup default stable'
 
       - name: Install Node.js
-        run: |
-          curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
-          pacman -S --noconfirm nodejs npm || true
+        run: pacman -S --noconfirm nodejs npm
 
       - name: Build Arch package
         run: |
@@ -357,9 +355,12 @@ jobs:
 
       - name: Collect artifacts
         run: |
-          mkdir -p dist-arch
-          cp src-tauri/target/release/bundle/deb/*.deb dist-arch/ 2>/dev/null || true
-          cp src-tauri/target/release/bundle/appimage/*.AppImage dist-arch/ 2>/dev/null || true
+          chown -R builder:builder $GITHUB_WORKSPACE
+          sudo -u builder bash -c '
+            mkdir -p dist-arch
+            cp src-tauri/target/release/bundle/deb/*.deb dist-arch/ 2>/dev/null || true
+            cp src-tauri/target/release/bundle/appimage/*.AppImage dist-arch/ 2>/dev/null || true
+          '
 
       - name: Upload Arch build artifacts
         uses: actions/upload-artifact@v4
