@@ -25,6 +25,7 @@ modules:
           exit 1
         fi
         echo "Extracting: $deb_file"
+        mkdir -p deb-extracted
         ar x "$deb_file" --output=deb-extracted
         # Handle different compression formats (xz, zst, gz)
         data_tar=$(ls deb-extracted/data.tar.* 2>/dev/null | head -1)
