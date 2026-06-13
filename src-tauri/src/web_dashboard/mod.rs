@@ -55,22 +55,27 @@ const USER_FILE_PERMS_TABLE: TableDefinition<'static, &'static str, &'static str
 // ─── Security constants ─────────────────────────────────────────────
 
 /// Maximum request body size: 100 MB
-const MAX_BODY_SIZE: usize = 104_857_600;
+#[allow(dead_code)]
+pub const MAX_BODY_SIZE: usize = 104_857_600;
 
 /// Rate limit: max requests per window per IP
-const RATE_LIMIT_MAX: u32 = 100;
+#[allow(dead_code)]
+pub const RATE_LIMIT_MAX: u32 = 100;
 
 /// Default port for the web dashboard
+#[allow(dead_code)]
 pub const DEFAULT_PORT: u16 = 3456;
 
 /// Rate limit window duration in seconds
-const RATE_LIMIT_WINDOW_SECS: u64 = 60;
+#[allow(dead_code)]
+pub const RATE_LIMIT_WINDOW_SECS: u64 = 60;
 
 /// JWT token expiry: 24 hours
 const JWT_EXPIRY_SECS: u64 = 86_400;
 
 /// Allowed CORS origins (localhost only)
-const ALLOWED_ORIGINS: &[&str] = &[
+#[allow(dead_code)]
+pub const ALLOWED_ORIGINS: &[&str] = &[
     "http://localhost:3456",
     "http://127.0.0.1:3456",
     "http://localhost:3457",
@@ -96,21 +101,24 @@ struct JwtClaims {
 // ─── WebDashboard struct ────────────────────────────────────────────
 
 pub struct WebDashboard {
-    port: u16,
+    #[allow(dead_code)]
+    pub port: u16,
     /// Always "127.0.0.1" — never bind to 0.0.0.0
-    bind_addr: String,
+    #[allow(dead_code)]
+    pub bind_addr: String,
     /// Random 256-bit secret generated at startup for HMAC-SHA256 JWT signing
-    jwt_secret: [u8; 32],
+    pub jwt_secret: [u8; 32],
     /// Shared database handle — opened once, shared across all request threads.
     /// Using Arc<Mutex<>> since redb requires exclusive access for writes.
-    db: Arc<Mutex<RedbDb>>,
-    running: AtomicBool,
+    pub db: Arc<Mutex<RedbDb>>,
+    #[allow(dead_code)]
+    pub running: AtomicBool,
     /// Per-IP rate limit counters: IP → (count, window_start)
-    rate_limits: Mutex<HashMap<String, (u32, Instant)>>,
-    /// Handle to the server accept thread — joined on Drop
-    server_thread: Mutex<Option<thread::JoinHandle<()>>>,
-    /// Shutdown signal sender — drop or close to signal the server loop
-    shutdown_tx: Mutex<Option<mpsc::Sender<()>>>,
+    pub rate_limits: Mutex<HashMap<String, (u32, Instant)>>,
+    #[allow(dead_code)]
+    pub server_thread: Mutex<Option<thread::JoinHandle<()>>>,
+    #[allow(dead_code)]
+    pub shutdown_tx: Mutex<Option<mpsc::Sender<()>>>,
 }
 
 impl WebDashboard {
@@ -136,8 +144,37 @@ impl WebDashboard {
         }
     }
 
+    /// Constructor that allows specifying a bind address (for Docker use case).
+    #[allow(dead_code)]
+    pub fn new_with_bind_addr(port: u16, db_path: &str, bind_addr: &str) -> Self {
+        let mut jwt_secret = [0u8; 32];
+        OsRng.fill_bytes(&mut jwt_secret);
+
+        let db = RedbDb::open(db_path)
+            .or_else(|_| RedbDb::create(db_path))
+            .expect("Failed to open web dashboard database");
+
+        Self {
+            port,
+            bind_addr: bind_addr.to_string(),
+            jwt_secret,
+            db: Arc::new(Mutex::new(db)),
+            running: AtomicBool::new(false),
+            rate_limits: Mutex::new(HashMap::new()),
+            server_thread: Mutex::new(None),
+            shutdown_tx: Mutex::new(None),
+        }
+    }
+
+    /// Accessor for the shared database handle.
+    #[allow(dead_code)]
+    pub fn db(&self) -> &Arc<Mutex<RedbDb>> {
+        &self.db
+    }
+
     /// Start the web dashboard HTTP server on a background thread.
     /// Binds to 127.0.0.1 only. Returns Ok(()) on successful bind.
+    #[allow(dead_code)]
     pub fn start(self: &std::sync::Arc<Self>) -> std::io::Result<()> {
         // Stop any previously running server
         self.stop();
@@ -446,7 +483,7 @@ fn write_http_json(stream: &mut TcpStream, status: u16, body: &str) {
 
 // ─── Request router ──────────────────────────────────────────────────
 
-fn handle_request(
+pub fn handle_request(
     dashboard: &WebDashboard,
     db: &RedbDb,
     method: &str,
@@ -690,7 +727,7 @@ fn create_jwt(
 
 /// Check and update the rate limit for a client IP.
 /// Returns true if the request is allowed, false if rate limited.
-fn check_rate_limit(rate_limits: &Mutex<HashMap<String, (u32, Instant)>>, client_ip: &str) -> bool {
+pub fn check_rate_limit(rate_limits: &Mutex<HashMap<String, (u32, Instant)>>, client_ip: &str) -> bool {
     let mut limits = match rate_limits.lock() {
         Ok(g) => g,
         Err(_) => return false, // If lock is poisoned, allow the request (fail open)
@@ -1522,4 +1559,141 @@ fn url_decode(input: &str) -> String {
         }
     }
     result
+}
+
+// ─── Static file serving (for Docker use case) ─────────────────────
+
+/// MIME type lookup for common file extensions
+pub fn mime_type(path: &str) -> &'static str {
+    match path.rsplit('.').next() {
+        Some("html") | Some("htm") => "text/html; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        Some("js") | Some("mjs") => "application/javascript; charset=utf-8",
+        Some("json") => "application/json; charset=utf-8",
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("svg") => "image/svg+xml",
+        Some("ico") => "image/x-icon",
+        Some("woff") => "font/woff",
+        Some("woff2") => "font/woff2",
+        Some("ttf") => "font/ttf",
+        Some("otf") => "font/otf",
+        Some("webp") => "image/webp",
+        Some("webm") => "video/webm",
+        Some("mp4") => "video/mp4",
+        Some("mp3") => "audio/mpeg",
+        Some("wasm") => "application/wasm",
+        Some("xml") => "application/xml; charset=utf-8",
+        Some("txt") => "text/plain; charset=utf-8",
+        Some("csv") => "text/csv; charset=utf-8",
+        Some("pdf") => "application/pdf",
+        Some("zip") => "application/zip",
+        Some("gz") | Some("gzip") => "application/gzip",
+        Some("map") => "application/json",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Serve a static file, writing binary-safe HTTP response directly to the stream.
+/// Returns true if the file was served, false if a text-based error was written.
+#[allow(dead_code)]
+pub fn serve_static_file(stream: &mut TcpStream, static_dir: &std::path::Path, request_path: &str) {
+    use std::fs;
+
+    let file_path = if request_path == "/" || request_path.ends_with('/') {
+        static_dir.join("index.html")
+    } else {
+        static_dir.join(request_path.trim_start_matches('/'))
+    };
+
+    // Security: prevent path traversal
+    let resolved = match file_path.canonicalize() {
+        Ok(p) => p,
+        Err(_) => {
+            let _ = stream.write_all(
+                b"HTTP/1.1 404 Not Found\r\n\
+                  Content-Type: text/html; charset=utf-8\r\n\
+                  Content-Length: 44\r\n\
+                  \r\n\
+                  <html><body><h1>404 Not Found</h1></body></html>",
+            );
+            return;
+        }
+    };
+
+    let static_resolved = match static_dir.canonicalize() {
+        Ok(p) => p,
+        Err(_) => {
+            let _ = stream.write_all(
+                b"HTTP/1.1 500 Internal Server Error\r\n\
+                  Content-Type: text/html; charset=utf-8\r\n\
+                  Content-Length: 52\r\n\
+                  \r\n\
+                  <html><body><h1>500 Internal Server Error</h1></body></html>",
+            );
+            return;
+        }
+    };
+
+    if !resolved.starts_with(&static_resolved) {
+        let _ = stream.write_all(
+            b"HTTP/1.1 403 Forbidden\r\n\
+              Content-Type: text/html; charset=utf-8\r\n\
+              Content-Length: 44\r\n\
+              \r\n\
+              <html><body><h1>403 Forbidden</h1></body></html>",
+        );
+        return;
+    }
+
+    // SPA fallback: if the file doesn't exist, serve index.html
+    let actual_path = if resolved.is_file() {
+        resolved
+    } else {
+        let index = static_dir.join("index.html");
+        if index.is_file() {
+            index
+        } else {
+            let _ = stream.write_all(
+                b"HTTP/1.1 404 Not Found\r\n\
+                  Content-Type: text/html; charset=utf-8\r\n\
+                  Content-Length: 44\r\n\
+                  \r\n\
+                  <html><body><h1>404 Not Found</h1></body></html>",
+            );
+            return;
+        }
+    };
+
+    let contents = match fs::read(&actual_path) {
+        Ok(c) => c,
+        Err(_) => {
+            let _ = stream.write_all(
+                b"HTTP/1.1 500 Internal Server Error\r\n\
+                  Content-Type: text/html; charset=utf-8\r\n\
+                  Content-Length: 52\r\n\
+                  \r\n\
+                  <html><body><h1>500 Internal Server Error</h1></body></html>",
+            );
+            return;
+        }
+    };
+
+    let ctype = mime_type(&actual_path.to_string_lossy());
+    let content_length = contents.len();
+
+    let header = format!(
+        "HTTP/1.1 200 OK\r\n\
+         Content-Type: {ctype}\r\n\
+         Content-Length: {content_length}\r\n\
+         Cache-Control: public, max-age=3600\r\n\
+         Access-Control-Allow-Origin: *\r\n\
+         Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n\
+         Access-Control-Allow-Headers: Content-Type, Authorization\r\n\
+         \r\n"
+    );
+
+    let _ = stream.write_all(header.as_bytes());
+    let _ = stream.write_all(&contents);
 }

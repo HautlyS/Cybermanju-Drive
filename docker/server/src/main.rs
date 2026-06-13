@@ -14,10 +14,10 @@ mod web_dashboard;
 
 use log::{error, info, warn};
 use std::fs;
-use std::io::{BufRead, BufReader, Read as IoRead, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 /// MIME type lookup for common file extensions
 fn mime_type(path: &str) -> &'static str {

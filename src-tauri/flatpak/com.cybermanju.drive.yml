@@ -1,0 +1,25 @@
+app-id: com.cybermanju.drive
+runtime: org.gnome.Platform
+runtime-version: '47'
+sdk: org.gnome.Sdk
+command: cybermanju-drive
+
+finish-args:
+  - --share=ipc
+  - --socket=x11
+  - --socket=wayland
+  - --socket=pulseaudio
+  - --share=network
+  - --device=dri
+  - --env=FLATPAK=1
+
+modules:
+  - name: cybermanju-drive
+    buildsystem: simple
+    build-commands:
+      - ar x artifacts/cybermanju-drive.deb --output=deb-extracted
+      - tar -xf deb-extracted/data.tar.* -C /
+      - ln -s /opt/Cybermanju\ Drive/cybermanju-drive /app/bin/cybermanju-drive
+    sources:
+      - type: dir
+        path: ../../artifacts

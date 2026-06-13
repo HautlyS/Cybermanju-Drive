@@ -47,9 +47,6 @@ RUN echo "pub struct WebDashboard;" > src/web_dashboard.rs && \
 # Now copy the actual web_dashboard module from the Tauri crate
 COPY src-tauri/src/web_dashboard/mod.rs ./src/web_dashboard.rs
 
-# Make handle_request public so main.rs can route API requests to it
-RUN sed -i 's/^fn handle_request(/pub fn handle_request(/' src/web_dashboard.rs
-
 # Build the release binary
 # Touch the source to invalidate the cache placeholder
 RUN touch src/web_dashboard.rs && cargo build --release
