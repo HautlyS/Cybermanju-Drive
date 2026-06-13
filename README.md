@@ -115,7 +115,8 @@
 - **Node.js** 20+
 - **Rust** 1.85+ (via [rustup](https://rustup.rs/))
 - **Platform dependencies:**
-  - **Linux:** `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`, `libsoup-3.0-dev`, `libjavascriptcoregtk-4.1-dev`
+  - **Linux (Debian/Ubuntu):** `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`, `libsoup-3.0-dev`, `libjavascriptcoregtk-4.1-dev`
+  - **Linux (Arch/CachyOS):** `webkit2gtk-4.1`, `gtk3`, `libayatana-appindicator`, `librsvg`, `libsoup3`, `pkg-config`, `base-devel`, `openssl`
   - **macOS:** Xcode Command Line Tools
   - **Windows:** WebView2 Runtime (usually pre-installed)
 
@@ -159,6 +160,42 @@ npm run tauri:build:debug
 ```
 
 Output installers are in `src-tauri/target/release/bundle/`.
+
+#### CachyOS / Arch Linux
+
+```bash
+# Install system dependencies
+sudo pacman -S \
+  webkit2gtk-4.1 \
+  gtk3 \
+  libayatana-appindicator \
+  librsvg \
+  libsoup3 \
+  pkg-config \
+  base-devel \
+  openssl \
+  nodejs \
+  npm
+
+# Install Rust
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source ~/.cargo/env
+
+# Build
+npm install
+npm run tauri:build
+```
+
+Or install from AUR:
+
+```bash
+# Using makepkg
+cd aur/
+makepkg -si
+
+# Using an AUR helper (e.g., yay)
+yay -S cybermanju-drive
+```
 
 ### Docker Image
 

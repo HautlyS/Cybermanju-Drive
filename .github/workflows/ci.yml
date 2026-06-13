@@ -213,13 +213,6 @@ jobs:
           path: src-tauri/target/release/bundle/deb/*.deb
           retention-days: 7
 
-      - name: Upload RPM package
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist-linux-rpm
-          path: src-tauri/target/release/bundle/rpm/*.rpm
-          retention-days: 7
-
   # ─── Linux: Build RPM ────────────────────────────────────────────
   rpm-build:
     name: Build Linux (RPM)
@@ -229,7 +222,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install system dependencies (for Tauri)
+      - name: Install system dependencies (for Tauri + RPM)
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -244,25 +237,20 @@ jobs:
             libssl-dev \
             rpm-build
 
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          cache-on-failure: true
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "lts/*"
           cache: "npm"
 
       - name: Install dependencies
         run: npm ci
-
-      - name: Cache Cargo registry & build
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            src-tauri/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
 
       - name: Build RPM package
         run: npm run tauri build
@@ -311,6 +299,73 @@ jobs:
         with:
           name: dist-flatpak
           path: cybermanju-drive.flatpak
+          retention-days: 7
+
+  # ─── Linux: Build Arch Package ────────────────────────────────────
+  arch-build:
+    name: Build Linux (Arch/CachyOS)
+    runs-on: ubuntu-latest
+    needs: [rust-check, linux-build]
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Install base dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm \
+            base-devel \
+            git \
+            webkit2gtk-4.1 \
+            gtk3 \
+            libayatana-appindicator \
+            librsvg \
+            libsoup3 \
+            pkg-config \
+            openssl \
+            curl \
+            sudo
+
+      - name: Create build user
+        run: |
+          useradd -m builder
+          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Fix ownership
+        run: chown -R builder:builder $GITHUB_WORKSPACE
+
+      - name: Install Rust
+        run: |
+          sudo -u builder bash -c 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y'
+          sudo -u builder bash -c 'source $HOME/.cargo/env && rustup default stable'
+
+      - name: Install Node.js
+        run: |
+          curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
+          pacman -S --noconfirm nodejs npm || true
+
+      - name: Build Arch package
+        run: |
+          sudo -u builder bash -c '
+            source $HOME/.cargo/env
+            cd $GITHUB_WORKSPACE
+            npm ci
+            npm run tauri build
+          '
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist-arch
+          cp src-tauri/target/release/bundle/deb/*.deb dist-arch/ 2>/dev/null || true
+          cp src-tauri/target/release/bundle/appimage/*.AppImage dist-arch/ 2>/dev/null || true
+
+      - name: Upload Arch build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-arch
+          path: dist-arch/
           retention-days: 7
 
   # ─── Android: Build APK ──────────────────────────────────────────

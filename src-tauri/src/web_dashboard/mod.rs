@@ -727,7 +727,10 @@ fn create_jwt(
 
 /// Check and update the rate limit for a client IP.
 /// Returns true if the request is allowed, false if rate limited.
-pub fn check_rate_limit(rate_limits: &Mutex<HashMap<String, (u32, Instant)>>, client_ip: &str) -> bool {
+pub fn check_rate_limit(
+    rate_limits: &Mutex<HashMap<String, (u32, Instant)>>,
+    client_ip: &str,
+) -> bool {
     let mut limits = match rate_limits.lock() {
         Ok(g) => g,
         Err(_) => return false, // If lock is poisoned, allow the request (fail open)

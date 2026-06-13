@@ -1,0 +1,53 @@
+# Maintainer: Cybermanju <your-email@example.com>
+pkgname=cybermanju-drive
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Encrypted file sync and management with post-quantum cryptography"
+arch=('x86_64')
+url="https://github.com/cybermanju/cybermanju-drive"
+license=('MIT')
+depends=(
+  'webkit2gtk-4.1'
+  'gtk3'
+  'libayatana-appindicator'
+  'librsvg'
+  'libsoup3'
+  'openssl'
+)
+makedepends=(
+  'cargo'
+  'nodejs'
+  'npm'
+  'pkg-config'
+  'base-devel'
+)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  npm ci
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  npm run tauri build
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+
+  # Install the binary
+  install -Dm755 "src-tauri/target/release/cybermanju-drive" \
+    "$pkgdir/usr/bin/cybermanju-drive"
+
+  # Install desktop file
+  install -Dm644 "src-tauri/target/release/bundle/deb/cybermanju-drive.desktop" \
+    "$pkgdir/usr/share/applications/cybermanju-drive.desktop" 2>/dev/null || true
+
+  # Install icons
+  for size in 32 128 128; do
+    install -Dm644 "src-tauri/icons/${size}x${size}.png" \
+      "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/cybermanju-drive.png" 2>/dev/null || true
+  done
+}

@@ -292,11 +292,7 @@ fn handle_connection(state: &AppState, mut stream: TcpStream) {
         // Serve static files (binary-safe, writes directly to stream)
         serve_static_file(&mut stream, &state.static_dir, path);
     } else {
-        let resp = http_response(
-            405,
-            "application/json",
-            r#"{"error":"Method Not Allowed"}"#,
-        );
+        let resp = http_response(405, "application/json", r#"{"error":"Method Not Allowed"}"#);
         let _ = stream.write_all(resp.as_bytes());
     }
 }
@@ -309,8 +305,7 @@ fn main() {
         .parse()
         .unwrap_or(3456);
 
-    let db_path = std::env::var("DB_PATH")
-        .unwrap_or_else(|_| "/data/cybermanju.db".to_string());
+    let db_path = std::env::var("DB_PATH").unwrap_or_else(|_| "/data/cybermanju.db".to_string());
 
     let static_dir: PathBuf = std::env::var("STATIC_DIR")
         .unwrap_or_else(|_| "./static".to_string())
@@ -326,10 +321,7 @@ fn main() {
 
     // Verify static directory exists
     if !static_dir.exists() {
-        error!(
-            "Static directory does not exist: {}",
-            static_dir.display()
-        );
+        error!("Static directory does not exist: {}", static_dir.display());
         std::process::exit(1);
     }
 
