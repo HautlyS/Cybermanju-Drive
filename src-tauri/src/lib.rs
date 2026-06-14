@@ -30,6 +30,7 @@ pub struct AppState {
 
 // WebDashboard now handles its own shutdown (Drop impl with signal channel + thread join).
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialize tracing subscriber (replaces env_logger)
     tracing_subscriber::fmt()

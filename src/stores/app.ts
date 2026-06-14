@@ -18,7 +18,7 @@ import { setAuthToken } from '@/composables/useTauri'
 export const useAppStore = defineStore('cybermanju', () => {
   // ── Navigation State ──────────────────────────────────────
   const currentPath = ref('/')
-  const currentPanel = ref<PanelType>('files')
+  const currentPanel = ref<PanelType>('landing')
   const viewMode = ref<ViewMode>('grid')
   const selectedFileId = ref<string | null>(null)
   const sidebarSection = ref<SidebarSection>('tree')

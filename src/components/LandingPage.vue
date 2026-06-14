@@ -1,601 +1,651 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import TopMenuBar from './TopMenuBar.vue'
+import Dock from './Dock.vue'
 
 const emit = defineEmits<{ (e: 'open-app'): void }>()
 
-const bootLines = [
-  'CYBERMANJU DRIVE v0.0.1',
-  'Copyright (c) 2026 Cybermanju Systems',
-  'All Rights Reserved.',
-  '',
-  'Initializing post-quantum crypto engine... ML-KEM-1024 [OK]',
-  'Mounting redb database... cybermanju.db [OK]',
-  'Loading Tantivy search index... tantivy_index [OK]',
-  'Calibrating triple-layer compressor... LZ4+ZSTD+BROTLI [OK]',
-  'Warming up ONNX face detection model... [OK]',
-  'Establishing cloud sync backends... [OK]',
-  '',
-  '>>> WELCOME TO CYBERMANJU DRIVE <<<',
-  '',
-  '  "Google Drive is like a digital attic — you keep throwing',
-  '   stuff in there and praying you never have to find it again."',
-  '',
-  '  "Dropbox thought folders were revolutionary.',
-  '   We thought encryption that survives a quantum apocalypse',
-  '   might be slightly more important."',
-  '',
-  '  "The cloud is just someone else\'s computer.',
-  '   This one has ML-KEM-1024 and ML-DSA-87 signatures.',
-  '   Good luck, NSA."',
-  '',
-  'System ready. Type HELP for available commands.',
+// ── Boot State ──
+const phase = ref<'post' | 'loading' | 'boot' | 'ready'>('post')
+const bootProgress = ref(0)
+const bootLog = ref<string[]>([])
+const showCursor = ref(true)
+let cursorTimer: ReturnType<typeof setInterval> | null = null
+const postDone = ref(false)
+const loadProgress = ref(0)
+
+const bootMessages = [
+  'POST: CPU Quantum Co-Processor... ML-KEM-1024 [OK]',
+  'POST: Memory Encryption Zones... ChaCha20-Poly1305 [OK]',
+  'POST: Storage Decryption Module... Argon2id [OK]',
+  'Mounting redb KV store... cybermanju.db [OK]',
+  'Loading Tantivy BM25 search index... [OK]',
+  'Initializing Triple-Layer Compressor... LZ4+ZSTD+BROTLI [OK]',
+  'Warming ONNX Runtime... face detect model [OK]',
+  'Calibrating ML-DSA-87 signing oracle... [OK]',
+  'Establishing sync backends... [OK]',
+  'Spawning web dashboard @ :3456... [OK]',
 ]
 
-const commands: Record<string, { output: string[]; description: string }> = {
+const quotes = [
+  '"The cloud is just someone else\'s computer.\n This one has ML-KEM-1024. Good luck, NSA."',
+  '"Google Drive reads your files.\n We just store them. The difference is subtle."',
+  '"Dropbox thought folders were revolutionary.\n We thought quantum-safe encryption might be nicer."',
+  '"Your data should be yours.\n Not a product. Not a training set. Just yours."',
+]
+
+const currentQuote = ref(quotes[0])
+
+// ── Rotating Buddha ASCII ──
+const buddhaFrames = [
+  [
+    '      ┌─────┐      ',
+    '    ╱  ═════  ╲    ',
+    '   │  ╱   ╲  │    ',
+    '   │ (  ═  ) │    ',
+    '   │  ╲   ╱  │    ',
+    '    ╲  ───  ╱    ',
+    '      └─────┘      ',
+    '     ╱  │  ╲       ',
+    '    ╱   │   ╲      ',
+    '   │   ╱ ╲   │     ',
+    '    ╲ ╱   ╲ ╱     ',
+  ],
+  [
+    '      ┌─────┐      ',
+    '    ╱  ═════  ╲    ',
+    '   │  ╲   ╱  │    ',
+    '   │ (  ═  ) │    ',
+    '   │  ╱   ╲  │    ',
+    '    ╲  ───  ╱    ',
+    '      └─────┘      ',
+    '       ╲ │ ╱       ',
+    '        ╲│╱        ',
+    '       ╱ │ ╲       ',
+    '      ╱  │  ╲      ',
+  ],
+  [
+    '      ╱‾‾‾‾‾╲      ',
+    '    ╱  ═════  ╲    ',
+    '   │  ╱   ╲  │    ',
+    '   │ (  ═  ) │    ',
+    '   │  ╲   ╱  │    ',
+    '    ╲  ───  ╱    ',
+    '      ╲_____╱      ',
+    '    ╱  ╲   ╱  ╲    ',
+    '   ╱    ╲ ╱    ╲   ',
+    '  │    ╱ ╲    │   ',
+    '   ╲  ╱   ╲  ╱   ',
+  ],
+  [
+    '      ┌─────┐      ',
+    '    ╱  ═════  ╲    ',
+    '   │  ╱   ╲  │    ',
+    '   │ (  ═  ) │    ',
+    '   │  ╲   ╱  │    ',
+    '    ╲  ───  ╱    ',
+    '      └─────┘      ',
+    '       ╱ │ ╲       ',
+    '      ╱  │  ╲      ',
+    '     ╱   │   ╲     ',
+    '    ╱    │    ╲    ',
+  ],
+]
+
+const currentFrame = ref(0)
+const frameLines = ref<string[]>([])
+const buddhaGlow = ref(0)
+let buddhaTimer: ReturnType<typeof setInterval> | null = null
+let glowTimer: ReturnType<typeof setInterval> | null = null
+
+const terminalInput = ref('')
+const terminalHistory = ref<string[]>([])
+const commandHist = ref<string[]>([])
+const histIdx = ref(-1)
+
+const commands: Record<string, { out: string[]; desc: string }> = {
   help: {
-    description: 'Show available commands',
-    output: [
-      'AVAILABLE COMMANDS:',
-      '',
-      '  HELP        Show this help message',
-      '  ABOUT       About Cybermanju Drive',
-      '  FEATURES    List all features',
-      '  PLATFORMS   Show supported platforms',
-      '  DOWNLOADS   Download links for all platforms',
-      '  WHY         Why not just use Google Drive?',
-      '  LICENSE     License information',
-      '  CLEAR       Clear the terminal',
-      '  LAUNCH      Launch the file manager app',
-      '  REBOOT      Reboot the system (replay boot sequence)',
-      '',
+    desc: 'Show available commands',
+    out: [
+      '  HELP     This message',
+      '  LAUNCH   Open file manager',
+      '  ABOUT    System info',
+      '  CLEAR    Clear terminal',
+      '  QUOTE    Show wisdom',
+      '  STATUS   System status',
     ],
+  },
+  launch: {
+    desc: 'Launch app',
+    out: ['Launching Cybermanju Drive...'],
   },
   about: {
-    description: 'About Cybermanju Drive',
-    output: [
-      'CYBERMANJU DRIVE v0.0.1',
-      '',
-      'A quantum-resistant encrypted file manager built with:',
-      '  - Rust + Tauri v2 for native desktop',
-      '  - Vue 3 + Pinia + Vite for the frontend',
-      '  - ML-KEM-1024 (FIPS 203) post-quantum key encapsulation',
-      '  - ML-DSA-87 (FIPS 204) post-quantum signatures',
-      '  - X25519 hybrid classical+PQC key exchange',
-      '  - Triple-layer compression (LZ4 + Zstd + Brotli)',
-      '  - Tantivy full-text BM25 search',
-      '  - ONNX Runtime face detection + clustering',
-      '  - Tree-sitter code intelligence (50+ languages)',
-      '  - Multi-cloud sync (GitHub, Google Drive, Telegram)',
-      '  - JWT-authenticated REST API + Web Dashboard',
-      '',
-      'Repository: https://github.com/hautlythird211/Cybermanju-Drive',
-      '',
-    ],
-  },
-  features: {
-    description: 'List all features',
-    output: [
-      'FEATURES:',
-      '',
-      '  [#] Post-Quantum Encryption   ML-KEM-1024 + ML-DSA. NIST FIPS 203/204.',
-      '  [$] Triple Compression        LZ4 -> Zstd -> Brotli pipeline. Up to 90% reduction.',
-      '  [@] Full-Text Search          Tantivy BM25 ranking with fuzzy matching.',
-      '  [+] Face Detection            ONNX Runtime with clustering.',
-      '  [~] Cloud Sync                Multi-backend: GitHub, GDrive, Telegram.',
-      '  [!] Multi-User                JWT auth with role-based access control.',
-      '  [@] GPS Map View              MapLibre GL integration with EXIF extraction.',
-      '  [T] Code Intelligence         Tree-sitter parsing for 50+ languages.',
-      '  [%] File Versioning           Snapshot and revert file history.',
-      '  [&] Share Links               Token-based expiring file sharing.',
-      '  [*] Collections               Curate files into themed collections.',
-      '  [=] Trash + Audit             Soft delete with full audit trail.',
-      '',
-    ],
-  },
-  platforms: {
-    description: 'Show supported platforms',
-    output: [
-      'SUPPORTED PLATFORMS:',
-      '',
-      '  WINDOWS 10/11     .MSI/.EXE installer     Tauri v2 native',
-      '  macOS 12+         .DMG                    Tauri v2 native',
-      '  Linux (deb)       .DEB package            Debian/Ubuntu',
-      '  Linux (rpm)       .RPM package            Fedora/RHEL',
-      '  Linux (Flatpak)   .FLATPAK bundle         Universal Linux',
-      '  Linux (Arch)      AUR/PKGBUILD            Arch/CachyOS',
-      '  Android 8+        .APK                    Tauri mobile',
-      '  Web/WASM          Static site             GitHub Pages',
-      '  Docker            Container               Self-hosted server',
-      '',
-    ],
-  },
-  downloads: {
-    description: 'Download links for all platforms',
-    output: [
-      'DOWNLOAD LINKS:',
-      '',
-      '  GitHub Releases:',
-      '    https://github.com/hautlythird211/Cybermanju-Drive/releases',
-      '',
-      '  Web App (GitHub Pages):',
-      '    https://hautlythird211.github.io/Cybermanju-Drive/',
-      '',
-      '  Docker:',
-      '    docker pull hautlythird211/cybermanju-drive:latest',
-      '    docker run -d -p 3456:3456 -v /data:/data cybermanju-drive',
-      '',
-      '  AUR (Arch Linux):',
-      '    yay -S cybermanju-drive',
-      '',
-      '  Build from source:',
-      '    git clone https://github.com/hautlythird211/Cybermanju-Drive',
-      '    cd Cybermanju-Drive && npm install && npm run tauri build',
-      '',
-    ],
-  },
-  why: {
-    description: 'Why not just use Google Drive?',
-    output: [
-      'WHY NOT GOOGLE DRIVE:',
-      '',
-      '  "Google Drive is like a digital attic — you keep throwing',
-      '   stuff in there and praying you never have to find it again."',
-      '',
-      '  "Google Drive reads your files. We just store them.',
-      '   The difference is subtle but important."',
-      '',
-      '  "Google Drive: 15 GB free, then they own your soul.',
-      '   Cybermanju Drive: unlimited, and your files are yours."',
-      '',
-      '  "Google Drive: encrypted at rest (they have the keys).',
-      '   Cybermanju Drive: encrypted with ML-KEM-1024 (only you have the keys).',
-      '   One of these survives a quantum computer. The other is Google."',
-      '',
-      '  "Google Drive: AI that reads your docs to sell you ads.',
-      '   Cybermanju Drive: AI that detects faces in your photos.',
-      '   We know which one is creepier."',
-      '',
-      '  "Dropbox: \'We\'re not just a sync service.\'',
-      '   Also Dropbox: charges you $10/mo for 2 TB of sync.',
-      '   Cybermanju Drive: free, open source, and has ML-DSA signatures.',
-      '   Your move, Dropbox."',
-      '',
-    ],
-  },
-  license: {
-    description: 'License information',
-    output: [
-      'LICENSE:',
-      '',
-      '  Cybermanju Drive is open source software.',
-      '  Licensed under the MIT License.',
-      '',
-      '  Copyright (c) 2026 Cybermanju Systems',
-      '',
-      '  Permission is hereby granted, free of charge, to any person',
-      '  obtaining a copy of this software... wait, you actually read',
-      '  licenses? Based.',
-      '',
-      '  TL;DR: Do whatever you want. We are not responsible if your',
-      '  files get quantum-computed into oblivion.',
-      '',
+    desc: 'System info',
+    out: [
+      'Cybermanju Drive v0.0.1',
+      'Post-Quantum Encrypted File System',
+      'ML-KEM-1024 | ML-DSA-87 | Triple Compression',
+      'https://github.com/hautlythird211/Cybermanju-Drive',
     ],
   },
   clear: {
-    description: 'Clear the terminal',
-    output: [],
+    desc: 'Clear terminal',
+    out: [],
   },
-  launch: {
-    description: 'Launch the file manager app',
-    output: [
-      'LAUNCHING FILE MANAGER...',
-      '',
-      '  Actually, you could have just clicked the button.',
-      '  But I respect the commitment to the bit.',
-      '',
-      '  Opening the app now. Enjoy your quantum-safe files.',
-      '',
+  quote: {
+    desc: 'Random wisdom',
+    out: [quotes[Math.floor(Math.random() * quotes.length)]],
+  },
+  status: {
+    desc: 'System status',
+    out: [
+      'STATUS: ONLINE',
+      'CRYPTO: ML-KEM-1024 [ACTIVE]',
+      'SEARCH: Tantivy BM25 [INDEXED]',
+      'SYNC:   [CONNECTED]',
+      'FACE:   ONNX Runtime [WARM]',
+      'WEB:    :3456 [SERVING]',
     ],
   },
-  reboot: {
-    description: 'Reboot the system',
-    output: [],
-  },
 }
 
-const visibleLines = ref<string[]>([])
-const bootProgress = ref(0)
-const booting = ref(true)
-const userInput = ref('')
-const terminalOutput = ref<string[]>([])
-const showCursor = ref(true)
-const cursorInterval = ref<ReturnType<typeof setInterval> | null>(null)
-const inputEnabled = ref(false)
-const terminalScrollRef = ref<HTMLDivElement | null>(null)
-const commandHistory = ref<string[]>([])
-const historyIndex = ref(-1)
-
-function typeBootSequence() {
-  if (bootProgress.value >= bootLines.length) {
-    booting.value = false
-    inputEnabled.value = true
-    if (cursorInterval.value) clearInterval(cursorInterval.value)
-    cursorInterval.value = setInterval(() => {
-      showCursor.value = !showCursor.value
-    }, 530)
-    return
-  }
-
-  const line = bootLines[bootProgress.value]
-  if (line === '') {
-    visibleLines.value.push('')
-    bootProgress.value++
-    setTimeout(typeBootSequence, 80)
-    return
-  }
-
-  let charIndex = 0
-  function typeChar() {
-    if (charIndex === 0) {
-      visibleLines.value.push('')
-    }
-    if (charIndex < line.length) {
-      const currentLine = visibleLines.value.pop() || ''
-      visibleLines.value.push(currentLine + line[charIndex])
-      charIndex++
-      const delay = line[charIndex - 1] === ' ' ? 8 : 12 + Math.random() * 20
-      setTimeout(typeChar, delay)
-    } else {
-      bootProgress.value++
-      setTimeout(typeBootSequence, 100)
-    }
-  }
-  typeChar()
-}
-
-function processCommand() {
-  const cmd = userInput.value.trim().toLowerCase()
-  userInput.value = ''
-
+function processCmd() {
+  const cmd = terminalInput.value.trim().toLowerCase()
+  terminalInput.value = ''
   if (!cmd) return
-
-  commandHistory.value.push(cmd)
-  historyIndex.value = -1
-
-  terminalOutput.value.push(`> ${cmd}`)
-
-  if (cmd === 'clear') {
-    terminalOutput.value = []
-    visibleLines.value = []
-    return
-  }
-
-  if (cmd === 'reboot') {
-    terminalOutput.value = []
-    visibleLines.value = []
-    bootProgress.value = 0
-    booting.value = true
-    inputEnabled.value = false
-    setTimeout(typeBootSequence, 300)
-    return
-  }
-
-  if (cmd === 'launch') {
-    terminalOutput.value.push(...(commands.launch?.output || []))
-    setTimeout(() => emit('open-app'), 1500)
-    return
-  }
-
-  const command = commands[cmd]
-  if (command) {
-    terminalOutput.value.push(...command.output)
+  commandHist.value.push(cmd)
+  histIdx.value = -1
+  terminalHistory.value.push(`> ${cmd}`)
+  const c = commands[cmd]
+  if (c) {
+    terminalHistory.value.push(...c.out)
+    if (cmd === 'clear') terminalHistory.value = []
+    if (cmd === 'launch') {
+      setTimeout(() => emit('open-app'), 800)
+    }
   } else {
-    terminalOutput.value.push(
-      `Unknown command: ${cmd}`,
-      `Type HELP for available commands.`,
-    )
+    terminalHistory.value.push(`Unknown: ${cmd}. Try HELP.`)
   }
 }
 
-function handleKeydown(e: KeyboardEvent) {
-  if (!inputEnabled.value) return
-
-  if (e.key === 'Enter') {
-    processCommand()
-    return
-  }
-
+function handleKey(e: KeyboardEvent) {
+  if (phase.value !== 'ready') return
+  if (e.key === 'Enter') processCmd()
   if (e.key === 'ArrowUp') {
     e.preventDefault()
-    if (commandHistory.value.length > 0) {
-      if (historyIndex.value === -1) {
-        historyIndex.value = commandHistory.value.length - 1
-      } else if (historyIndex.value > 0) {
-        historyIndex.value--
-      }
-      userInput.value = commandHistory.value[historyIndex.value]
+    if (commandHist.value.length) {
+      histIdx.value = histIdx.value < commandHist.value.length - 1 ? histIdx.value + 1 : histIdx.value
+      terminalInput.value = commandHist.value[commandHist.value.length - 1 - histIdx.value]
     }
-    return
   }
-
   if (e.key === 'ArrowDown') {
     e.preventDefault()
-    if (historyIndex.value >= 0 && historyIndex.value < commandHistory.value.length - 1) {
-      historyIndex.value++
-      userInput.value = commandHistory.value[historyIndex.value]
+    if (histIdx.value > 0) {
+      histIdx.value--
+      terminalInput.value = commandHist.value[commandHist.value.length - 1 - histIdx.value]
     } else {
-      historyIndex.value = -1
-      userInput.value = ''
+      histIdx.value = -1
+      terminalInput.value = ''
     }
-    return
   }
+}
+
+// ── Boot Sequence ──
+function runPost() {
+  phase.value = 'post'
+  bootLog.value = []
+  postDone.value = false
+  let i = 0
+  const postLines = [
+    'Cybermanju Systems POST v0.0.1',
+    'CPU: Quantum Co-Processor @ 2.4 GHz [PASS]',
+    'CRYPTO: ML-KEM-1024 Accelerator [PASS]',
+    'MEM: 16 GUARD ChaCha20 Zones [PASS]',
+    'RTC: System Clock [SYNCED]',
+    '────────────────────────────────────────────',
+  ]
+  function tick() {
+    if (i < postLines.length) {
+      bootLog.value.push(postLines[i])
+      i++
+      setTimeout(tick, 120 + Math.random() * 60)
+    } else {
+      postDone.value = true
+      setTimeout(runLoading, 300)
+    }
+  }
+  tick()
+}
+
+function runLoading() {
+  phase.value = 'loading'
+  loadProgress.value = 0
+  bootLog.value = []
+  let step = 0
+  function tick() {
+    if (step < bootMessages.length) {
+      bootLog.value.push(bootMessages[step])
+      loadProgress.value = ((step + 1) / bootMessages.length) * 100
+      step++
+      setTimeout(tick, 80 + Math.random() * 40)
+    } else {
+      setTimeout(runBoot, 200)
+    }
+  }
+  tick()
+}
+
+function runBoot() {
+  phase.value = 'boot'
+  bootLog.value = []
+  currentQuote.value = quotes[Math.floor(Math.random() * quotes.length)]
+  const bootLines = [
+    '',
+    `  ${currentQuote.value}`,
+    '',
+    '  ╔══════════════════════════════════════╗',
+    '  ║    CYBERMANJU DRIVE v0.0.1          ║',
+    '  ║    Post-Quantum Encrypted Storage    ║',
+    '  ║    System Ready.                     ║',
+    '  ╚══════════════════════════════════════╝',
+    '',
+  ]
+  let i = 0
+  function tick() {
+    if (i < bootLines.length) {
+      bootLog.value.push(bootLines[i])
+      i++
+      setTimeout(tick, 100 + Math.random() * 50)
+    } else {
+      setTimeout(() => {
+        phase.value = 'ready'
+        terminalHistory.value = [
+          'System ready. Type HELP for commands.',
+          '',
+        ]
+      }, 400)
+    }
+  }
+  tick()
+}
+
+function restartBoot() {
+  stopAnimations()
+  bootLog.value = []
+  terminalHistory.value = []
+  terminalInput.value = ''
+  currentFrame.value = 0
+  buddhaGlow.value = 0
+  runPost()
+}
+
+// ── Animations ──
+function startBuddhaAnimation() {
+  frameLines.value = buddhaFrames[0]
+  buddhaTimer = setInterval(() => {
+    currentFrame.value = (currentFrame.value + 1) % buddhaFrames.length
+    frameLines.value = buddhaFrames[currentFrame.value]
+  }, 280)
+
+  glowTimer = setInterval(() => {
+    buddhaGlow.value = Math.sin(Date.now() / 800) * 0.3 + 0.6
+  }, 50)
+}
+
+function stopAnimations() {
+  if (buddhaTimer) clearInterval(buddhaTimer)
+  if (glowTimer) clearInterval(glowTimer)
+  if (cursorTimer) clearInterval(cursorTimer)
+  buddhaTimer = null
+  glowTimer = null
+  cursorTimer = null
 }
 
 onMounted(() => {
-  setTimeout(typeBootSequence, 300)
+  cursorTimer = setInterval(() => { showCursor.value = !showCursor.value }, 500)
+  currentQuote.value = quotes[Math.floor(Math.random() * quotes.length)]
+  startBuddhaAnimation()
+  runPost()
 })
 
 onUnmounted(() => {
-  if (cursorInterval.value) clearInterval(cursorInterval.value)
+  stopAnimations()
 })
 </script>
 
 <template>
-  <div class="terminal-crt" @keydown="handleKeydown" tabindex="0">
-    <div class="crt-bezel">
-      <div class="crt-screen">
-        <div class="scanlines"></div>
-        <div class="screen-content" ref="terminalScrollRef">
-          <div class="boot-text" v-if="visibleLines.length > 0 && booting">
-            <div v-for="(line, i) in visibleLines" :key="'boot-' + i" class="boot-line">{{ line }}</div>
-          </div>
+  <div class="landing-os" @keydown="handleKey" tabindex="0">
+    <TopMenuBar />
 
-          <div class="terminal-body">
-            <div v-for="(line, i) in terminalOutput" :key="'out-' + i" class="out-line">{{ line }}</div>
-
-            <div v-if="!booting" class="prompt-line">
-              <span class="prompt-sign">></span>
-              <span class="prompt-text">{{ userInput }}</span>
-              <span class="cursor" :class="{ blink: showCursor }">&#9608;</span>
+    <div class="landing-content">
+      <div class="boot-overlay" v-if="phase !== 'ready'">
+        <div class="boot-terminal">
+          <div class="boot-log">
+            <div v-for="(line, i) in bootLog" :key="i" class="boot-line">{{ line }}</div>
+            <div v-if="phase === 'loading'" class="boot-progress">
+              <div class="progress-track">
+                <div class="progress-fill" :style="{ width: loadProgress + '%' }" />
+              </div>
             </div>
+            <div v-if="phase === 'post' && !postDone" class="cursor-block">&#9608;</div>
           </div>
+        </div>
+      </div>
 
-          <div v-if="!booting && terminalOutput.length === 0 && visibleLines.length === 0" class="help-hint">
-            <div class="hint-line">SYSTEM READY. TYPE <span class="hint-cmd">HELP</span> FOR COMMANDS.</div>
-            <div class="hint-line" style="margin-top: 4px;">
-              <button class="launch-btn" @click="emit('open-app')">[ LAUNCH APP ]</button>
+      <div v-else class="desktop-landing">
+        <div class="ascii-background">
+          <div class="ascii-buddha" :style="{ opacity: buddhaGlow }">
+            <div v-for="(line, i) in frameLines" :key="i" class="buddha-line">{{ line }}</div>
+          </div>
+          <div class="ascii-particles">
+            <div v-for="n in 20" :key="n" class="particle" :style="{
+              left: Math.random() * 100 + '%',
+              top: Math.random() * 100 + '%',
+              animationDelay: Math.random() * 5 + 's',
+              animationDuration: (3 + Math.random() * 4) + 's',
+            }">.</div>
+          </div>
+        </div>
+
+        <div class="terminal-window">
+          <div class="terminal-log" ref="logRef">
+            <div v-for="(line, i) in terminalHistory" :key="i" class="term-line"
+              :class="{ 'term-prompt': line.startsWith('>'), 'term-system': !line.startsWith('>') }">
+              {{ line }}
+            </div>
+            <div class="term-input-line">
+              <span class="term-prompt-sign">&gt;</span>
+              <span class="term-input-text">{{ terminalInput }}</span>
+              <span class="term-cursor" :class="{ hide: showCursor }">&#9608;</span>
             </div>
           </div>
         </div>
 
-        <div class="screen-status">
-          <span class="status-led"></span>
-          <span class="status-text">ONLINE</span>
-          <span class="status-sep">|</span>
-          <span class="status-text">ML-KEM-1024</span>
-          <span class="status-sep">|</span>
-          <span class="status-text">v0.0.1</span>
+        <div class="launch-hint">
+          <button class="launch-button" @click="emit('open-app')">
+            [ ENTER CYBERMANJU ]
+          </button>
+          <button class="reboot-button" @click="restartBoot">
+            [ REBOOT ]
+          </button>
         </div>
       </div>
     </div>
+
+    <Dock />
   </div>
 </template>
 
 <style scoped>
-.terminal-crt {
+.landing-os {
   position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: #000;
+  font-family: 'Courier New', 'Fira Code', monospace;
+  outline: none;
+  overflow: hidden;
+  z-index: 999;
+}
+
+.landing-content {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+}
+
+/* ── Boot Overlay ── */
+.boot-overlay {
+  position: absolute;
   inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #0a0a0a;
-  font-family: 'Courier New', 'Fira Code', monospace;
-  outline: none;
-  overflow: hidden;
+  background: #000;
+  z-index: 10;
 }
 
-.crt-bezel {
+.boot-terminal {
   width: 92vw;
-  max-width: 900px;
-  height: 85vh;
-  max-height: 640px;
-  background: #1a1a1a;
-  border: 4px solid #333;
-  border-radius: 12px;
-  padding: 20px;
+  max-width: 780px;
+  max-height: 70vh;
+  background: #050505;
+  border: 1px solid rgba(0, 255, 65, 0.15);
+  border-radius: 8px;
+  padding: 24px 28px;
   box-shadow:
-    0 0 40px rgba(0, 255, 65, 0.05),
-    inset 0 0 60px rgba(0, 0, 0, 0.5),
-    0 20px 60px rgba(0, 0, 0, 0.8);
+    0 0 40px rgba(0, 255, 65, 0.03),
+    inset 0 0 60px rgba(0, 0, 0, 0.8);
+  overflow: hidden;
 }
 
-.crt-screen {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  background: #0d0d0d;
-  border-radius: 4px;
-  overflow: hidden;
+.boot-log {
   display: flex;
   flex-direction: column;
-  box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.8);
-}
-
-.scanlines {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 10;
-  background: repeating-linear-gradient(
-    0deg,
-    transparent 0px,
-    transparent 2px,
-    rgba(0, 255, 65, 0.03) 2px,
-    rgba(0, 255, 65, 0.03) 4px
-  );
-}
-
-.screen-content {
-  flex: 1;
-  padding: 20px 24px;
-  overflow-y: auto;
-  overflow-x: hidden;
-  color: #00ff41;
-  font-size: 13px;
-  line-height: 1.5;
-  text-shadow: 0 0 4px rgba(0, 255, 65, 0.3);
-  position: relative;
-  z-index: 5;
-}
-
-.screen-content::-webkit-scrollbar {
-  width: 4px;
-}
-.screen-content::-webkit-scrollbar-track {
-  background: #0d0d0d;
-}
-.screen-content::-webkit-scrollbar-thumb {
-  background: #00ff41;
-  opacity: 0.5;
+  gap: 2px;
 }
 
 .boot-line {
+  color: #00ff41;
+  font-size: 13px;
+  line-height: 1.5;
+  text-shadow: 0 0 4px rgba(0, 255, 65, 0.2);
   white-space: pre-wrap;
   word-break: break-word;
-  min-height: 1.2em;
 }
 
-.out-line {
-  white-space: pre-wrap;
-  word-break: break-word;
-  line-height: 1.4;
+.boot-progress {
+  margin-top: 16px;
+  padding: 0 4px;
 }
 
-.terminal-body {
+.progress-track {
+  width: 100%;
+  height: 3px;
+  background: rgba(0, 255, 65, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: #00ff41;
+  transition: width 0.1s linear;
+  box-shadow: 0 0 8px rgba(0, 255, 65, 0.4);
+}
+
+.cursor-block {
+  display: inline-block;
+  color: #00ff41;
+  animation: blink 500ms step-end infinite;
   margin-top: 4px;
-}
-
-.prompt-line {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
-}
-
-.prompt-sign {
-  color: #00ff41;
-  font-weight: 700;
-  opacity: 0.7;
-}
-
-.prompt-text {
-  color: #00ff41;
-}
-
-.cursor {
-  color: #00ff41;
-  font-size: 12px;
-  line-height: 1;
-  animation: blink 530ms step-end infinite;
-}
-
-.cursor.blink {
-  animation: none;
 }
 
 @keyframes blink {
   50% { opacity: 0; }
 }
 
-.screen-status {
+/* ── Desktop Landing ── */
+.desktop-landing {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+}
+
+.ascii-background {
+  position: absolute;
+  inset: 0;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 24px;
-  border-top: 1px solid rgba(0, 255, 65, 0.2);
-  background: rgba(0, 0, 0, 0.4);
-  position: relative;
-  z-index: 5;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 0;
 }
 
-.status-led {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #00ff41;
-  box-shadow: 0 0 6px #00ff41;
-  animation: pulse 2s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
-}
-
-.status-text {
-  color: rgba(0, 255, 65, 0.6);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-}
-
-.status-sep {
-  color: rgba(0, 255, 65, 0.2);
-  font-size: 10px;
-}
-
-.help-hint {
-  margin-top: 8px;
-}
-
-.hint-line {
+.ascii-buddha {
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.15;
   color: #00ff41;
-  font-size: 13px;
+  text-shadow: 0 0 6px rgba(0, 255, 65, 0.25);
+  letter-spacing: 1px;
+  transition: opacity 0.05s;
+  user-select: none;
+}
+
+.buddha-line {
+  white-space: pre;
+}
+
+.ascii-particles {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.particle {
+  position: absolute;
+  color: rgba(0, 255, 65, 0.15);
+  font-size: 8px;
+  animation: float 4s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0) scale(1); opacity: 0; }
+  50% { transform: translateY(-20px) scale(1.5); opacity: 0.8; }
+}
+
+/* ── Terminal Window ── */
+.terminal-window {
+  position: relative;
+  z-index: 2;
+  width: 92vw;
+  max-width: 640px;
+  max-height: 40vh;
+  background: rgba(0, 0, 0, 0.85);
+  border: 1px solid rgba(0, 255, 65, 0.2);
+  border-radius: 8px;
+  padding: 16px 20px;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
+}
+
+.terminal-log {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+  max-height: 30vh;
+}
+
+.term-line {
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.term-system {
+  color: rgba(0, 255, 65, 0.7);
+}
+
+.term-prompt {
+  color: #00ff41;
+  font-weight: 700;
+}
+
+.term-input-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.term-prompt-sign {
+  color: #00ff41;
+  font-weight: 700;
   opacity: 0.8;
 }
 
-.hint-cmd {
-  font-weight: 700;
-  opacity: 1;
-  text-shadow: 0 0 8px rgba(0, 255, 65, 0.5);
+.term-input-text {
+  color: #00ff41;
+  font-size: 12px;
 }
 
-.launch-btn {
+.term-cursor {
+  color: #00ff41;
+  font-size: 11px;
+  animation: blink 500ms step-end infinite;
+}
+
+.term-cursor.hide {
+  opacity: 0;
+}
+
+/* ── Launch Buttons ── */
+.launch-hint {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  gap: 12px;
+}
+
+.launch-button, .reboot-button {
   background: transparent;
-  border: 1px solid #00ff41;
+  border: 1px solid rgba(0, 255, 65, 0.3);
+  border-radius: 6px;
   color: #00ff41;
   font-family: 'Courier New', monospace;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
-  padding: 8px 20px;
+  padding: 10px 24px;
   cursor: pointer;
-  text-shadow: 0 0 4px rgba(0, 255, 65, 0.3);
-  margin-top: 8px;
+  text-shadow: 0 0 4px rgba(0, 255, 65, 0.2);
+  transition: all 0.15s;
+  letter-spacing: 1px;
 }
 
-.launch-btn:hover {
-  background: #00ff41;
-  color: #000;
-  text-shadow: none;
+.launch-button:hover {
+  background: rgba(0, 255, 65, 0.1);
+  border-color: #00ff41;
+  box-shadow: 0 0 16px rgba(0, 255, 65, 0.2);
+}
+
+.reboot-button:hover {
+  background: rgba(255, 95, 87, 0.1);
+  border-color: #ff5f57;
+  color: #ff5f57;
 }
 
 @media (max-width: 768px) {
-  .crt-bezel {
-    width: 98vw;
-    height: 92vh;
-    max-height: none;
-    padding: 10px;
-    border-width: 2px;
-    border-radius: 6px;
+  .boot-terminal {
+    padding: 16px;
+    width: 96vw;
   }
-
-  .screen-content {
-    padding: 12px 14px;
+  .boot-line {
     font-size: 11px;
   }
-
-  .screen-status {
-    padding: 4px 14px;
+  .terminal-window {
+    padding: 12px 14px;
+    width: 96vw;
+  }
+  .term-line {
+    font-size: 10px;
+  }
+  .ascii-buddha {
+    font-size: 8px;
+  }
+  .launch-button, .reboot-button {
+    font-size: 10px;
+    padding: 8px 16px;
   }
 }
 </style>
