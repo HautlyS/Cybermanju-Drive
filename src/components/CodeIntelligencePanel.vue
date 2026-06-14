@@ -95,8 +95,8 @@ const gotoLine = ref('')
 const gotoLineNum = ref(0)
 
 const sourceLines = computed(() => {
-  if (!parseResult.value?.parseResult) return []
-  return parseResult.value.parseResult.split('\n')
+  if (!selectedFile.value?.contentText) return []
+  return selectedFile.value.contentText.split('\n')
 })
 
 async function handleParse() {

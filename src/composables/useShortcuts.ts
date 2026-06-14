@@ -184,12 +184,12 @@ export function useShortcuts(
   onMounted(() => {
     load()
     const el = scopeRef?.value || document
-    el.addEventListener('keydown', handleKey)
+    el.addEventListener('keydown', handleKey as EventListener)
   })
 
   onUnmounted(() => {
     const el = scopeRef?.value || document
-    el.removeEventListener('keydown', handleKey)
+    el.removeEventListener('keydown', handleKey as EventListener)
     if (chord.timeout) clearTimeout(chord.timeout)
   })
 

@@ -94,6 +94,7 @@ export const useAppStore = defineStore('cybermanju', () => {
   const commandPaletteOpen = ref(false)
   const showShortcutsHelp = ref(false)
   const createFolderPromptOpen = ref(false)
+  const sortBy = ref<'name' | 'date' | 'size' | 'type'>('name')
   const autoRefreshInterval = ref(0)
   let autoRefreshTimer: ReturnType<typeof setInterval> | null = null
   const selectedFileIds = ref<string[]>([])
@@ -881,9 +882,9 @@ export const useAppStore = defineStore('cybermanju', () => {
     searchQuery, searchTotalResults, isSearching, isLoading, lastError, matrixRainEnabled,
     showEncryptionPanel, showCompressionPanel, showPermissionsPanel, commandPaletteOpen,
     showShortcutsHelp, createFolderPromptOpen, showLoginPopup,
-    selectedFileIds, isMultiSelect, users, autoRefreshInterval,
+    selectedFileIds, isMultiSelect, users, autoRefreshInterval, sortBy,
     // Computed
-    selectedFile, activeAccount, encryptedFiles, compressedFiles,
+    currentUser, selectedFile, activeAccount, encryptedFiles, compressedFiles,
     starredFiles, folders, currentFolderFiles,
     // Actions
     initialize, selectFile, toggleStar, clearError,
@@ -915,5 +916,6 @@ export const useAppStore = defineStore('cybermanju', () => {
     // Utility
     rebuildParentIndex,
     notifySuccess,
+    notifyError,
   }
 })

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Comprehensive test suite for all Cybermanju Drive crates"
 
-[dev-dependencies]
+[dependencies]
 cybermanju-types = { path = "../types" }
 cybermanju-compression = { path = "../compression" }
 cybermanju-crypto = { path = "../crypto" }

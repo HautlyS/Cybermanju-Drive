@@ -78,7 +78,7 @@ touchConfig.onAction((action: TouchAction) => {
     open_settings: () => { store.currentPanel = 'settings' },
     open_storage: () => { store.currentPanel = 'storage' },
     escape: () => {
-      store.selectedFile = null
+      store.selectedFileId = null
       store.createFolderPromptOpen = false
       store.showEncryptionPanel = false
       store.showCompressionPanel = false
@@ -131,9 +131,9 @@ const confirmTitle = ref('CONFIRM')
 
 const searchTypeFilter = ref('all')
 const searchCurrentDir = ref(false)
-const recentSearches = ref<string[]>(() => {
+const recentSearches = ref<string[]>((() => {
   try { return JSON.parse(localStorage.getItem('cybermanju_recent_searches') || '[]') as string[] } catch { return [] }
-})
+})())
 
 function saveRecentSearch(query: string) {
   if (!query.trim()) return
@@ -180,7 +180,7 @@ shortcuts.on('new_folder', () => { store.createFolderPromptOpen = true })
 shortcuts.on('upload_file', () => { showUploadDialog.value = true })
 shortcuts.on('refresh', () => { store.fetchFiles() })
 shortcuts.on('escape', () => {
-  store.selectedFile = null
+  store.selectedFileId = null
   store.createFolderPromptOpen = false
   store.showEncryptionPanel = false
   store.showCompressionPanel = false
@@ -290,10 +290,10 @@ ctx.registerContext('file_grid_bg', [
   { id: 'div1', label: '', divider: true },
   {
     id: 'sort', label: 'SORT BY', icon: '[S]', submenu: [
-      { id: 'sort_name', label: 'NAME', icon: '[N]', action: () => { store.sortBy = 'name' } },
-      { id: 'sort_date', label: 'DATE', icon: '[D]', action: () => { store.sortBy = 'date' } },
-      { id: 'sort_size', label: 'SIZE', icon: '[S]', action: () => { store.sortBy = 'size' } },
-      { id: 'sort_type', label: 'TYPE', icon: '[T]', action: () => { store.sortBy = 'type' } },
+      { id: 'sort_name', label: 'NAME', icon: '[N]', action: () => { (store as any).sortBy = 'name' } },
+      { id: 'sort_date', label: 'DATE', icon: '[D]', action: () => { (store as any).sortBy = 'date' } },
+      { id: 'sort_size', label: 'SIZE', icon: '[S]', action: () => { (store as any).sortBy = 'size' } },
+      { id: 'sort_type', label: 'TYPE', icon: '[T]', action: () => { (store as any).sortBy = 'type' } },
     ]
   },
   {
