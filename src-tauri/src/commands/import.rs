@@ -508,11 +508,10 @@ pub fn import_from_url(
     let url_path = url::Url::parse(&url)
         .map(|u| {
             u.path_segments()
-                .and_then(|s| s.last())
-                .unwrap_or("download")
+                .and_then(|s| s.last().map(String::from))
+                .unwrap_or_else(|| "download".to_string())
         })
-        .unwrap_or("download")
-        .to_string();
+        .unwrap_or_else(|_| "download".to_string());
 
     let file_name = if url_path.is_empty() || url_path == "/" {
         "download".to_string()
