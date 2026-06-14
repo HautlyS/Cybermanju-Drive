@@ -5,7 +5,6 @@
 // Session tokens: HMAC-SHA256 with 24-hour expiry (not forgeable)
 
 use chrono::Utc;
-use redb::ReadableTable;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::State;

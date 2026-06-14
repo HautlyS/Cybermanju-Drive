@@ -1741,9 +1741,8 @@ fn fn_onnx_detect_faces(file_node: &FileNode) -> Result<Vec<Vec<f32>>> {
 
     // Run SCRFD inference — requires &mut self, so lock the mutex
     let mut scrfd = sessions.scrfd.lock().unwrap();
-    let scrfd_input =
-        ort::Value::from_array(ndarray::Array1::from_vec(input_tensor))
-            .map_err(|e| anyhow::anyhow!("Tensor creation error: {}", e))?;
+    let scrfd_input = ort::Value::from_array(ndarray::Array1::from_vec(input_tensor))
+        .map_err(|e| anyhow::anyhow!("Tensor creation error: {}", e))?;
     let scrfd_output = scrfd.run(ort::inputs!["input" => scrfd_input])?;
     drop(scrfd);
     let faces = postprocess_scrfd(&scrfd_output, w, h)?;
@@ -1758,9 +1757,8 @@ fn fn_onnx_detect_faces(file_node: &FileNode) -> Result<Vec<Vec<f32>>> {
         let arcface_input = preprocess_for_arcface(&face_crop);
 
         let mut arcface = sessions.arcface.lock().unwrap();
-        let arcface_input_tensor =
-            ort::Value::from_array(ndarray::Array1::from_vec(arcface_input))
-                .map_err(|e| anyhow::anyhow!("Tensor creation error: {}", e))?;
+        let arcface_input_tensor = ort::Value::from_array(ndarray::Array1::from_vec(arcface_input))
+            .map_err(|e| anyhow::anyhow!("Tensor creation error: {}", e))?;
         let arcface_output = arcface.run(ort::inputs!["input" => arcface_input_tensor])?;
         drop(arcface);
 

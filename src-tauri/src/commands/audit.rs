@@ -1,6 +1,5 @@
 use crate::db::schema::AuditEntry;
 use crate::AppState;
-use redb::ReadableTable;
 use tauri::State;
 
 /// Fetch audit log entries with optional limit and entity filter.
