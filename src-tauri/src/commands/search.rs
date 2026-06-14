@@ -28,7 +28,7 @@ pub fn search_files(
     let request = SearchRequest {
         query: query.clone(),
         limit: Some(limit),
-        offset: None,
+        offset,
     };
 
     let results = tantivy_index.search(&request).map_err(|e| e.to_string())?;
