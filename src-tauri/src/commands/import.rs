@@ -474,6 +474,112 @@ pub fn rebuild_search_index(state: State<'_, AppState>) -> Result<u32, String> {
     Ok(count)
 }
 
+/// Import a file from a URL — downloads the file and processes it like a local import.
+#[tauri::command]
+pub fn import_from_url(
+    url: String,
+    parent_path: String,
+    state: State<'_, AppState>,
+) -> Result<FileNode, String> {
+    let start = std::time::Instant::now();
+
+    // Download the file
+    let response = reqwest::blocking::get(&url)
+        .map_err(|e| format!("Failed to download URL '{}': {}", url, e))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("Download failed with HTTP {}", status));
+    }
+
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
+    let bytes = response
+        .bytes()
+        .map_err(|e| format!("Failed to read response body: {}", e))?;
+
+    let size_bytes = bytes.len() as u64;
+
+    // Detect file name from URL
+    let url_path = url::Url::parse(&url)
+        .map(|u| u.path_segments().and_then(|s| s.last()).unwrap_or("download"))
+        .unwrap_or("download")
+        .to_string();
+
+    let file_name = if url_path.is_empty() || url_path == "/" {
+        "download".to_string()
+    } else {
+        url_path.to_string()
+    };
+
+    let hash_blake3 = Some(blake3::hash(&bytes).to_hex().to_string());
+
+    // Detect MIME type from content-type header or file extension
+    let mime_type = content_type.or_else(|| {
+        mime_guess::from_path(&file_name).first().map(|m| m.to_string())
+    });
+
+    let now = Utc::now().to_rfc3339();
+    let file_id = uuid::Uuid::new_v4().to_string();
+
+    let mut context = serde_json::Map::new();
+    context.insert("source".to_string(), serde_json::json!("url_import"));
+    context.insert("original_url".to_string(), serde_json::json!(url));
+
+    let file_node = FileNode {
+        id: file_id.clone(),
+        name: file_name,
+        file_type: "file".to_string(),
+        parent_id: if parent_path.is_empty() { None } else { Some(parent_path) },
+        size_bytes,
+        mime_type,
+        hash_blake3,
+        encrypted: false,
+        encryption_algorithm: None,
+        compression_layers: Vec::new(),
+        thumbnail_path: None,
+        context_data: Some(serde_json::Value::Object(context)),
+        tags: Vec::new(),
+        collection_ids: Vec::new(),
+        face_group_ids: Vec::new(),
+        loose_group_ids: Vec::new(),
+        gps_lat: None,
+        gps_lon: None,
+        created_at: now.clone(),
+        modified_at: now,
+    };
+
+    // Store in database
+    let db = state.db.write().map_err(|e| e.to_string())?;
+    let serialized = serde_json::to_string(&file_node).map_err(|e| e.to_string())?;
+    db.insert_file_with_index(&file_id, serialized.as_str(), file_node.parent_id.as_deref())
+        .map_err(|e| e.to_string())?;
+
+    // Index in Tantivy
+    let content_text = String::from_utf8(bytes.iter().take(65536).copied().collect()).unwrap_or_default();
+    let tantivy_index = state.tantivy_index.write().map_err(|e| e.to_string())?;
+    if let Err(e) = tantivy_index.add_document(
+        &file_id,
+        &file_node.name,
+        &content_text,
+        &file_node.tags,
+        &file_node.file_type,
+        file_node.encrypted,
+        file_node.gps_lat.is_some(),
+        &file_node.created_at,
+        file_node.hash_blake3.as_deref(),
+    ) {
+        log::warn!("Failed to index URL-imported file {}: {}", file_id, e);
+    }
+
+    log::info!("Imported from URL {} ({}) in {}ms", url, size_bytes, start.elapsed().as_millis());
+    Ok(file_node)
+}
+
 /// Extract GPS from an image file using the exif crate.
 /// Returns (lat, lon) or (None, None) if no GPS data found.
 fn extract_gps_if_image(path: &std::path::Path) -> (Option<f64>, Option<f64>) {

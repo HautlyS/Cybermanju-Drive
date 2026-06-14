@@ -248,11 +248,11 @@ pub fn parse_file(file_path: String) -> Result<Value, String> {
     let parse_time_ms = start.elapsed().as_millis() as u64;
 
     let result = json!({
-        "file_path": file_path,
+        "filePath": file_path,
         "language": language,
         "symbols": symbols,
-        "total_lines": total_lines,
-        "parse_time_ms": parse_time_ms,
+        "totalLines": total_lines,
+        "parseTimeMs": parse_time_ms,
     });
 
     Ok(result)

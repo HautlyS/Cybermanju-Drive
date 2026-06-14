@@ -2,6 +2,9 @@
   <footer class="statusbar">
     <div class="sb-left">
       <span class="sb-path">{{ store.currentPath }}</span>
+      <div v-if="store.isLoading" class="sb-progress-bar">
+        <div class="sb-progress-fill" />
+      </div>
     </div>
 
     <div class="sb-center">
@@ -28,15 +31,37 @@
     </div>
 
     <div class="sb-right">
-      <span class="sb-tech">TAURI V2 | REDB | RUSTPQ | TANTIVY</span>
+      <span
+        class="sb-clickable sync-icon"
+        :class="{ 'sb-active': isSyncActive }"
+        title="SYNC STATUS"
+        aria-label="SYNC STATUS"
+      >{{ isSyncActive ? 'SYNC:' + store.syncProgress?.status.toUpperCase() : 'SYNC:IDLE' }}</span>
+      <span class="sb-div">|</span>
+      <span
+        class="sb-clickable"
+        :class="{ 'sb-active': store.matrixRainEnabled }"
+        @click="store.matrixRainEnabled = !store.matrixRainEnabled"
+        title="TOGGLE MATRIX RAIN"
+        aria-label="TOGGLE MATRIX RAIN BACKGROUND"
+      >{{ store.matrixRainEnabled ? 'GFX:ON' : 'GFX:OFF' }}</span>
+      <span class="sb-div">|</span>
+      <span class="sb-clickable" @click="store.commandPaletteOpen = true" title="COMMAND PALETTE (CTRL+K)" aria-label="OPEN COMMAND PALETTE">CMD+K</span>
+      <span class="sb-div">|</span>
+      <span class="sb-tech">{{ isWebMode() ? 'WEB MODE' : 'TAURI MODE' }}</span>
     </div>
   </footer>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { isWebMode } from '@/composables/useTauri'
 
 const store = useAppStore()
+const isSyncActive = computed(() =>
+  store.syncProgress !== null && store.syncProgress.status !== 'idle' && store.syncProgress.status !== 'done'
+)
 </script>
 
 <style scoped>
@@ -68,6 +93,26 @@ const store = useAppStore()
   text-overflow: ellipsis;
   white-space: nowrap;
   color: rgba(255,255,255,0.7);
+}
+
+.sb-progress-bar {
+  width: 60px;
+  height: 6px;
+  border: 1px solid #FFFFFF;
+  margin-left: 8px;
+  overflow: hidden;
+}
+
+.sb-progress-fill {
+  height: 100%;
+  width: 30%;
+  background: #FFFFFF;
+  animation: sb-progress 1.2s ease-in-out infinite;
+}
+
+@keyframes sb-progress {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(calc(60px * 3.33)); }
 }
 
 .sb-center {
@@ -109,5 +154,30 @@ const store = useAppStore()
   font-size: 9px;
   color: rgba(255,255,255,0.3);
   letter-spacing: 0.5px;
+}
+
+.sb-clickable {
+  cursor: pointer;
+  color: rgba(255,255,255,0.5);
+  font-size: 9px;
+}
+
+.sb-clickable:hover {
+  color: #FFFFFF;
+  text-decoration: underline;
+}
+
+.sb-active {
+  color: #FFFFFF;
+  font-weight: 700;
+}
+
+@media (max-width: 768px) {
+  .sb-center {
+    display: none;
+  }
+  .sb-path {
+    max-width: 120px;
+  }
 }
 </style>

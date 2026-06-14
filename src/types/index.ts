@@ -1,5 +1,5 @@
 export type ViewMode = 'grid' | 'list' | 'masonry'
-export type PanelType = 'landing' | 'files' | 'preview' | 'encryption' | 'compression' | 'collections' | 'faces' | 'map' | 'code' | 'search' | 'style' | 'accounts' | 'loose-groups' | 'sync' | 'webdash' | 'users' | 'dashboard'
+export type PanelType = 'landing' | 'files' | 'preview' | 'encryption' | 'compression' | 'collections' | 'faces' | 'map' | 'code' | 'search' | 'style' | 'accounts' | 'loose-groups' | 'sync' | 'webdash' | 'users' | 'dashboard' | 'settings' | 'trash' | 'activity' | 'favorites' | 'recent' | 'storage'
 export type SidebarSection = 'tree' | 'locations' | 'collections' | 'people' | 'styles' | 'loose' | 'users' | 'sync' | 'dashboard' | 'landing'
 
 export interface ModuleInfo {
@@ -222,6 +222,42 @@ export interface ApiEndpoint {
   description: string
 }
 
+export interface TrashItem {
+  id: string
+  originalFile: FileNode
+  deletedAt: string
+  deletedBy?: string
+  restorePath?: string
+}
+
+export interface AuditEntry {
+  id: string
+  action: string
+  entityType: string
+  entityId: string
+  userId?: string
+  details?: Record<string, unknown>
+  timestamp: string
+}
+
+export interface FileVersion {
+  id: string
+  fileId: string
+  versionNumber: number
+  hashBlake3?: string
+  sizeBytes: number
+  snapshotData?: string
+  createdAt: string
+}
+
+export interface ShareLink {
+  id: string
+  fileId: string
+  token: string
+  expiresAt: string
+  url: string
+}
+
 export const CYBER = {
   bgDeep: '#000000',
   bgPanel: '#000000',
@@ -313,8 +349,8 @@ export interface SyncConfig {
   createPreviews: boolean
   deleteRawAfterSync: boolean
   maxConcurrentUploads: number
-  createdAt: string
-  updatedAt: string
+  createdAt?: string
+  updatedAt?: string
 }
 
 export interface SyncFile {
@@ -339,8 +375,8 @@ export interface SyncProgress {
   status: SyncStatusType
   bytesUploaded: number
   errors: string[]
-  startedAt: string
-  estimatedRemainingSeconds: number
+  startedAt?: string
+  estimatedRemainingSeconds?: number
 }
 
 export interface SyncResult {
@@ -377,6 +413,12 @@ export const MODULE_METADATA: Record<PanelType, ModuleInfo> = {
   preview: { id: 'preview', label: 'PREVIEW', icon: '[P]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #0a0a0a 50%, #000000 100%)', description: 'File preview panel', requiresAuth: true },
   encryption: { id: 'encryption', label: 'ENCRYPT', icon: '[@]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #0d0000 50%, #000000 100%)', description: 'Post-quantum encryption management', requiresAuth: true },
   compression: { id: 'compression', label: 'COMPRESS', icon: '[$]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #000d00 50%, #000000 100%)', description: 'Triple-layer compression pipeline', requiresAuth: true },
+  settings: { id: 'settings', label: 'SETTINGS', icon: '[@]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #0a0a0a 50%, #000000 100%)', description: 'Application settings and preferences', requiresAuth: true },
+  trash: { id: 'trash', label: 'TRASH', icon: '[%]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #0d0000 50%, #000000 100%)', description: 'Deleted files', requiresAuth: true },
+  activity: { id: 'activity', label: 'ACTIVITY', icon: '[~]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #00080d 50%, #000000 100%)', description: 'File activity log', requiresAuth: true },
+  favorites: { id: 'favorites', label: 'FAVORITES', icon: '[*]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #0d0800 50%, #000000 100%)', description: 'Starred files', requiresAuth: true },
+  recent: { id: 'recent', label: 'RECENT', icon: '[T]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #080808 50%, #000000 100%)', description: 'Recently modified files', requiresAuth: true },
+  storage: { id: 'storage', label: 'STORAGE', icon: '[$]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #000a00 50%, #000000 100%)', description: 'Storage usage dashboard', requiresAuth: true },
 }
 
 export const SYNC_BACKEND_INFO: Record<SyncBackendType, { name: string; description: string; color: string; icon: string }> = {

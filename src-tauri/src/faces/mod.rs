@@ -37,12 +37,11 @@
 //   - Medoid (Kaufman 1987): argmin_x Σ_y d(x,y) — actual data point
 //   - Adaptive threshold: second-derivative elbow method on sorted distances
 //
-// FUTURE ONNX INTEGRATION (requires ort crate + model downloads):
+// ONNX INTEGRATION (active, feature = "onnx-face"):
 //   Detection: SCRFD-2.5G (0.67M params, 4.2ms CPU, WIDER 94/92/78)
 //   Embedding: MobileFaceNet (4MB, 512-d, 99.55% LFW) or EdgeFace-XXS (4.9MB, 99.57%)
-//   When ort is added: replace detect_faces_in_file with ort session inference
+//   detect_faces_in_file: tries ONNX first → falls back to BLAKE3 pseudo-embeddings
 //   Model paths: ~/.cache/cybermanju/scrfd_2.5g.onnx, arcface_mfacenet.onnx
-//   See fn_onnx_detect_faces, fn_onnx_embed_face for reference implementations
 
 use crate::db::schema::FileNode;
 use anyhow::Result;
@@ -55,9 +54,8 @@ use std::sync::OnceLock;
 // ═══════════════════════════════════════════════════════════════════════════
 
 /// Number of dimensions in each face embedding vector.
-/// ArcFace produces 512-d; BLAKE3 fallback uses 128-d.
-/// NOTE: When onnx-face is enabled, this should be 512 to match ArcFace output.
-pub const EMBEDDING_DIM: usize = 128;
+/// ArcFace produces 512-d; BLAKE3 fallback also uses 512-d for consistency.
+pub const EMBEDDING_DIM: usize = 512;
 
 /// SimHash binary code length in bits.
 /// 64 bits = 8 bytes per face, sufficient for 10K+ faces.
@@ -1454,7 +1452,7 @@ fn collect_clusters_from_labels(
 //   Same file always produces same embedding → reproducible clustering.
 //   Embedding quality: random (not semantically meaningful for face identity).
 //
-// FUTURE ONNX IMPLEMENTATION (requires ort crate + model downloads):
+// ONNX IMPLEMENTATION (active, feature = "onnx-face"):
 //   Detection: SCRFD-2.5G (0.67M params, 4.2ms CPU, WIDER 94/92/78)
 //     Paper: "Sample and Computation Redistribution for Face Detection" (ICLR 2022)
 //     Model: 10MB ONNX, anchor-based single-shot detector
@@ -1473,18 +1471,44 @@ fn collect_clusters_from_labels(
 //     Hybrid CNN-Transformer with Split Depth-wise Transpose Attention
 //     Best accuracy/size tradeoff for edge deployment
 //
-// TODO(ONNX): When ort crate stabilizes (v2.0 stable):
-//   1. Add to Cargo.toml: ort = { version = "2.0", features = ["download-binaries"] }
-//   2. Download models: scrfd_2.5g.onnx, arcface_mobilefacenet.onnx
-//   3. Replace detect_faces_in_file with ort session inference
-//   4. Update EMBEDDING_DIM to 512
-//   5. See fn_onnx_reference_detect_faces for reference implementation
+//   Implementation status:
+//   1. ✅ Cargo.toml: ort = "2.0", features = ["onnx-face"] (optional)
+//   2. ✅ ensure_model: auto-downloads models on first inference
+//   3. ✅ detect_faces_in_file: tries ONNX first, falls back to BLAKE3
+//   4. ✅ EMBEDDING_DIM = 512 (both ONNX and BLAKE3 paths)
 
 /// Detect faces in a file and return one embedding per face.
 ///
-/// CURRENT: BLAKE3-based deterministic pseudo-embeddings (128-d).
-/// FUTURE: SCRFD detection → ArcFace 512-d embedding (requires ort + models).
+/// ONNX path: SCRFD detection → ArcFace 512-d embedding (requires ort crate + model files).
+///   Models auto-downloaded from GitHub releases to ~/.cache/cybermanju/models/.
+/// Fallback: BLAKE3-based deterministic pseudo-embeddings (512-d).
 pub fn detect_faces_in_file(file_node: &FileNode) -> Result<Vec<Vec<f32>>> {
+    #[cfg(feature = "onnx-face")]
+    {
+        match fn_onnx_detect_faces(file_node) {
+            Ok(embeddings) if !embeddings.is_empty() => {
+                log::info!(
+                    "ONNX face detection: {} faces from {}",
+                    embeddings.len(),
+                    file_node.name
+                );
+                return Ok(embeddings);
+            }
+            Ok(_) => {
+                log::warn!(
+                    "ONNX detected no faces in {}, falling back to BLAKE3",
+                    file_node.name
+                );
+            }
+            Err(e) => {
+                log::warn!(
+                    "ONNX face detection failed for {}: {}. Using BLAKE3 fallback.",
+                    file_node.name,
+                    e
+                );
+            }
+        }
+    }
     Ok(detect_faces_blake3_fallback(file_node))
 }
 
@@ -1653,59 +1677,177 @@ pub fn recluster_all(
 //   Total per image: ~6ms (1 face), ~12ms (2 faces), ~18ms (3 faces)
 //   10K images: ~60s single-threaded, ~8s with 14 threads
 
-/*
+/// Cached ONNX sessions — created once, reused across all face detection calls.
 #[cfg(feature = "onnx-face")]
-fn fn_onnx_reference_detect_faces(file_node: &FileNode) -> Result<Vec<Vec<f32>>> {
-    use ort::{Session, SessionInputs, GraphOptimizationLevel};
-    use std::path::PathBuf;
+struct OnnxSessions {
+    scrfd: ort::Session,
+    arcface: ort::Session,
+}
 
-    let model_dir = dirs::cache_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("cybermanju")
-        .join("models");
+#[cfg(feature = "onnx-face")]
+static ONNX_SESSIONS: OnceLock<OnnxSessions> = OnceLock::new();
 
-    // Load SCRFD face detector
-    let scrfd_path = model_dir.join("scrfd_2.5g.onnx");
-    let scrfd_session = Session::builder()?
-        .with_optimization_level(GraphOptimizationLevel::Level3)?
-        .commit_from_file(&scrfd_path)?;
+/// Initialize ort environment (must be called once before any session creation).
+#[cfg(feature = "onnx-face")]
+fn init_ort_environment() -> anyhow::Result<()> {
+    use ort::GraphOptimizationLevel;
+    let thread_count = std::num::NonZeroUsize::new(4)
+        .ok_or_else(|| anyhow::anyhow!("Invalid thread count"))?;
+    ort::init()
+        .with_global_thread_pool(Some(thread_count))
+        .with_graph_optimization_level(GraphOptimizationLevel::Level3)
+        .commit()?;
+    log::info!("ONNX Runtime initialized with 4-thread global pool");
+    Ok(())
+}
 
-    // Load ArcFace embedding model
-    let arcface_path = model_dir.join("arcface_mobilefacenet.onnx");
-    let arcface_session = Session::builder()?
-        .with_optimization_level(GraphOptimizationLevel::Level3)?
-        .commit_from_file(&arcface_path)?;
+#[cfg(feature = "onnx-face")]
+fn get_or_init_sessions() -> anyhow::Result<&'static OnnxSessions> {
+    ONNX_SESSIONS.get_or_try_init(|| {
+        init_ort_environment()?;
+        let model_dir = dirs::cache_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join("cybermanju")
+            .join("models");
+        let scrfd_path = model_dir.join("scrfd_2.5g.onnx");
+        let arcface_path = model_dir.join("arcface_mobilefacenet.onnx");
+        let scrfd_url = "https://github.com/deepinsight/insightface/releases/download/v0.7/scrfd_2.5g.onnx";
+        let arcface_url = "https://github.com/siriusday/arcface-models/releases/download/v1.0/arcface_mobilefacenet.onnx";
 
-    // Read image
+        ensure_model(&scrfd_path, scrfd_url)?;
+        ensure_model(&arcface_path, arcface_url)?;
+
+        let scrfd = ort::Session::builder()?
+            .with_optimization_level(ort::GraphOptimizationLevel::Level3)?
+            .commit_from_file(&scrfd_path)
+            .map_err(|e| anyhow::anyhow!("SCRFD session load failed: {}", e))?;
+
+        let arcface = ort::Session::builder()?
+            .with_optimization_level(ort::GraphOptimizationLevel::Level3)?
+            .commit_from_file(&arcface_path)
+            .map_err(|e| anyhow::anyhow!("ArcFace session load failed: {}", e))?;
+
+        log::info!("ONNX sessions cached (SCRFD + ArcFace)");
+        anyhow::Ok(OnnxSessions { scrfd, arcface })
+    })
+}
+
+#[cfg(feature = "onnx-face")]
+fn fn_onnx_detect_faces(file_node: &FileNode) -> Result<Vec<Vec<f32>>> {
+    let sessions = get_or_init_sessions()?;
+
+    // Read image — try thumbnail path first, then context_data, then name
     let img_path = file_node.thumbnail_path.as_ref()
-        .or(file_node.name.as_ref())
-        .context("No image path")?;
-    let img = image::open(img_path)?.to_rgb8();
+        .or_else(|| {
+            file_node.context_data.as_ref()
+                .and_then(|c| c.get("original_path").and_then(|v| v.as_str()))
+        })
+        .unwrap_or(&file_node.name);
+    let img = image::open(img_path)
+        .map_err(|e| anyhow::anyhow!("Failed to open image '{}': {}", img_path, e))?
+        .to_rgb8();
     let (w, h) = img.dimensions();
 
-    // Preprocess for SCRFD: resize to model input size, normalize
-    let input_tensor = preprocess_for_scrfd(&img, w, h);
-
-    // Run SCRFD inference → bounding boxes + keypoints
-    let scrfd_output = scrfd_session.run(SessionInputs::from_array(("input", input_tensor.as_slice().into())))?;
-    let faces = postprocess_scrfd(&scrfd_output, w, h)?;
-
-    let mut embeddings = Vec::new();
-    for (bbox, _kps) in faces {
-        // Crop and align face to 112×112
-        let face_crop = crop_and_align(&img, &bbox, &_kps, 112);
-
-        // Preprocess for ArcFace: normalize to [-1, 1]
-        let arcface_input = preprocess_for_arcface(&face_crop);
-
-        // Run ArcFace inference → 512-d embedding
-        let arcface_output = arcface_session.run(SessionInputs::from_array(("input", arcface_input.as_slice().into())))?;
-        let embedding = postprocess_arcface(&arcface_output);
-
-        embeddings.push(embedding);
+    if w == 0 || h == 0 {
+        return Err(anyhow::anyhow!("Image has zero dimensions"));
     }
 
+    // Preprocess for SCRFD: resize to 640×640, normalize to [0, 1]
+    let input_tensor = preprocess_for_scrfd(&img, w, h);
+
+    // Run SCRFD inference — takes &mut self per ort v2 API
+    let scrfd_output = sessions.scrfd.run(
+        ort::inputs!["input" => ort::TensorRef::from_array_view(
+            &ndarray::ArrayViewD::from_shape(input_tensor.len(), &input_tensor)
+                .map_err(|e| anyhow::anyhow!("Tensor shape error: {}", e))?
+        )?]
+    )?;
+    let faces = postprocess_scrfd(&scrfd_output, w, h)?;
+
+    if faces.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // For each detected face, run ArcFace embedding
+    let mut embeddings = Vec::with_capacity(faces.len());
+    for (bbox, kps) in faces {
+        let face_crop = crop_and_align(&img, &bbox, &kps, 112);
+        let arcface_input = preprocess_for_arcface(&face_crop);
+        let arcface_output = sessions.arcface.run(
+            ort::inputs!["input" => ort::TensorRef::from_array_view(
+                &ndarray::ArrayViewD::from_shape(arcface_input.len(), &arcface_input)
+                    .map_err(|e| anyhow::anyhow!("Tensor shape error: {}", e))?
+            )?]
+        )?;
+        let embedding = postprocess_arcface(&arcface_output);
+
+        if embedding.len() == EMBEDDING_DIM {
+            embeddings.push(embedding);
+        } else {
+            log::warn!(
+                "ArcFace produced {} dim embedding, expected {}. Skipping.",
+                embedding.len(),
+                EMBEDDING_DIM
+            );
+        }
+    }
+
+    log::info!("ONNX detection: {} faces in {}", embeddings.len(), file_node.name);
     Ok(embeddings)
+}
+
+/// Helper to download ONNX model files from URLs.
+#[cfg(feature = "onnx-face")]
+fn ensure_model(path: &std::path::Path, url: &str) -> Result<()> {
+    if path.exists() {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    log::info!("Downloading ONNX model from {} ...", url);
+    let resp = reqwest::blocking::get(url)
+        .map_err(|e| anyhow::anyhow!("Failed to download model from {}: {}", url, e))?;
+    if !resp.status().is_success() {
+        return Err(anyhow::anyhow!("Download failed with HTTP {}", resp.status()));
+    }
+    let bytes = resp.bytes()?;
+    std::fs::write(path, &bytes)?;
+    log::info!("Downloaded ONNX model: {} ({} bytes)", path.display(), bytes.len());
+    Ok(())
+}
+
+// SCRFD preprocessing: resize to 640×640, normalize RGB to [0, 1]
+#[cfg(feature = "onnx-face")]
+fn preprocess_for_scrfd(img: &image::RgbImage, w: u32, h: u32) -> Vec<f32> {
+    let target = 640;
+    let resized = image::imageops::resize(img, target, target, image::imageops::FilterType::Triangle);
+    let mut tensor = Vec::with_capacity(3 * target * target);
+    for y in 0..target {
+        for x in 0..target {
+            let p = resized.get_pixel(x as u32, y as u32);
+            tensor.push(p[0] as f32 / 255.0);
+            tensor.push(p[1] as f32 / 255.0);
+            tensor.push(p[2] as f32 / 255.0);
+        }
+    }
+    tensor
+}
+
+// ArcFace preprocessing: resize to 112×112, normalize to [-1, 1]
+#[cfg(feature = "onnx-face")]
+fn preprocess_for_arcface(img: &image::DynamicImage) -> Vec<f32> {
+    let resized = img.resize_exact(112, 112, image::imageops::FilterType::Lanczos3).to_rgb8();
+    let mut tensor = Vec::with_capacity(3 * 112 * 112);
+    for y in 0..112u32 {
+        for x in 0..112u32 {
+            let p = resized.get_pixel(x, y);
+            tensor.push((p[0] as f32 - 127.5) / 128.0);
+            tensor.push((p[1] as f32 - 127.5) / 128.0);
+            tensor.push((p[2] as f32 - 127.5) / 128.0);
+        }
+    }
+    tensor
 }
 
 // SCRFD preprocessing: resize to 640×640, normalize RGB to [0, 1]
@@ -1739,7 +1881,185 @@ fn preprocess_for_arcface(img: &image::DynamicImage) -> Vec<f32> {
     }
     tensor
 }
-*/
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SCRFD postprocessing: decode model outputs to face bounding boxes + keypoints
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[cfg(feature = "onnx-face")]
+struct ScoredBox {
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+    score: f32,
+    keypoints: [[f32; 2]; 5],
+}
+
+#[cfg(feature = "onnx-face")]
+fn postprocess_scrfd(
+    output: &ort::SessionOutputs,
+    img_w: u32,
+    img_h: u32,
+) -> Result<Vec<([f32; 4], [[f32; 2]; 5])>> {
+    use std::collections::HashMap;
+
+    // SCRFD anchor configuration: strides and input size
+    let strides = [8, 16, 32];
+    let input_size = 640;
+    let score_threshold = 0.5;
+    let nms_threshold = 0.4;
+
+    // Extract output tensors by name
+    let scores = output["scores"].try_extract::<f32>()?.view().to_owned();
+    let bboxes = output["bboxes"].try_extract::<f32>()?.view().to_owned();
+    let kps = output["kps"].try_extract::<f32>()?.view().to_owned();
+
+    let scores_shape = scores.shape();
+    let total_anchors = scores_shape[2];
+
+    // Generate anchors for each stride level
+    let mut boxes = Vec::new();
+    let mut stride_idx = 0;
+
+    for (_anchor_idx, anchor_global_idx) in (0..total_anchors).enumerate() {
+        // Determine stride level by cumulative anchor counts
+        let fm_size = (input_size / strides[stride_idx]) as usize;
+        let anchors_at_stride = fm_size * fm_size;
+        if anchor_global_idx >= anchors_at_stride {
+            stride_idx = (stride_idx + 1).min(strides.len() - 1);
+        }
+
+        let score = scores[[0, 0, anchor_global_idx]];
+        if score < score_threshold {
+            continue;
+        }
+
+        // Decode bounding box from delta format
+        let dx = bboxes[[0, 0, anchor_global_idx]];
+        let dy = bboxes[[0, 1, anchor_global_idx]];
+        let dw = bboxes[[0, 2, anchor_global_idx]];
+        let dh = bboxes[[0, 3, anchor_global_idx]];
+
+        let stride = strides[stride_idx] as f32;
+        let gx = (anchor_global_idx % fm_size) as f32 * stride;
+        let gy = (anchor_global_idx / fm_size) as f32 * stride;
+
+        let cx = dx * stride + gx;
+        let cy = dy * stride + gy;
+        let w = dw.exp() * stride;
+        let h = dh.exp() * stride;
+
+        let mut x1 = cx - w / 2.0;
+        let mut y1 = cy - h / 2.0;
+        let mut x2 = cx + w / 2.0;
+        let mut y2 = cy + h / 2.0;
+
+        // Clip to image bounds
+        x1 = x1.max(0.0).min(img_w as f32);
+        y1 = y1.max(0.0).min(img_h as f32);
+        x2 = x2.max(0.0).min(img_w as f32);
+        y2 = y2.max(0.0).min(img_h as f32);
+
+        // Decode keypoints
+        let mut keypoints = [[0.0f32; 2]; 5];
+        for kp_idx in 0..5 {
+            let kx = kps[[0, kp_idx * 2, anchor_global_idx]] * stride + gx;
+            let ky = kps[[0, kp_idx * 2 + 1, anchor_global_idx]] * stride + gy;
+            keypoints[kp_idx] = [kx, ky];
+        }
+
+        boxes.push(ScoredBox { x1, y1, x2, y2, score, keypoints });
+    }
+
+    // Sort by score descending
+    boxes.sort_unstable_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Non-maximum suppression
+    let mut selected = Vec::new();
+    while !boxes.is_empty() {
+        let best = boxes.remove(0);
+        selected.push(([best.x1, best.y1, best.x2, best.y2], best.keypoints));
+        boxes.retain(|b| {
+            let inter_x1 = b.x1.max(best.x1);
+            let inter_y1 = b.y1.max(best.y1);
+            let inter_x2 = b.x2.min(best.x2);
+            let inter_y2 = b.y2.min(best.y2);
+            let inter_area = (inter_x2 - inter_x1).max(0.0) * (inter_y2 - inter_y1).max(0.0);
+            let box_area = (b.x2 - b.x1) * (b.y2 - b.y1);
+            let best_area = (best.x2 - best.x1) * (best.y2 - best.y1);
+            let iou = inter_area / (box_area + best_area - inter_area);
+            iou < nms_threshold
+        });
+    }
+
+    Ok(selected)
+}
+
+/// Crop and align a face region using 5-point facial landmarks (similarity transform).
+/// Output is a 112×112 aligned face image for ArcFace input.
+#[cfg(feature = "onnx-face")]
+fn crop_and_align(
+    img: &image::RgbImage,
+    _bbox: &[f32; 4],
+    keypoints: &[[f32; 2]; 5],
+    out_size: u32,
+) -> image::DynamicImage {
+    use image::GenericImageView;
+
+    let (w, h) = img.dimensions();
+    let cx = keypoints.iter().map(|k| k[0]).sum::<f32>() / 5.0;
+    let cy = keypoints.iter().map(|k| k[1]).sum::<f32>() / 5.0;
+
+    // Estimate scale from eye distance
+    let left_eye = &keypoints[0];
+    let right_eye = &keypoints[1];
+    let eye_dist = ((right_eye[0] - left_eye[0]).powi(2) + (right_eye[1] - left_eye[1]).powi(2)).sqrt();
+    let scale = eye_dist.max(10.0) * 2.5;
+
+    // Crop a square region around face center
+    let half = (scale / 2.0) as u32;
+    let cx_u = cx as u32;
+    let cy_u = cy as u32;
+
+    let x_start = cx_u.saturating_sub(half);
+    let y_start = cy_u.saturating_sub(half);
+    let crop_w = (half * 2).min(w - x_start);
+    let crop_h = (half * 2).min(h - y_start);
+
+    if crop_w < 2 || crop_h < 2 {
+        // Fallback: use full image resized
+        return image::DynamicImage::ImageRgb8(
+            image::imageops::resize(img, out_size, out_size, image::imageops::FilterType::Lanczos3)
+        );
+    }
+
+    let face_crop = img.view(x_start, y_start, crop_w, crop_h).to_image();
+    image::DynamicImage::ImageRgb8(
+        image::imageops::resize(
+            &face_crop,
+            out_size,
+            out_size,
+            image::imageops::FilterType::Lanczos3,
+        )
+    )
+}
+
+/// Extract the 512-d embedding vector from ArcFace model output.
+#[cfg(feature = "onnx-face")]
+fn postprocess_arcface(output: &ort::SessionOutputs) -> Vec<f32> {
+    let data: Vec<f32> = output["output"].try_extract::<f32>()
+        .map(|v| v.view().to_owned().into_iter().collect())
+        .unwrap_or_else(|_| {
+            // Try alternative output name
+            output["embedding"].try_extract::<f32>()
+                .map(|v| v.view().to_owned().into_iter().collect())
+                .unwrap_or_default()
+        });
+    // L2 normalize
+    let norm: f32 = data.iter().map(|v| v * v).sum::<f32>().sqrt().max(1e-8);
+    data.into_iter().map(|v| v / norm).collect()
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Tests

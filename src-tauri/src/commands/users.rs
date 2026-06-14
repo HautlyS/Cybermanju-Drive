@@ -533,6 +533,73 @@ pub fn verify_file_access(
     Ok(false)
 }
 
+/// Alias for register_user — called by the frontend as create_user.
+#[tauri::command]
+pub fn create_user(
+    username: String,
+    password: String,
+    role: String,
+    state: State<'_, AppState>,
+) -> Result<User, String> {
+    register_user(username, password, None, Some(role), state)
+}
+
+/// Delete a user by ID.
+#[tauri::command]
+pub fn delete_user(user_id: String, state: State<'_, AppState>) -> Result<bool, String> {
+    let db = state.db.write().map_err(|e| e.to_string())?;
+    let tx = db.begin_write().map_err(|e| e.to_string())?;
+    {
+        let mut table = tx
+            .open_table(crate::db::Database::get_users_table())
+            .map_err(|e| e.to_string())?;
+        let removed = table.remove(user_id.as_str()).map_err(|e| e.to_string())?.is_some();
+        if !removed {
+            return Err(format!("User not found: {}", user_id));
+        }
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+/// Update a user's role.
+#[tauri::command]
+pub fn update_user_role(
+    user_id: String,
+    role: String,
+    state: State<'_, AppState>,
+) -> Result<User, String> {
+    if !["admin", "user", "viewer"].contains(&role.as_str()) {
+        return Err(format!("Invalid role: {}. Must be admin, user, or viewer", role));
+    }
+    let db = state.db.write().map_err(|e| e.to_string())?;
+    let tx = db.begin_write().map_err(|e| e.to_string())?;
+    let user = {
+        let table = tx
+            .open_table(crate::db::Database::get_users_table())
+            .map_err(|e| e.to_string())?;
+        let existing = table.get(user_id.as_str()).map_err(|e| e.to_string())?;
+        match existing {
+            Some(v) => {
+                let mut user: User = serde_json::from_str(v.value()).map_err(|e| e.to_string())?;
+                user.role = role;
+                user.updated_at = chrono::Utc::now().to_rfc3339();
+                user
+            }
+            None => return Err(format!("User not found: {}", user_id)),
+        }
+    };
+    {
+        let mut table = tx
+            .open_table(crate::db::Database::get_users_table())
+            .map_err(|e| e.to_string())?;
+        table.insert(user_id.as_str(), serde_json::to_string(&user).map_err(|e| e.to_string())?.as_str())
+            .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(user)
+}
+
 /// Get all file permissions for a specific file.
 #[tauri::command]
 pub fn get_file_permissions(

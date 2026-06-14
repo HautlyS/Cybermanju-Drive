@@ -8,13 +8,14 @@
     </div>
 
     <div class="topbar-center">
-      <div class="search-wrap" :class="{ searching: store.isSearching }">
+      <div class="search-wrap" :class="{ searching: store.isSearching }" role="search">
         <span class="search-icon">&gt;</span>
         <input
           v-model="store.searchQuery"
           class="search-input"
           type="text"
           placeholder="SEARCH_WITH_TANTIVY_"
+          aria-label="SEARCH FILES WITH TANTIVY BM25"
           @keyup.enter="handleSearch"
         />
         <span v-if="store.isSearching" class="search-cursor">_</span>
@@ -26,7 +27,8 @@
         class="status-badge"
         :class="store.encryptionStatus.isEncrypted ? 'on' : 'off'"
         @click="store.showEncryptionPanel = !store.showEncryptionPanel"
-        title="TOGGLE ENCRYPTION PANEL"
+        title="TOGGLE ENCRYPTION PANEL (CTRL+E)"
+        aria-label="TOGGLE ENCRYPTION PANEL"
       >
         <span class="badge-label">{{ store.encryptionStatus.isEncrypted ? 'PQC:ON' : 'PQC:OFF' }}</span>
       </button>
@@ -44,23 +46,56 @@
         :class="{ on: store.matrixRainEnabled }"
         @click="store.matrixRainEnabled = !store.matrixRainEnabled"
         title="TOGGLE BACKGROUND ANIMATION"
+        aria-label="TOGGLE MATRIX RAIN ANIMATION"
       >
         <span class="badge-label">{{ store.matrixRainEnabled ? 'GFX:ON' : 'GFX:OFF' }}</span>
+      </button>
+
+      <button
+        class="status-badge neutral"
+        @click="store.commandPaletteOpen = true"
+        title="COMMAND PALETTE (CTRL+K)"
+        aria-label="OPEN COMMAND PALETTE"
+      >
+        <span class="badge-label">[K]</span>
+      </button>
+
+      <button
+        class="status-badge neutral"
+        @click="store.showLoginPopup = true"
+        title="LOGIN / REGISTER"
+        aria-label="OPEN LOGIN DIALOG"
+      >
+        <span class="badge-label">{{ store.currentUser ? store.currentUser.username : 'LOGIN' }}</span>
       </button>
     </div>
   </header>
 </template>
 
 <script setup lang="ts">
+import { ref, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 
 const store = useAppStore()
 
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+
 function handleSearch() {
   if (store.searchQuery.trim()) {
     store.searchFiles(store.searchQuery)
+    store.currentPanel = 'search'
   }
 }
+
+watch(() => store.searchQuery, () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  if (!store.searchQuery.trim()) return
+  searchTimer = setTimeout(() => {
+    if (store.searchQuery.trim()) {
+      store.searchFiles(store.searchQuery)
+    }
+  }, 400)
+})
 </script>
 
 <style scoped>
@@ -209,5 +244,32 @@ function handleSearch() {
 .badge-label {
   font-family: 'Courier New', monospace;
   font-size: 10px;
+}
+
+@media (max-width: 768px) {
+  .topbar {
+    padding: 0 6px;
+    gap: 6px;
+  }
+  .topbar-left {
+    min-width: auto;
+  }
+  .logo-text {
+    font-size: 12px;
+  }
+  .logo-sub {
+    display: none;
+  }
+  .topbar-center {
+    max-width: none;
+    flex: 1;
+  }
+  .topbar-right .status-badge {
+    padding: 2px 4px;
+    font-size: 8px;
+  }
+  .badge-label {
+    font-size: 8px;
+  }
 }
 </style>

@@ -153,6 +153,75 @@ pub struct User {
 }
 
 // ---------------------------------------------------------------------------
+// TrashItem — soft-deleted file node with restore metadata
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrashItem {
+    pub id: String,
+    pub original_file: FileNode,
+    pub deleted_at: String,
+    pub deleted_by: Option<String>,
+    pub restore_path: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// AuditEntry — immutable activity log record
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditEntry {
+    pub id: String,
+    pub action: String,
+    pub entity_type: String,
+    pub entity_id: String,
+    pub user_id: Option<String>,
+    pub details: Option<serde_json::Value>,
+    pub timestamp: String,
+}
+
+// ---------------------------------------------------------------------------
+// FileVersion — content snapshot for versioning
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileVersion {
+    pub id: String,
+    pub file_id: String,
+    pub version_number: u32,
+    pub hash_blake3: Option<String>,
+    pub size_bytes: u64,
+    pub snapshot_data: Option<String>,
+    pub created_at: String,
+}
+
+// ---------------------------------------------------------------------------
+// ShareLink — token-based file sharing with expiry
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShareLink {
+    pub id: String,
+    pub file_id: String,
+    pub token: String,
+    pub expires_at: String,
+    pub created_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+impl ShareLink {
+    pub fn with_url(mut self) -> Self {
+        self.url = Some(format!("http://localhost:3456/api/shared/{}", self.token));
+        self
+    }
+}
+
+// ---------------------------------------------------------------------------
 // UserFilePermission — per-file access control
 // ---------------------------------------------------------------------------
 

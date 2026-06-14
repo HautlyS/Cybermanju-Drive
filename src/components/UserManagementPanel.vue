@@ -10,28 +10,67 @@
     <div class="section">
       <h3 class="section-title">[USERS] REGISTERED USERS</h3>
       <p class="text-muted" style="margin-bottom:8px;font-size:10px;">PER-FILE USERNAME + PASSWORD AUTH WITH ARGON2 HASHING. ROLE-BASED ACCESS: ADMIN, USER, VIEWER.</p>
-      <div v-if="users.length === 0" class="text-muted" style="font-size:10px;">NO USERS REGISTERED</div>
+      <div v-if="store.users.length === 0" class="text-muted" style="font-size:10px;">NO USERS REGISTERED</div>
       <div class="user-list">
-        <div v-for="user in users" :key="user.id" class="user-card">
+        <div v-for="user in store.users" :key="user.id" class="user-card">
           <div class="user-header">
             <span class="user-name">{{ user.username }}</span>
             <span class="user-role">{{ user.role }}</span>
             <span class="user-active" :class="{ on: user.isActive }">{{ user.isActive ? 'ACTIVE' : 'INACTIVE' }}</span>
+            <div class="user-actions">
+              <button class="user-action-btn" @click="handleRole(user.id, user.role === 'admin' ? 'user' : 'admin')">[ROLE]</button>
+              <button class="user-action-btn" @click="handleDelete(user.id)">[DEL]</button>
+            </div>
           </div>
         </div>
       </div>
     </div>
+
+    <div class="create-section" v-if="showCreate">
+      <h3 class="section-title">[+] CREATE USER</h3>
+      <input v-model="newUsername" class="bw-input" placeholder="USERNAME" @keyup.enter="handleCreate" />
+      <input v-model="newPassword" class="bw-input" type="password" placeholder="PASSWORD" @keyup.enter="handleCreate" />
+      <select v-model="newRole" class="bw-input" style="appearance:none;">
+        <option value="user">USER</option>
+        <option value="admin">ADMIN</option>
+        <option value="viewer">VIEWER</option>
+      </select>
+      <button class="bw-btn" @click="handleCreate">[CREATE]</button>
+    </div>
+    <button v-else class="bw-btn" @click="showCreate = true">[+ ADD USER]</button>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
 
 const store = useAppStore()
-const users = computed(() => [] as any[])
+const newUsername = ref('')
+const newPassword = ref('')
+const newRole = ref('user')
+const showCreate = ref(false)
 
-onMounted(() => {})
+onMounted(() => {
+  store.fetchUsers()
+})
+
+async function handleCreate() {
+  if (!newUsername.value.trim() || !newPassword.value.trim()) return
+  await store.createUser(newUsername.value.trim(), newPassword.value.trim(), newRole.value)
+  newUsername.value = ''
+  newPassword.value = ''
+  newRole.value = 'user'
+  showCreate.value = false
+}
+
+async function handleDelete(userId: string) {
+  await store.deleteUser(userId)
+}
+
+async function handleRole(userId: string, role: string) {
+  await store.updateUserRole(userId, role)
+}
 </script>
 
 <style scoped>
@@ -86,6 +125,65 @@ onMounted(() => {})
 .user-active { font-size: 9px; font-weight: 700; }
 .user-active.on { color: #FFFFFF; }
 .user-active:not(.on) { color: rgba(255,255,255,0.3); }
+
+.user-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.user-action-btn {
+  background: transparent;
+  border: 2px solid #FFFFFF;
+  color: #FFFFFF;
+  padding: 1px 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 8px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.user-action-btn:hover {
+  background: #FFFFFF;
+  color: #000;
+}
+
+.create-section {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 2px solid #FFFFFF;
+}
+
+.bw-input {
+  background: #000;
+  border: 2px solid #FFFFFF;
+  color: #FFFFFF;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  padding: 4px 6px;
+  width: 100%;
+  margin-bottom: 6px;
+}
+
+.bw-input::placeholder {
+  color: rgba(255,255,255,0.3);
+}
+
+.bw-btn {
+  background: transparent;
+  border: 2px solid #FFFFFF;
+  color: #FFFFFF;
+  padding: 4px 12px;
+  cursor: pointer;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  width: 100%;
+}
+
+.bw-btn:hover {
+  background: #FFFFFF;
+  color: #000;
+}
 
 .text-muted { color: rgba(255,255,255,0.5) !important; }
 </style>

@@ -5,6 +5,10 @@ description = "Cybermanju Drive — Quantum-resistant encrypted file manager"
 authors = ["Cybermanju Team"]
 edition = "2021"
 
+[features]
+default = ["onnx-face"]
+onnx-face = ["ort", "dirs"]
+
 [lib]
 name = "cybermanju_drive_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
@@ -70,7 +74,13 @@ rand_core = { version = "0.6", features = ["getrandom"] }
 jsonwebtoken = "9"
 # HTTP client (replaces curl subprocess calls) — use rustls to avoid OpenSSL cross-compilation issues on Android
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "multipart", "rustls-tls"] }
+# URL parsing
+url = "2"
 # Parallel iterators
 rayon = "1.10"
 # Robust directory traversal
 walkdir = "2.5"
+# ONNX Runtime for real ML face detection (optional — falls back to BLAKE3 pseudo-embeddings)
+ort = { version = "2.0", features = ["download-binaries", "ndarray"], optional = true }
+# System cache dir for ONNX model storage
+dirs = { version = "6", optional = true }

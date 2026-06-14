@@ -5,14 +5,17 @@
       <span class="sidebar-account-name">{{ store.activeAccount?.name || 'NO_ACCOUNT' }}</span>
     </div>
 
-    <div class="sidebar-tabs">
+    <div class="sidebar-tabs" role="tablist" aria-label="SIDEBAR SECTIONS">
       <button
         v-for="tab in sectionTabs"
         :key="tab.id"
         class="sidebar-tab"
         :class="{ active: store.sidebarSection === tab.id }"
         :title="tab.label"
-        @click="store.sidebarSection = tab.id as any; if (tab.id === 'landing') store.currentPanel = 'landing'"
+        :aria-label="tab.label"
+        :aria-selected="store.sidebarSection === tab.id ? 'true' : 'false'"
+        role="tab"
+        @click="store.sidebarSection = tab.id as SidebarSection; if (tab.id === 'landing') store.currentPanel = 'landing'"
       >
         <span class="tab-icon">{{ tab.icon }}</span>
         <span v-if="!store.sidebarCollapsed" class="tab-label">{{ tab.label }}</span>
@@ -30,13 +33,18 @@
         </div>
       </div>
 
-      <div v-if="store.sidebarSection === 'tree'" class="sidebar-section">
+      <div v-if="store.sidebarSection === 'tree'" class="sidebar-section"
+        @contextmenu.prevent="showTreeContextMenu($event)"
+      >
         <div class="section-header">FILE TREE</div>
         <div class="tree-container">
-          <div v-for="folder in rootFolders" :key="folder.id" class="tree-node-row" @click="store.selectFile(folder.id)">
-            <span class="tree-arrow">&gt;</span>
-            <span class="tree-name">{{ folder.name }}</span>
-          </div>
+          <TreeNode
+            v-for="folder in rootFolders"
+            :key="folder.id"
+            :node="folder"
+            :depth="0"
+            @select="store.selectFile"
+          />
           <div v-if="rootFolders.length === 0" class="empty-section text-muted">NO FOLDERS</div>
         </div>
       </div>
@@ -160,24 +168,43 @@
           <button class="bw-btn" style="width:100%;font-size:10px;" @click="store.currentPanel = 'dashboard'">[OPEN] DASHBOARD</button>
         </div>
       </div>
+
+      <div v-if="store.sidebarSection === 'tools'" class="sidebar-section">
+        <div class="section-header">TOOLS</div>
+        <div class="tools-list">
+          <button class="ql-item" @click="store.currentPanel = 'favorites'" aria-label="OPEN FAVORITES">[*] FAVORITES ({{ store.starredFiles.length }})</button>
+          <button class="ql-item" @click="store.currentPanel = 'recent'" aria-label="OPEN RECENT FILES">[T] RECENT FILES</button>
+          <button class="ql-item" @click="store.currentPanel = 'activity'" aria-label="OPEN ACTIVITY LOG">[~] ACTIVITY LOG</button>
+          <button class="ql-item" @click="store.currentPanel = 'storage'" aria-label="OPEN STORAGE DASHBOARD">[$] STORAGE</button>
+          <button class="ql-item" @click="store.currentPanel = 'settings'" aria-label="OPEN SETTINGS">[@] SETTINGS</button>
+          <button class="ql-item" @click="store.currentPanel = 'trash'" aria-label="OPEN TRASH">[%] TRASH</button>
+        </div>
+      </div>
     </div>
 
     <div v-if="!store.sidebarCollapsed" class="sidebar-bottom">
-      <button class="qa-btn" @click="store.fetchGeoFiles(); store.currentPanel = 'map'">[MAP]</button>
-      <button class="qa-btn" @click="store.fetchCollections(); store.sidebarSection = 'collections'">[COL]</button>
-      <button class="qa-btn" @click="store.detectFaces(store.selectedFileId || '')">[FACE]</button>
+      <button class="qa-btn" @click="store.fetchGeoFiles(); store.currentPanel = 'map'" aria-label="OPEN MAP VIEW">[MAP]</button>
+      <button class="qa-btn" @click="store.fetchCollections(); store.sidebarSection = 'collections'" aria-label="OPEN COLLECTIONS">[COL]</button>
+      <button class="qa-btn" @click="store.detectFaces(store.selectedFileId || '')" aria-label="DETECT FACES">[FACE]</button>
     </div>
 
-    <button class="collapse-btn" @click="store.sidebarCollapsed = !store.sidebarCollapsed">
+    <button class="collapse-btn" @click="store.sidebarCollapsed = !store.sidebarCollapsed" :aria-label="store.sidebarCollapsed ? 'EXPAND SIDEBAR' : 'COLLAPSE SIDEBAR'">
       <span style="display:inline-block;transform:rotate(store.sidebarCollapsed ? 0deg : 180deg)">^</span>
     </button>
+
+
   </aside>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { useContextMenu } from '@/composables/useContextMenu'
 import { isWebMode } from '@/composables/useTauri'
+import type { SidebarSection } from '@/types'
+import TreeNode from './TreeNode.vue'
+
+const ctx = useContextMenu()
 
 const store = useAppStore()
 
@@ -209,6 +236,7 @@ const sectionTabs = computed(() => {
     { id: 'sync', label: 'SYNC', icon: '[~]' },
     { id: 'users', label: 'USERS', icon: '[!]' },
     { id: 'dashboard', label: 'REMOTE', icon: '[@]' },
+    { id: 'tools', label: 'TOOLS', icon: '[@]' },
   )
   return tabs
 })
@@ -216,6 +244,10 @@ const sectionTabs = computed(() => {
 const rootFolders = computed(() =>
   store.files.filter(f => f.fileType === 'folder' && !f.parentId)
 )
+
+function showTreeContextMenu(e: MouseEvent) {
+  ctx.open(e, 'sidebar_bg')
+}
 </script>
 
 <style scoped>
@@ -506,4 +538,21 @@ const rootFolders = computed(() =>
 
 .text-muted { opacity: 0.6; color: #FFFFFF !important; }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 768px) {
+  .sidebar.collapsed {
+    width: 36px;
+    min-width: 36px;
+  }
+  .sidebar.collapsed .sidebar-tab {
+    padding: 4px 2px;
+  }
+}
+
+@media (min-width: 769px) and (max-width: 1024px) {
+  .sidebar.collapsed {
+    width: 40px;
+    min-width: 40px;
+  }
+}
 </style>

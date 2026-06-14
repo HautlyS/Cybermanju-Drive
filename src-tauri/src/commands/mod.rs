@@ -1,4 +1,6 @@
 pub mod accounts;
+pub mod audit;
+pub mod batch;
 pub mod collections;
 pub mod compression;
 pub mod dashboard;
@@ -8,5 +10,8 @@ pub mod files;
 pub mod import;
 pub mod map;
 pub mod search;
+pub mod share;
 pub mod sync;
+pub mod trash;
 pub mod users;
+pub mod versions;

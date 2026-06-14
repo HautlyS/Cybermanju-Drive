@@ -7,12 +7,17 @@ use crate::AppState;
 
 /// A file with GPS coordinates for map display.
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GeoFile {
-    pub file_id: String,
+    pub id: String,
     pub name: String,
+    #[serde(rename = "fileType")]
     pub file_type: String,
+    #[serde(rename = "gpsLat")]
     pub lat: f64,
+    #[serde(rename = "gpsLon")]
     pub lon: f64,
+    #[serde(rename = "thumbnailPath")]
     pub thumbnail_path: Option<String>,
 }
 
@@ -32,7 +37,7 @@ pub fn get_geo_files(state: State<'_, AppState>) -> Result<Vec<GeoFile>, String>
 
         if let (Some(lat), Some(lon)) = (file_node.gps_lat, file_node.gps_lon) {
             results.push(GeoFile {
-                file_id: file_node.id,
+                id: file_node.id,
                 name: file_node.name,
                 file_type: file_node.file_type,
                 lat,
@@ -47,6 +52,7 @@ pub fn get_geo_files(state: State<'_, AppState>) -> Result<Vec<GeoFile>, String>
 
 /// GPS coordinates extracted from EXIF data.
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GpsCoordinates {
     pub latitude: f64,
     pub longitude: f64,

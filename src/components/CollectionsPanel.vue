@@ -12,7 +12,15 @@
     </div>
 
     <div class="collections-list">
-      <div v-for="col in collections" :key="col.id" class="collection-card">
+      <div
+        v-for="col in collections"
+        :key="col.id"
+        class="collection-card"
+        :class="{ 'drop-target': dragOverCollectionId === col.id }"
+        @dragover.prevent="dragOverCollectionId = col.id"
+        @dragleave.prevent="dragOverCollectionId = null"
+        @drop.prevent="handleDrop(col.id)"
+      >
         <div class="col-header">
           <span class="col-name">{{ col.name }}</span>
           <span class="col-type text-muted">{{ col.collectionType }}</span>
@@ -45,11 +53,20 @@ const store = useAppStore()
 const collections = computed(() => store.collections)
 const newName = ref('')
 const newType = ref<CollectionType>('custom')
+const dragOverCollectionId = ref<string | null>(null)
 
 async function handleCreate() {
   if (!newName.value.trim()) return
   await store.createCollection(newName.value.trim(), newType.value, '#FFFFFF')
   newName.value = ''
+}
+
+function handleDrop(collectionId: string) {
+  dragOverCollectionId.value = null
+  const fileId = store.selectedFileId
+  if (fileId) {
+    store.addToCollection(collectionId, fileId)
+  }
 }
 </script>
 
@@ -100,6 +117,12 @@ async function handleCreate() {
 .collection-card {
   border: 2px solid #FFFFFF;
   padding: 10px;
+  transition: border-color 0.15s;
+}
+
+.collection-card.drop-target {
+  border-color: #FFFFFF;
+  background: rgba(255,255,255,0.1);
 }
 
 .col-header {

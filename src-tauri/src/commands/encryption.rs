@@ -8,6 +8,7 @@ use crate::AppState;
 
 /// Status returned when encrypting/decrypting a file.
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EncryptionStatus {
     pub file_id: String,
     pub encrypted: bool,

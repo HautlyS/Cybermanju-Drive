@@ -29,6 +29,7 @@ pub struct SearchResult {
 pub struct SearchRequest {
     pub query: String,
     pub limit: Option<usize>,
+    pub offset: Option<usize>,
 }
 
 /// Search suggestion
@@ -316,7 +317,8 @@ impl SearchIndex {
         let query = query_parser.parse_query(&request.query)?;
 
         let limit = request.limit.unwrap_or(50);
-        let top_docs = searcher.search(&query, &TopDocs::with_limit(limit))?;
+        let offset = request.offset.unwrap_or(0);
+        let top_docs = searcher.search(&query, &TopDocs::with_limit(limit).and_offset(offset))?;
 
         let results = top_docs
             .iter()

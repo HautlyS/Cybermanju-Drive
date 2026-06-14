@@ -6,8 +6,21 @@
         <h2 class="panel-title">GEOGRAPHY VIEW</h2>
       </div>
       <div class="header-actions">
+        <button class="refresh-btn" @click="toggleFullscreen" title="FULLSCREEN (F)">[F]</button>
+        <button class="refresh-btn" :class="{ active: mapStyle === 'satellite' }" @click="toggleMapStyle" title="TOGGLE MAP STYLE">[{{ mapStyle === 'satellite' ? 'SAT' : 'OSM' }}]</button>
         <button class="refresh-btn" @click="handleRefresh" title="REFRESH">[R]</button>
       </div>
+    </div>
+
+    <div class="search-location-bar">
+      <input
+        v-model="locationQuery"
+        class="loc-search-input"
+        placeholder="SEARCH LOCATION (E.G. TOKYO, 35.68,139.76)..."
+        @keyup.enter="handleLocationSearch"
+        aria-label="SEARCH LOCATION"
+      />
+      <button class="refresh-btn" @click="handleLocationSearch" title="SEARCH">[G]</button>
     </div>
 
     <div class="map-container" v-if="geoMarkers.length > 0">
@@ -57,8 +70,11 @@ const emit = defineEmits<{ close: [] }>()
 const geoMarkers = computed(() => store.geoMarkers)
 const isLoading = computed(() => store.isLoading)
 const mapContainer = ref<HTMLDivElement | null>(null)
+const locationQuery = ref('')
+const mapStyle = ref<'osm' | 'satellite'>('osm')
 
 let map: any = null
+let maplibreglModule: any = null
 let markers: any[] = []
 
 onMounted(async () => {
@@ -81,23 +97,76 @@ watch(geoMarkers, async (newMarkers) => {
 async function initMap() {
   if (!mapContainer.value || map) return
   try {
-    const maplibregl = await import('maplibre-gl')
+    maplibreglModule = await import('maplibre-gl')
     const center = getMapCenter()
-    map = new maplibregl.Map({
+    map = new maplibreglModule.Map({
       container: mapContainer.value,
-      style: {
-        version: 8,
-        sources: {
-          osm: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '&copy; OpenStreetMap contributors' },
-        },
-        layers: [{ id: 'osm', type: 'raster', source: 'osm' }],
-      },
+      style: getMapStyle(),
       center: [center.lng, center.lat],
       zoom: center.zoom,
       attributionControl: false,
     })
     map.on('load', () => addMarkers())
   } catch (e) { console.warn('MapLibre GL failed:', e) }
+}
+
+function getMapStyle() {
+  if (mapStyle.value === 'satellite') {
+    return {
+      version: 8,
+      sources: {
+        satellite: { type: 'raster', tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, attribution: '&copy; Esri' },
+        labels: { type: 'raster', tiles: ['https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, attribution: '&copy; Esri' },
+      },
+      layers: [
+        { id: 'satellite', type: 'raster', source: 'satellite' },
+        { id: 'labels', type: 'raster', source: 'labels' },
+      ],
+    }
+  }
+  return {
+    version: 8,
+    sources: {
+      osm: { type: 'raster', tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], tileSize: 256, attribution: '&copy; OpenStreetMap contributors' },
+    },
+    layers: [{ id: 'osm', type: 'raster', source: 'osm' }],
+  }
+}
+
+function toggleMapStyle() {
+  mapStyle.value = mapStyle.value === 'osm' ? 'satellite' : 'osm'
+  if (map) {
+    destroyMap()
+    setTimeout(() => initMap(), 100)
+  }
+}
+
+function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen()
+  } else {
+    document.exitFullscreen()
+  }
+}
+
+async function handleLocationSearch() {
+  const q = locationQuery.value.trim()
+  if (!q) return
+  const coordsMatch = q.match(/^(-?\d+\.?\d*)\s*[,;]\s*(-?\d+\.?\d*)$/)
+  if (coordsMatch) {
+    const lat = parseFloat(coordsMatch[1])
+    const lng = parseFloat(coordsMatch[2])
+    if (map) map.flyTo({ center: [lng, lat], zoom: 12, essential: true })
+    return
+  }
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=1`)
+    const data = await res.json()
+    if (data && data.length > 0) {
+      const { lat, lon } = data[0]
+      if (map) map.flyTo({ center: [parseFloat(lon), parseFloat(lat)], zoom: 12, essential: true })
+    }
+  } catch {}
 }
 
 function destroyMap() {
@@ -132,7 +201,7 @@ function addMarkers() {
     el.style.cssText = 'width:16px;height:16px;border:2px solid #000;background:#fff;cursor:pointer;'
     el.addEventListener('mouseenter', () => { el.style.transform = 'scale(1.4)' })
     el.addEventListener('mouseleave', () => { el.style.transform = 'scale(1)' })
-    const m = new (map as any).Marker({ element: el }).setLngLat([marker.lng, marker.lat]).addTo(map)
+    const m = new maplibreglModule!.Marker({ element: el }).setLngLat([marker.lng, marker.lat]).addTo(map)
     markers.push(m)
   })
 }
@@ -191,6 +260,26 @@ async function handleRefresh() { await store.fetchGeoFiles() }
 
 .header-actions { display: flex; gap: 6px; }
 
+.search-location-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.loc-search-input {
+  flex: 1;
+  background: #000;
+  border: 2px solid #FFFFFF;
+  color: #FFFFFF;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  padding: 4px 8px;
+}
+
+.loc-search-input::placeholder {
+  color: rgba(255,255,255,0.3);
+}
+
 .refresh-btn {
   background: #000;
   border: 2px solid #FFFFFF;
@@ -203,6 +292,7 @@ async function handleRefresh() { await store.fetchGeoFiles() }
 }
 
 .refresh-btn:hover { background: #FFFFFF; color: #000; }
+.refresh-btn.active { background: #FFFFFF; color: #000; }
 
 .map-container {
   width: 100%;

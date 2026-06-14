@@ -10,10 +10,15 @@
     <div class="section">
       <h3 class="section-title">[STATUS] DASHBOARD STATUS</h3>
       <div class="status-card">
-        <div class="s-row"><span class="s-key text-muted">STATUS</span><span class="s-value">{{ dashboardStatus.running ? 'RUNNING' : 'STOPPED' }}</span></div>
-        <div class="s-row"><span class="s-key text-muted">PORT</span><span class="s-value">{{ dashboardStatus.port }}</span></div>
-        <div class="s-row"><span class="s-key text-muted">URL</span><span class="s-value mono">{{ dashboardStatus.url }}</span></div>
-        <div class="s-row"><span class="s-key text-muted">CONNECTIONS</span><span class="s-value">{{ dashboardStatus.activeConnections }}</span></div>
+        <div class="s-row"><span class="s-key text-muted">STATUS</span><span class="s-value">{{ store.dashboardStatus.running ? 'RUNNING' : 'STOPPED' }}</span></div>
+        <div class="s-row"><span class="s-key text-muted">PORT</span><span class="s-value">{{ store.dashboardStatus.port }}</span></div>
+        <div class="s-row"><span class="s-key text-muted">URL</span><span class="s-value mono">{{ store.dashboardStatus.url }}</span></div>
+        <div class="s-row"><span class="s-key text-muted">CONNECTIONS</span><span class="s-value">{{ store.dashboardStatus.activeConnections }}</span></div>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:8px;">
+        <button class="bw-btn" style="flex:1;" @click="store.startDashboard()" :disabled="store.dashboardStatus.running">[START]</button>
+        <button class="bw-btn" style="flex:1;" @click="store.stopDashboard()" :disabled="!store.dashboardStatus.running">[STOP]</button>
+        <button class="bw-btn" style="flex:1;" @click="store.fetchDashboardStatus()">[REFRESH]</button>
       </div>
     </div>
 
@@ -30,18 +35,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
 import type { DashboardStatus, ApiEndpoint } from '@/types'
 
 const store = useAppStore()
-
-const dashboardStatus = ref<DashboardStatus>({
-  running: false,
-  port: 3456,
-  url: 'HTTP://LOCALHOST:3456',
-  activeConnections: 0,
-})
 
 const apiEndpoints = ref<ApiEndpoint[]>([
   { method: 'GET', path: '/api/files', description: 'LIST FILES' },
@@ -52,6 +50,10 @@ const apiEndpoints = ref<ApiEndpoint[]>([
   { method: 'GET', path: '/api/face-groups', description: 'LIST FACE GROUPS' },
   { method: 'GET', path: '/api/encryption/status', description: 'ENCRYPTION STATUS' },
 ])
+
+onMounted(() => {
+  store.fetchDashboardStatus()
+})
 </script>
 
 <style scoped>

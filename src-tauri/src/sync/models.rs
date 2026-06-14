@@ -118,6 +118,8 @@ pub struct SyncConfig {
     pub create_previews: bool,
     pub delete_raw_after_sync: bool,
     pub max_concurrent_uploads: u32,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
 }
 
 /// Live progress of a sync operation

@@ -15,8 +15,8 @@ pub mod web_dashboard;
 use commands::faces as face_cmd;
 use commands::sync as sync_cmd;
 use commands::{
-    accounts, collections, dashboard, encryption, files, import as import_cmd, map,
-    search as search_cmd, users,
+    accounts, audit, batch, collections, dashboard, encryption, files, import as import_cmd, map,
+    search as search_cmd, share, trash, users, versions,
 };
 use db::Database;
 use std::sync::{Arc, RwLock};
@@ -118,6 +118,7 @@ pub fn run() {
             files::get_preview,
             // Search
             search_cmd::search_files,
+            search_cmd::search_files_paginated,
             search_cmd::suggest,
             // Encryption
             encryption::encrypt_file,
@@ -161,6 +162,9 @@ pub fn run() {
             files::list_loose_groups,
             // User management & permissions
             users::register_user,
+            users::create_user,
+            users::delete_user,
+            users::update_user_role,
             users::authenticate_user,
             users::list_users,
             users::set_file_permission,
@@ -184,9 +188,32 @@ pub fn run() {
             sync_cmd::list_remote_files,
             // File import / upload
             import_cmd::import_file,
+            import_cmd::import_from_url,
             import_cmd::scan_directory,
             import_cmd::upload_file,
             import_cmd::rebuild_search_index,
+            // Share links
+            share::generate_share_link,
+            share::get_shared_file,
+            share::list_share_links,
+            // Trash / recycle bin
+            trash::list_trash,
+            trash::restore_from_trash,
+            trash::empty_trash,
+            trash::delete_from_trash,
+            // Audit log
+            audit::get_audit_log,
+            // Batch operations
+            batch::batch_delete,
+            batch::batch_encrypt,
+            batch::batch_compress,
+            // File versioning
+            versions::list_file_versions,
+            versions::create_file_version,
+            versions::revert_file_version,
+            versions::snapshot_all_versions,
+            // Parent index rebuild
+            files::rebuild_parent_index,
         ])
         .run(tauri::generate_context!())
         .expect("Fatal error while running Cybermanju Drive — see logs above");

@@ -1,14 +1,16 @@
 // Cybermanju Drive — Pinia Store
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { invoke } from '@/composables/useTauri'
+import { useNotifications } from '@/composables/useNotifications'
 import type {
   FileNode, Account, Collection, FaceGroup, LooseGroup,
   SearchResult, EncryptionStatus, EncryptionKeyInfo,
   CompressionStats, ParseResult, GeoMarker,
   ViewMode, PanelType, SidebarSection,
   SyncConfig, SyncProgress, SyncResult, RemoteFile,
-  AuthResult, ModuleInfo,
+  AuthResult, ModuleInfo, TrashItem, AuditEntry, FileVersion, User,
+  DashboardStatus,
 } from '@/types'
 import { MODULE_METADATA } from '@/types'
 import { setAuthToken } from '@/composables/useTauri'
@@ -30,6 +32,9 @@ export const useAppStore = defineStore('cybermanju', () => {
   const faceGroups = ref<FaceGroup[]>([])
   const looseGroups = ref<LooseGroup[]>([])
   const searchResults = ref<SearchResult[]>([])
+  const searchPage = ref(0)
+  const searchTotalResults = ref(0)
+  const searchPageSize = 20
   const geoMarkers = ref<GeoMarker[]>([])
 
   // ── Encryption State ──────────────────────────────────────
@@ -38,6 +43,24 @@ export const useAppStore = defineStore('cybermanju', () => {
 
   // ── Compression State ─────────────────────────────────────
   const compressionStats = ref<CompressionStats | null>(null)
+
+  // ── Trash State ────────────────────────────────────────────
+  const trashItems = ref<TrashItem[]>([])
+  const showTrashPanel = ref(false)
+
+  // ── Audit State ────────────────────────────────────────────
+  const auditLog = ref<AuditEntry[]>([])
+
+  // ── Versions State ─────────────────────────────────────────
+  const fileVersions = ref<FileVersion[]>([])
+
+  // ── Dashboard State ─────────────────────────────────────────
+  const dashboardStatus = ref<DashboardStatus>({
+    running: false,
+    port: 3456,
+    url: 'http://localhost:3456',
+    activeConnections: 0,
+  })
 
   // ── Sync State ────────────────────────────────────────────
   const syncConfigs = ref<SyncConfig[]>([])
@@ -52,6 +75,9 @@ export const useAppStore = defineStore('cybermanju', () => {
   const isAuthenticated = computed(() => !!currentUser.value)
   const showLoginPopup = ref(false)
 
+  // ── User Management State ──────────────────────────────────
+  const users = ref<User[]>([])
+
   // ── Transition State ──────────────────────────────────────
   const previousPanel = ref<PanelType | null>(null)
   const isTransitioning = ref(false)
@@ -64,11 +90,18 @@ export const useAppStore = defineStore('cybermanju', () => {
   const matrixRainEnabled = ref(true)
   const showEncryptionPanel = ref(false)
   const showCompressionPanel = ref(false)
+  const showPermissionsPanel = ref(false)
   const commandPaletteOpen = ref(false)
+  const showShortcutsHelp = ref(false)
+  const createFolderPromptOpen = ref(false)
+  const autoRefreshInterval = ref(0)
+  let autoRefreshTimer: ReturnType<typeof setInterval> | null = null
+  const selectedFileIds = ref<string[]>([])
+  const isMultiSelect = ref(false)
 
   // ── Module Helpers ─────────────────────────────────────────
   const currentModule = computed<ModuleInfo>(() =>
-    MODULE_METADATA[showEncryptionPanel.value ? 'encryption' : showCompressionPanel.value ? 'compression' : currentPanel.value] || MODULE_METADATA.files
+    MODULE_METADATA[(showEncryptionPanel.value ? 'encryption' : showCompressionPanel.value ? 'compression' : currentPanel.value) as PanelType] || MODULE_METADATA.files
   )
 
   // ── Computed ──────────────────────────────────────────────
@@ -100,11 +133,17 @@ export const useAppStore = defineStore('cybermanju', () => {
     files.value.filter(f => f.parentId === selectedFileId.value || (selectedFileId.value === null && !f.parentId))
   )
 
-  // ── Error Helper ──────────────────────────────────────────
-  function setError(msg: string, error: unknown) {
+  const { notify } = useNotifications()
+
+  function notifyError(msg: string, error: unknown) {
     const detail = error instanceof Error ? error.message : String(error)
     lastError.value = `${msg}: ${detail}`
+    notify('error', lastError.value)
     console.error(lastError.value)
+  }
+
+  function notifySuccess(msg: string) {
+    notify('success', msg)
   }
 
   function clearError() {
@@ -126,10 +165,30 @@ export const useAppStore = defineStore('cybermanju', () => {
         listKeys(),
         fetchSyncConfigs(),
       ])
+      startAutoRefresh()
     } finally {
       isLoading.value = false
     }
   }
+
+  function startAutoRefresh() {
+    if (autoRefreshTimer) clearInterval(autoRefreshTimer)
+    if (autoRefreshInterval.value > 0) {
+      autoRefreshTimer = setInterval(async () => {
+        await Promise.allSettled([
+          fetchFiles(),
+          fetchAccounts(),
+          fetchCollections(),
+          fetchFaceGroups(),
+          fetchEncryptionStatus(),
+          fetchSyncConfigs(),
+          fetchTrashItems(),
+        ])
+      }, autoRefreshInterval.value * 1000)
+    }
+  }
+
+  watch(autoRefreshInterval, () => startAutoRefresh())
 
   // ── Actions: Selection ────────────────────────────────────
   function selectFile(fileId: string | null) {
@@ -152,7 +211,7 @@ export const useAppStore = defineStore('cybermanju', () => {
       const result = await invoke<FileNode[]>('list_files', { parentPath: path })
       files.value = result
     } catch (e) {
-      setError('Failed to fetch files', e)
+      notifyError('Failed to fetch files', e)
     } finally {
       isLoading.value = false
     }
@@ -162,7 +221,7 @@ export const useAppStore = defineStore('cybermanju', () => {
     try {
       return await invoke<FileNode>('get_file', { fileId })
     } catch (e) {
-      setError('Failed to get file', e)
+      notifyError('Failed to get file', e)
       return null
     }
   }
@@ -172,7 +231,7 @@ export const useAppStore = defineStore('cybermanju', () => {
       await invoke('create_folder', { name, parentId })
       await fetchFiles()
     } catch (e) {
-      setError('Failed to create folder', e)
+      notifyError('Failed to create folder', e)
     }
   }
 
@@ -181,8 +240,10 @@ export const useAppStore = defineStore('cybermanju', () => {
       await invoke('delete_file', { fileId })
       files.value = files.value.filter(f => f.id !== fileId)
       if (selectedFileId.value === fileId) selectedFileId.value = null
+      selectedFileIds.value = selectedFileIds.value.filter(id => id !== fileId)
+      notifySuccess(`File deleted`)
     } catch (e) {
-      setError('Failed to delete file', e)
+      notifyError('Failed to delete file', e)
     }
   }
 
@@ -190,8 +251,9 @@ export const useAppStore = defineStore('cybermanju', () => {
     try {
       await invoke('rename_file', { fileId, newName })
       await fetchFiles()
+      notifySuccess('File renamed')
     } catch (e) {
-      setError('Failed to rename file', e)
+      notifyError('Failed to rename file', e)
     }
   }
 
@@ -199,22 +261,49 @@ export const useAppStore = defineStore('cybermanju', () => {
     try {
       await invoke('duplicate_file_context', { fileId })
       await fetchFiles()
+      notifySuccess('File context duplicated')
     } catch (e) {
-      setError('Failed to duplicate file', e)
+      notifyError('Failed to duplicate file', e)
     }
   }
 
   // ── Actions: Search ───────────────────────────────────────
-  async function searchFiles(query: string) {
-    if (!query.trim()) { searchResults.value = []; return }
+  async function searchFiles(query: string, page?: number) {
+    if (!query.trim()) { searchResults.value = []; searchTotalResults.value = 0; return }
     isSearching.value = true
     clearError()
     try {
-      searchResults.value = await invoke<SearchResult[]>('search_files', { query, limit: 50 })
-    } catch (e) {
-      setError('Search failed', e)
+      const pg = page ?? 0
+      const limit = searchPageSize
+      const result = await invoke<{ results: SearchResult[]; total: number }>('search_files_paginated', { query, limit, offset: pg * limit })
+      if (pg === 0) {
+        searchResults.value = result.results
+      } else {
+        searchResults.value = [...searchResults.value, ...result.results]
+      }
+      searchTotalResults.value = result.total
+      searchPage.value = pg
+    } catch {
+      try {
+        const result = await invoke<SearchResult[]>('search_files', { query, limit: 50 })
+        if (page && page > 0) {
+          searchResults.value = [...searchResults.value, ...result]
+        } else {
+          searchResults.value = result
+        }
+        searchTotalResults.value = result.length
+        searchPage.value = page ?? 0
+      } catch (e) {
+        notifyError('Search failed', e)
+      }
     } finally {
       isSearching.value = false
+    }
+  }
+
+  function loadMoreSearchResults() {
+    if (searchQuery.value.trim()) {
+      searchFiles(searchQuery.value, searchPage.value + 1)
     }
   }
 
@@ -223,7 +312,7 @@ export const useAppStore = defineStore('cybermanju', () => {
     try {
       encryptionStatus.value = await invoke<EncryptionStatus>('get_encryption_status')
     } catch (e) {
-      setError('Failed to get encryption status', e)
+      notifyError('Failed to get encryption status', e)
     }
   }
 
@@ -233,7 +322,7 @@ export const useAppStore = defineStore('cybermanju', () => {
       await listKeys()
       await fetchEncryptionStatus()
     } catch (e) {
-      setError('Failed to generate keypair', e)
+      notifyError('Failed to generate keypair', e)
     }
   }
 
@@ -241,7 +330,7 @@ export const useAppStore = defineStore('cybermanju', () => {
     try {
       encryptionKeys.value = await invoke<EncryptionKeyInfo[]>('list_keys')
     } catch (e) {
-      setError('Failed to list keys', e)
+      notifyError('Failed to list keys', e)
     }
   }
 
@@ -251,7 +340,7 @@ export const useAppStore = defineStore('cybermanju', () => {
       await fetchFiles()
       await fetchEncryptionStatus()
     } catch (e) {
-      setError('Encryption failed', e)
+      notifyError('Encryption failed', e)
     }
   }
 
@@ -261,7 +350,7 @@ export const useAppStore = defineStore('cybermanju', () => {
       await fetchFiles()
       await fetchEncryptionStatus()
     } catch (e) {
-      setError('Decryption failed', e)
+      notifyError('Decryption failed', e)
     }
   }
 
@@ -272,7 +361,7 @@ export const useAppStore = defineStore('cybermanju', () => {
       compressionStats.value = stats
       await fetchFiles()
     } catch (e) {
-      setError('Compression failed', e)
+      notifyError('Compression failed', e)
     }
   }
 
@@ -282,7 +371,7 @@ export const useAppStore = defineStore('cybermanju', () => {
       compressionStats.value = stats
       await fetchFiles()
     } catch (e) {
-      setError('Decompression failed', e)
+      notifyError('Decompression failed', e)
     }
   }
 
@@ -291,7 +380,7 @@ export const useAppStore = defineStore('cybermanju', () => {
     try {
       collections.value = await invoke<Collection[]>('list_collections')
     } catch (e) {
-      setError('Failed to fetch collections', e)
+      notifyError('Failed to fetch collections', e)
     }
   }
 
@@ -300,7 +389,7 @@ export const useAppStore = defineStore('cybermanju', () => {
       await invoke('create_collection', { name, collectionType: type, color, description })
       await fetchCollections()
     } catch (e) {
-      setError('Failed to create collection', e)
+      notifyError('Failed to create collection', e)
     }
   }
 
@@ -309,7 +398,7 @@ export const useAppStore = defineStore('cybermanju', () => {
       await invoke('add_to_collection', { collectionId, fileId, note })
       await fetchCollections()
     } catch (e) {
-      setError('Failed to add to collection', e)
+      notifyError('Failed to add to collection', e)
     }
   }
 
@@ -318,7 +407,7 @@ export const useAppStore = defineStore('cybermanju', () => {
       await invoke('remove_from_collection', { collectionId, fileId })
       await fetchCollections()
     } catch (e) {
-      setError('Failed to remove from collection', e)
+      notifyError('Failed to remove from collection', e)
     }
   }
 
@@ -327,7 +416,7 @@ export const useAppStore = defineStore('cybermanju', () => {
     try {
       faceGroups.value = await invoke<FaceGroup[]>('list_face_groups')
     } catch (e) {
-      setError('Failed to fetch face groups', e)
+      notifyError('Failed to fetch face groups', e)
     }
   }
 
@@ -336,7 +425,7 @@ export const useAppStore = defineStore('cybermanju', () => {
       await invoke('detect_faces', { fileId })
       await fetchFaceGroups()
     } catch (e) {
-      setError('Face detection failed', e)
+      notifyError('Face detection failed', e)
     }
   }
 
@@ -346,7 +435,7 @@ export const useAppStore = defineStore('cybermanju', () => {
       await fetchFaceGroups()
       return result
     } catch (e) {
-      setError('Batch face detection failed', e)
+      notifyError('Batch face detection failed', e)
       return null
     }
   }
@@ -357,7 +446,7 @@ export const useAppStore = defineStore('cybermanju', () => {
       await fetchFaceGroups()
       return result
     } catch (e) {
-      setError('Re-clustering failed', e)
+      notifyError('Re-clustering failed', e)
       return null
     }
   }
@@ -367,7 +456,7 @@ export const useAppStore = defineStore('cybermanju', () => {
       await invoke('rename_face_group', { groupId, newName })
       await fetchFaceGroups()
     } catch (e) {
-      setError('Failed to rename face group', e)
+      notifyError('Failed to rename face group', e)
     }
   }
 
@@ -376,7 +465,7 @@ export const useAppStore = defineStore('cybermanju', () => {
       await invoke('merge_face_groups', { sourceGroupId, targetGroupId })
       await fetchFaceGroups()
     } catch (e) {
-      setError('Failed to merge face groups', e)
+      notifyError('Failed to merge face groups', e)
     }
   }
 
@@ -385,7 +474,7 @@ export const useAppStore = defineStore('cybermanju', () => {
       await invoke('delete_face_group', { groupId })
       await fetchFaceGroups()
     } catch (e) {
-      setError('Failed to delete face group', e)
+      notifyError('Failed to delete face group', e)
     }
   }
 
@@ -393,7 +482,7 @@ export const useAppStore = defineStore('cybermanju', () => {
     try {
       return await invoke<FaceGroup[]>('find_similar_faces', { groupId, threshold })
     } catch (e) {
-      setError('Failed to find similar faces', e)
+      notifyError('Failed to find similar faces', e)
       return []
     }
   }
@@ -405,7 +494,7 @@ export const useAppStore = defineStore('cybermanju', () => {
       const active = accounts.value.find(a => a.isActive)
       if (active) activeAccountId.value = active.id
     } catch (e) {
-      setError('Failed to fetch accounts', e)
+      notifyError('Failed to fetch accounts', e)
     }
   }
 
@@ -414,7 +503,7 @@ export const useAppStore = defineStore('cybermanju', () => {
       await invoke('create_account', { name, accountType: type, path, color })
       await fetchAccounts()
     } catch (e) {
-      setError('Failed to create account', e)
+      notifyError('Failed to create account', e)
     }
   }
 
@@ -424,7 +513,7 @@ export const useAppStore = defineStore('cybermanju', () => {
       activeAccountId.value = accountId
       await fetchAccounts()
     } catch (e) {
-      setError('Failed to switch account', e)
+      notifyError('Failed to switch account', e)
     }
   }
 
@@ -441,7 +530,7 @@ export const useAppStore = defineStore('cybermanju', () => {
           lng: f.gpsLon!,
         }))
     } catch (e) {
-      setError('Failed to fetch geo files', e)
+      notifyError('Failed to fetch geo files', e)
     }
   }
 
@@ -450,7 +539,7 @@ export const useAppStore = defineStore('cybermanju', () => {
     try {
       parseResult.value = await invoke<ParseResult>('parse_file', { filePath })
     } catch (e) {
-      setError('Parse failed', e)
+      notifyError('Parse failed', e)
     }
   }
 
@@ -459,7 +548,7 @@ export const useAppStore = defineStore('cybermanju', () => {
     try {
       looseGroups.value = await invoke<LooseGroup[]>('list_loose_groups')
     } catch (e) {
-      setError('Failed to fetch loose groups', e)
+      notifyError('Failed to fetch loose groups', e)
     }
   }
 
@@ -468,7 +557,7 @@ export const useAppStore = defineStore('cybermanju', () => {
     try {
       syncConfigs.value = await invoke<SyncConfig[]>('list_sync_configs')
     } catch (e) {
-      setError('Failed to fetch sync configs', e)
+      notifyError('Failed to fetch sync configs', e)
     }
   }
 
@@ -477,7 +566,7 @@ export const useAppStore = defineStore('cybermanju', () => {
       await invoke('create_sync_config', { config })
       await fetchSyncConfigs()
     } catch (e) {
-      setError('Failed to create sync config', e)
+      notifyError('Failed to create sync config', e)
     }
   }
 
@@ -486,7 +575,7 @@ export const useAppStore = defineStore('cybermanju', () => {
       await invoke('delete_sync_config', { configId })
       await fetchSyncConfigs()
     } catch (e) {
-      setError('Failed to delete sync config', e)
+      notifyError('Failed to delete sync config', e)
     }
   }
 
@@ -495,7 +584,7 @@ export const useAppStore = defineStore('cybermanju', () => {
       await invoke('start_sync', { configId, fileIds })
       await pollSyncProgress()
     } catch (e) {
-      setError('Failed to start sync', e)
+      notifyError('Failed to start sync', e)
     }
   }
 
@@ -509,7 +598,7 @@ export const useAppStore = defineStore('cybermanju', () => {
         setTimeout(() => pollSyncProgress(), 1000)
       }
     } catch (e) {
-      setError('Failed to get sync progress', e)
+      notifyError('Failed to get sync progress', e)
     }
   }
 
@@ -517,7 +606,7 @@ export const useAppStore = defineStore('cybermanju', () => {
     try {
       syncProgress.value = await invoke<SyncProgress>('get_sync_progress')
     } catch (e) {
-      setError('Failed to get sync progress', e)
+      notifyError('Failed to get sync progress', e)
     }
   }
 
@@ -525,7 +614,7 @@ export const useAppStore = defineStore('cybermanju', () => {
     try {
       return await invoke<boolean>('test_sync_connection', { config })
     } catch (e) {
-      setError('Sync connection test failed', e)
+      notifyError('Sync connection test failed', e)
       return false
     }
   }
@@ -535,7 +624,7 @@ export const useAppStore = defineStore('cybermanju', () => {
       await invoke('cancel_sync')
       syncProgress.value = null
     } catch (e) {
-      setError('Failed to cancel sync', e)
+      notifyError('Failed to cancel sync', e)
     }
   }
 
@@ -543,8 +632,242 @@ export const useAppStore = defineStore('cybermanju', () => {
     try {
       return await invoke<RemoteFile[]>('list_remote_files', { config, prefix })
     } catch (e) {
-      setError('Failed to list remote files', e)
+      notifyError('Failed to list remote files', e)
       return []
+    }
+  }
+
+  // ── Actions: Trash ─────────────────────────────────────────
+  async function fetchTrashItems() {
+    try {
+      trashItems.value = await invoke<TrashItem[]>('list_trash')
+    } catch (e) {
+      notifyError('Failed to fetch trash', e)
+    }
+  }
+
+  async function restoreTrashItem(fileId: string) {
+    try {
+      await invoke('restore_from_trash', { fileId })
+      await fetchTrashItems()
+      await fetchFiles()
+      notifySuccess('File restored from trash')
+    } catch (e) {
+      notifyError('Failed to restore file', e)
+    }
+  }
+
+  async function emptyTrash() {
+    try {
+      const count = await invoke<number>('empty_trash')
+      trashItems.value = []
+      notifySuccess(`Permanently deleted ${count} items`)
+    } catch (e) {
+      notifyError('Failed to empty trash', e)
+    }
+  }
+
+  async function deleteFromTrash(fileId: string) {
+    try {
+      await invoke('delete_from_trash', { fileId })
+      await fetchTrashItems()
+      notifySuccess('File permanently deleted')
+    } catch (e) {
+      notifyError('Failed to delete from trash', e)
+    }
+  }
+
+  // ── Actions: Audit Log ─────────────────────────────────────
+  async function fetchAuditLog(limit?: number, entityType?: string) {
+    try {
+      auditLog.value = await invoke<AuditEntry[]>('get_audit_log', { limit, entityType })
+    } catch (e) {
+      notifyError('Failed to fetch audit log', e)
+    }
+  }
+
+  // ── Actions: File Versions ─────────────────────────────────
+  async function fetchFileVersions(fileId: string) {
+    try {
+      fileVersions.value = await invoke<FileVersion[]>('list_file_versions', { fileId })
+    } catch (e) {
+      notifyError('Failed to fetch file versions', e)
+    }
+  }
+
+  async function createVersion(fileId: string) {
+    try {
+      await invoke('create_file_version', { fileId })
+      await fetchFileVersions(fileId)
+      notifySuccess('Version snapshot created')
+    } catch (e) {
+      notifyError('Failed to create version', e)
+    }
+  }
+
+  async function revertToVersion(fileId: string, versionId: string) {
+    try {
+      await invoke('revert_file_version', { fileId, versionId })
+      await fetchFileVersions(fileId)
+      await fetchFiles()
+      notifySuccess('File reverted to version')
+    } catch (e) {
+      notifyError('Failed to revert file version', e)
+    }
+  }
+
+  async function snapshotAllVersions() {
+    try {
+      const count = await invoke<number>('snapshot_all_versions')
+      notifySuccess(`Snapshotted ${count} files`)
+    } catch (e) {
+      notifyError('Failed to snapshot all versions', e)
+    }
+  }
+
+  // ── Actions: Dashboard Status ───────────────────────────────
+  async function fetchDashboardStatus() {
+    try {
+      dashboardStatus.value = await invoke<DashboardStatus>('dashboard_status')
+    } catch (e) {
+      notifyError('Failed to fetch dashboard status', e)
+    }
+  }
+
+  async function startDashboard() {
+    try {
+      const result = await invoke<DashboardStatus>('start_dashboard')
+      dashboardStatus.value = result
+      notifySuccess('Dashboard started')
+    } catch (e) {
+      notifyError('Failed to start dashboard', e)
+    }
+  }
+
+  async function stopDashboard() {
+    try {
+      await invoke<boolean>('stop_dashboard')
+      dashboardStatus.value = { running: false, port: 3456, url: 'http://localhost:3456', activeConnections: 0 }
+      notifySuccess('Dashboard stopped')
+    } catch (e) {
+      notifyError('Failed to stop dashboard', e)
+    }
+  }
+
+  // ── Actions: User Management ───────────────────────────────
+  async function fetchUsers() {
+    try {
+      users.value = await invoke<User[]>('list_users')
+    } catch (e) {
+      notifyError('Failed to fetch users', e)
+    }
+  }
+
+  async function createUser(username: string, password: string, role: string) {
+    try {
+      await invoke('create_user', { username, password, role })
+      await fetchUsers()
+      notifySuccess(`User '${username}' created`)
+    } catch (e) {
+      notifyError('Failed to create user', e)
+    }
+  }
+
+  async function deleteUser(userId: string) {
+    try {
+      await invoke('delete_user', { userId })
+      await fetchUsers()
+      notifySuccess('User deleted')
+    } catch (e) {
+      notifyError('Failed to delete user', e)
+    }
+  }
+
+  async function updateUserRole(userId: string, role: string) {
+    try {
+      await invoke('update_user_role', { userId, role })
+      await fetchUsers()
+      notifySuccess('User role updated')
+    } catch (e) {
+      notifyError('Failed to update user role', e)
+    }
+  }
+
+  // ── Actions: Batch Operations ──────────────────────────────
+  async function batchDeleteFiles(fileIds: string[]) {
+    try {
+      const count = await invoke<number>('batch_delete', { fileIds })
+      await fetchFiles()
+      notifySuccess(`Batch deleted ${count} files`)
+    } catch (e) {
+      notifyError('Batch delete failed', e)
+    }
+  }
+
+  async function batchEncryptFiles(fileIds: string[], algorithm: string) {
+    try {
+      const count = await invoke<number>('batch_encrypt', { fileIds, algorithm })
+      await fetchFiles()
+      notifySuccess(`Batch encrypted ${count} files`)
+    } catch (e) {
+      notifyError('Batch encrypt failed', e)
+    }
+  }
+
+  async function batchCompressFiles(fileIds: string[], layer: string) {
+    try {
+      const count = await invoke<number>('batch_compress', { fileIds, layer })
+      await fetchFiles()
+      notifySuccess(`Batch compressed ${count} files`)
+    } catch (e) {
+      notifyError('Batch compress failed', e)
+    }
+  }
+
+  // ── Actions: Share Links ────────────────────────────────────
+  const shareLinks = ref<import('@/types').ShareLink[]>([])
+
+  async function generateShareLink(fileId: string, expiresInHours?: number) {
+    try {
+      const result = await invoke<import('@/types').ShareLink>('generate_share_link', { fileId, expiresInHours })
+      await fetchShareLinks()
+      notifySuccess('Share link generated')
+      return result
+    } catch (e) {
+      notifyError('Failed to generate share link', e)
+      return null
+    }
+  }
+
+  async function fetchShareLinks() {
+    try {
+      shareLinks.value = await invoke<import('@/types').ShareLink[]>('list_share_links')
+    } catch (e) {
+      notifyError('Failed to fetch share links', e)
+    }
+  }
+
+  // ── Actions: URL Import ─────────────────────────────────────
+  async function importFromUrl(url: string, parentPath: string) {
+    try {
+      const result = await invoke<FileNode>('import_from_url', { url, parentPath })
+      await fetchFiles()
+      notifySuccess('File imported from URL')
+      return result
+    } catch (e) {
+      notifyError('Failed to import from URL', e)
+      return null
+    }
+  }
+
+  // ── Actions: Parent Index Rebuild ──────────────────────────
+  async function rebuildParentIndex() {
+    try {
+      const count = await invoke<number>('rebuild_parent_index')
+      await fetchFiles()
+      notifySuccess(`Rebuilt parent index for ${count} files`)
+    } catch (e) {
+      notifyError('Failed to rebuild parent index', e)
     }
   }
 
@@ -554,15 +877,18 @@ export const useAppStore = defineStore('cybermanju', () => {
     files, accounts, activeAccountId, collections, faceGroups, looseGroups,
     searchResults, geoMarkers, encryptionStatus, encryptionKeys,
     compressionStats, parseResult, syncConfigs, syncProgress,
-    searchQuery, isSearching, isLoading, lastError, matrixRainEnabled,
-    showEncryptionPanel, showCompressionPanel, commandPaletteOpen,
+    trashItems, showTrashPanel, auditLog, fileVersions, dashboardStatus, shareLinks,
+    searchQuery, searchTotalResults, isSearching, isLoading, lastError, matrixRainEnabled,
+    showEncryptionPanel, showCompressionPanel, showPermissionsPanel, commandPaletteOpen,
+    showShortcutsHelp, createFolderPromptOpen, showLoginPopup,
+    selectedFileIds, isMultiSelect, users, autoRefreshInterval,
     // Computed
     selectedFile, activeAccount, encryptedFiles, compressedFiles,
     starredFiles, folders, currentFolderFiles,
     // Actions
     initialize, selectFile, toggleStar, clearError,
     fetchFiles, getFile, createFolder, deleteFile, renameFile, duplicateFileContext,
-    searchFiles, fetchEncryptionStatus, generateKeypair, listKeys, encryptFile, decryptFile,
+    searchFiles, loadMoreSearchResults, fetchEncryptionStatus, generateKeypair, listKeys, encryptFile, decryptFile,
     compressFile, decompressFile, fetchCollections, createCollection, addToCollection, removeFromCollection,
     fetchFaceGroups, detectFaces, detectFacesBatch, reclusterFaces,
     renameFaceGroup, mergeFaceGroups, deleteFaceGroup, findSimilarFaces,
@@ -570,5 +896,24 @@ export const useAppStore = defineStore('cybermanju', () => {
     parseFileCode, fetchLooseGroups,
     fetchSyncConfigs, createSyncConfig, deleteSyncConfig, startSync,
     getSyncProgress, testSyncConnection, cancelSync, listRemoteFiles,
+    // User Management
+    fetchUsers, createUser, deleteUser, updateUserRole,
+    // Trash
+    fetchTrashItems, restoreTrashItem, emptyTrash, deleteFromTrash,
+    // Audit
+    fetchAuditLog,
+    // Versions
+    fetchFileVersions, createVersion, revertToVersion, snapshotAllVersions,
+    // Batch
+    batchDeleteFiles, batchEncryptFiles, batchCompressFiles,
+    // Dashboard
+    fetchDashboardStatus, startDashboard, stopDashboard,
+    // Share Links
+    generateShareLink, fetchShareLinks,
+    // URL Import
+    importFromUrl,
+    // Utility
+    rebuildParentIndex,
+    notifySuccess,
   }
 })

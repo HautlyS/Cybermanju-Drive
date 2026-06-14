@@ -113,33 +113,38 @@ pub fn create_folder(
     Ok(folder)
 }
 
-/// Delete a file or folder by its ID.
+/// Delete a file or folder by its ID (soft-delete to trash).
 #[tauri::command]
 pub fn delete_file(file_id: String, state: State<'_, AppState>) -> Result<bool, String> {
     let db = state.db.write().map_err(|e| e.to_string())?;
 
-    // First read the file node to get its parent_id for index cleanup
+    // Read the file node
     let tx_read = db.begin_read().map_err(|e| e.to_string())?;
     let table_read = tx_read
         .open_table(crate::db::Database::get_files_table())
         .map_err(|e| e.to_string())?;
-    let value = table_read
+    let file_node: Option<FileNode> = table_read
         .get(file_id.as_str())
-        .map_err(|e| e.to_string())?;
-    let parent_id = value.and_then(|val| {
-        serde_json::from_str::<FileNode>(val.value())
-            .ok()
-            .and_then(|node| node.parent_id)
-    });
+        .map_err(|e| e.to_string())?
+        .and_then(|val| serde_json::from_str::<FileNode>(val.value()).ok());
+    let parent_id = file_node.as_ref().and_then(|n| n.parent_id.clone());
     drop(tx_read);
 
-    // Atomically remove from both files table and parent index
-    let removed = db
-        .remove_file_with_index(&file_id, parent_id.as_deref())
+    let node = file_node.ok_or_else(|| format!("File not found: {}", file_id))?;
+
+    // Move to trash
+    db.trash_file(&file_id, &node, None)
         .map_err(|e| e.to_string())?;
-    if !removed {
-        return Err(format!("File not found: {}", file_id));
+
+    // Remove from parent index
+    if let Some(pid) = &parent_id {
+        db.remove_from_parent_index(&file_id, pid)
+            .map_err(|e| e.to_string())?;
     }
+
+    // Log audit
+    db.log_audit("delete", "file", &file_id, None, None)
+        .map_err(|e| e.to_string())?;
 
     Ok(true)
 }
@@ -445,4 +450,56 @@ pub fn list_loose_groups(state: State<'_, AppState>) -> Result<Vec<LooseGroup>, 
     }
 
     Ok(results)
+}
+
+/// Rebuild the parent index from all FileNodes in the files table.
+/// Useful after restoring from a backup or index corruption.
+#[tauri::command]
+pub fn rebuild_parent_index(state: State<'_, AppState>) -> Result<u32, String> {
+    let db = state.db.write().map_err(|e| e.to_string())?;
+
+    let tx_read = db.begin_read().map_err(|e| e.to_string())?;
+    let table = tx_read
+        .open_table(crate::db::Database::get_files_table())
+        .map_err(|e| e.to_string())?;
+
+    let file_nodes: Vec<FileNode> = table
+        .iter()
+        .map_err(|e| e.to_string())?
+        .filter_map(|entry| {
+            let (_, value) = entry.ok()?;
+            serde_json::from_str::<FileNode>(value.value()).ok()
+        })
+        .collect();
+    drop(tx_read);
+
+    // Clear existing index and rebuild
+    let tx_write = db.begin_write().map_err(|e| e.to_string())?;
+    {
+        let mut index_table = tx_write
+            .open_table(crate::db::Database::get_parent_index_table())
+            .map_err(|e| e.to_string())?;
+        // Clear index
+        let keys: Vec<String> = index_table
+            .iter()
+            .map_err(|e| e.to_string())?
+            .filter_map(|e| e.ok().map(|(k, _)| k.value().to_string()))
+            .collect();
+        for key in keys {
+            index_table.remove(key.as_str()).map_err(|e| e.to_string())?;
+        }
+    }
+    tx_write.commit().map_err(|e| e.to_string())?;
+
+    // Re-insert each file into index
+    let mut count = 0u32;
+    for node in &file_nodes {
+        if let Some(ref parent_id) = node.parent_id {
+            db.add_to_parent_index(&node.id, parent_id)
+                .map_err(|e| e.to_string())?;
+            count += 1;
+        }
+    }
+
+    Ok(count)
 }
