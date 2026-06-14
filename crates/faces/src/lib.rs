@@ -43,7 +43,7 @@
 //   detect_faces_in_file: tries ONNX first → falls back to BLAKE3 pseudo-embeddings
 //   Model paths: ~/.cache/cybermanju/scrfd_2.5g.onnx, arcface_mfacenet.onnx
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use cybermanju_types::schema::FileNode;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
@@ -1668,27 +1668,23 @@ pub fn recluster_all(
 /// Cached ONNX sessions — created once, reused across all face detection calls.
 #[cfg(feature = "onnx-face")]
 struct OnnxSessions {
-    scrfd: std::sync::Mutex<ort::Session>,
-    arcface: std::sync::Mutex<ort::Session>,
+    scrfd: std::sync::Mutex<ort::session::Session>,
+    arcface: std::sync::Mutex<ort::session::Session>,
 }
 
 #[cfg(feature = "onnx-face")]
-static ONNX_SESSIONS: OnceLock<OnnxSessions> = OnceLock::new();
-
-/// Initialize ort environment (must be called once before any session creation).
-#[cfg(feature = "onnx-face")]
-fn init_ort_environment() -> anyhow::Result<()> {
-    ort::init()
-        .with_global_thread_pool(std::num::NonZeroUsize::new(4))
-        .commit()?;
-    log::info!("ONNX Runtime initialized with 4-thread global pool");
-    Ok(())
+fn init_ort_environment() {
+    ort::init().commit();
+    log::info!("ONNX Runtime initialized");
 }
+
+#[cfg(feature = "onnx-face")]
+static ONNX_SESSIONS: OnceLock<anyhow::Result<OnnxSessions>> = OnceLock::new();
 
 #[cfg(feature = "onnx-face")]
 fn get_or_init_sessions() -> anyhow::Result<&'static OnnxSessions> {
-    ONNX_SESSIONS.get_or_try_init(|| {
-        init_ort_environment()?;
+    ONNX_SESSIONS.get_or_init(|| {
+        init_ort_environment();
         let model_dir = dirs::cache_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
             .join("cybermanju")
@@ -1698,25 +1694,36 @@ fn get_or_init_sessions() -> anyhow::Result<&'static OnnxSessions> {
         let scrfd_url = "https://github.com/deepinsight/insightface/releases/download/v0.7/scrfd_2.5g.onnx";
         let arcface_url = "https://github.com/siriusday/arcface-models/releases/download/v1.0/arcface_mobilefacenet.onnx";
 
-        ensure_model(&scrfd_path, scrfd_url)?;
-        ensure_model(&arcface_path, arcface_url)?;
+        let result = (|| -> anyhow::Result<OnnxSessions> {
+            ensure_model(&scrfd_path, scrfd_url)?;
+            ensure_model(&arcface_path, arcface_url)?;
 
-        let scrfd = ort::Session::builder()?
-            .with_optimization_level(ort::GraphOptimizationLevel::Level3)?
-            .commit_from_file(&scrfd_path)
-            .map_err(|e| anyhow::anyhow!("SCRFD session load failed: {}", e))?;
+            let scrfd_builder = ort::session::Session::builder()
+                .map_err(|e| anyhow::anyhow!("Failed to create session builder: {}", e))?;
+            let scrfd = scrfd_builder
+                .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)
+                .map_err(|e| anyhow::anyhow!("Failed to set optimization level: {}", e))?
+                .commit_from_file(&scrfd_path)
+                .map_err(|e| anyhow::anyhow!("SCRFD session load failed: {}", e))?;
 
-        let arcface = ort::Session::builder()?
-            .with_optimization_level(ort::GraphOptimizationLevel::Level3)?
-            .commit_from_file(&arcface_path)
-            .map_err(|e| anyhow::anyhow!("ArcFace session load failed: {}", e))?;
+            let arcface_builder = ort::session::Session::builder()
+                .map_err(|e| anyhow::anyhow!("Failed to create session builder: {}", e))?;
+            let arcface = arcface_builder
+                .with_optimization_level(ort::session::builder::GraphOptimizationLevel::Level3)
+                .map_err(|e| anyhow::anyhow!("Failed to set optimization level: {}", e))?
+                .commit_from_file(&arcface_path)
+                .map_err(|e| anyhow::anyhow!("ArcFace session load failed: {}", e))?;
 
-        log::info!("ONNX sessions cached (SCRFD + ArcFace)");
-        anyhow::Ok(OnnxSessions {
-            scrfd: std::sync::Mutex::new(scrfd),
-            arcface: std::sync::Mutex::new(arcface),
-        })
-    })
+            log::info!("ONNX sessions cached (SCRFD + ArcFace)");
+            Ok(OnnxSessions {
+                scrfd: std::sync::Mutex::new(scrfd),
+                arcface: std::sync::Mutex::new(arcface),
+            })
+        })();
+
+        result
+    });
+    ONNX_SESSIONS.get().unwrap().as_ref().map_err(|e| anyhow::anyhow!("{}", e))
 }
 
 #[cfg(feature = "onnx-face")]
@@ -1727,7 +1734,7 @@ fn fn_onnx_detect_faces(file_node: &FileNode) -> Result<Vec<Vec<f32>>> {
     let img_path = file_node
         .thumbnail_path
         .as_ref()
-        .or(file_node.name.as_ref())
+        .or(Some(&file_node.name))
         .context("No image path")?;
     let img = image::open(img_path)?.to_rgb8();
     let (w, h) = img.dimensions();
@@ -1739,13 +1746,16 @@ fn fn_onnx_detect_faces(file_node: &FileNode) -> Result<Vec<Vec<f32>>> {
     // Preprocess for SCRFD: resize to 640×640, normalize to [0, 1]
     let input_tensor = preprocess_for_scrfd(&img, w, h);
 
-    // Run SCRFD inference — requires &mut self, so lock the mutex
-    let mut scrfd = sessions.scrfd.lock().unwrap();
-    let scrfd_input = ort::Value::from_array(ndarray::Array1::from_vec(input_tensor))
-        .map_err(|e| anyhow::anyhow!("Tensor creation error: {}", e))?;
-    let scrfd_output = scrfd.run(ort::inputs!["input" => scrfd_input])?;
-    drop(scrfd);
-    let faces = postprocess_scrfd(&scrfd_output, w, h)?;
+    // Run SCRFD inference and postprocess in a scope to release the lock
+    let faces = {
+        let mut scrfd = sessions.scrfd.lock().unwrap();
+        let scrfd_array = ndarray::Array1::from_vec(input_tensor);
+        let scrfd_input = ort::value::TensorRef::from_array_view(&scrfd_array)
+            .map_err(|e| anyhow::anyhow!("Tensor creation error: {}", e))?;
+        let scrfd_output = scrfd.run(ort::inputs!["input" => scrfd_input])
+            .map_err(|e| anyhow::anyhow!("SCRFD inference failed: {}", e))?;
+        postprocess_scrfd(&scrfd_output, w, h)?
+    };
 
     if faces.is_empty() {
         return Ok(Vec::new());
@@ -1756,13 +1766,15 @@ fn fn_onnx_detect_faces(file_node: &FileNode) -> Result<Vec<Vec<f32>>> {
         let face_crop = crop_and_align(&img, &bbox, &kps, 112);
         let arcface_input = preprocess_for_arcface(&face_crop);
 
-        let mut arcface = sessions.arcface.lock().unwrap();
-        let arcface_input_tensor = ort::Value::from_array(ndarray::Array1::from_vec(arcface_input))
-            .map_err(|e| anyhow::anyhow!("Tensor creation error: {}", e))?;
-        let arcface_output = arcface.run(ort::inputs!["input" => arcface_input_tensor])?;
-        drop(arcface);
-
-        let embedding = postprocess_arcface(&arcface_output);
+        let embedding = {
+            let mut arcface = sessions.arcface.lock().unwrap();
+            let arcface_array = ndarray::Array1::from_vec(arcface_input);
+            let arcface_input_tensor = ort::value::TensorRef::from_array_view(&arcface_array)
+                .map_err(|e| anyhow::anyhow!("Tensor creation error: {}", e))?;
+            let arcface_output = arcface.run(ort::inputs!["input" => arcface_input_tensor])
+                .map_err(|e| anyhow::anyhow!("ArcFace inference failed: {}", e))?;
+            postprocess_arcface(&arcface_output)
+        };
         if embedding.len() == EMBEDDING_DIM {
             embeddings.push(embedding);
         } else {
@@ -1788,7 +1800,7 @@ fn preprocess_for_scrfd(img: &image::RgbImage, _w: u32, _h: u32) -> Vec<f32> {
     let target = 640;
     let resized =
         image::imageops::resize(img, target, target, image::imageops::FilterType::Triangle);
-    let mut tensor = Vec::with_capacity(3 * target * target);
+    let mut tensor = Vec::with_capacity((3 * target * target) as usize);
     for y in 0..target {
         for x in 0..target {
             let p = resized.get_pixel(x as u32, y as u32);
@@ -1835,20 +1847,19 @@ struct ScoredBox {
 
 #[cfg(feature = "onnx-face")]
 fn postprocess_scrfd(
-    output: &ort::SessionOutputs,
+    output: &ort::session::SessionOutputs,
     img_w: u32,
     img_h: u32,
 ) -> Result<Vec<([f32; 4], [[f32; 2]; 5])>> {
-    use std::collections::HashMap;
 
     let strides = [8, 16, 32];
     let input_size = 640;
     let score_threshold = 0.5;
     let nms_threshold = 0.4;
 
-    let scores = output["scores"].try_extract::<f32>()?.view().to_owned();
-    let bboxes = output["bboxes"].try_extract::<f32>()?.view().to_owned();
-    let kps = output["kps"].try_extract::<f32>()?.view().to_owned();
+    let scores = output["scores"].try_extract_array::<f32>()?.view().to_owned();
+    let bboxes = output["bboxes"].try_extract_array::<f32>()?.view().to_owned();
+    let kps = output["kps"].try_extract_array::<f32>()?.view().to_owned();
 
     let scores_shape = scores.shape();
     let total_anchors = scores_shape[2];
@@ -1982,13 +1993,13 @@ fn crop_and_align(
 }
 
 #[cfg(feature = "onnx-face")]
-fn postprocess_arcface(output: &ort::SessionOutputs) -> Vec<f32> {
+fn postprocess_arcface(output: &ort::session::SessionOutputs) -> Vec<f32> {
     let data: Vec<f32> = output["output"]
-        .try_extract::<f32>()
+        .try_extract_array::<f32>()
         .map(|v| v.view().to_owned().into_iter().collect())
         .unwrap_or_else(|_| {
             output["embedding"]
-                .try_extract::<f32>()
+                .try_extract_array::<f32>()
                 .map(|v| v.view().to_owned().into_iter().collect())
                 .unwrap_or_default()
         });
