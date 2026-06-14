@@ -506,7 +506,11 @@ pub fn import_from_url(
 
     // Detect file name from URL
     let url_path = url::Url::parse(&url)
-        .map(|u| u.path_segments().and_then(|s| s.last()).unwrap_or("download"))
+        .map(|u| {
+            u.path_segments()
+                .and_then(|s| s.last())
+                .unwrap_or("download")
+        })
         .unwrap_or("download")
         .to_string();
 
@@ -520,7 +524,9 @@ pub fn import_from_url(
 
     // Detect MIME type from content-type header or file extension
     let mime_type = content_type.or_else(|| {
-        mime_guess::from_path(&file_name).first().map(|m| m.to_string())
+        mime_guess::from_path(&file_name)
+            .first()
+            .map(|m| m.to_string())
     });
 
     let now = Utc::now().to_rfc3339();
@@ -534,7 +540,11 @@ pub fn import_from_url(
         id: file_id.clone(),
         name: file_name,
         file_type: "file".to_string(),
-        parent_id: if parent_path.is_empty() { None } else { Some(parent_path) },
+        parent_id: if parent_path.is_empty() {
+            None
+        } else {
+            Some(parent_path)
+        },
         size_bytes,
         mime_type,
         hash_blake3,
@@ -556,11 +566,16 @@ pub fn import_from_url(
     // Store in database
     let db = state.db.write().map_err(|e| e.to_string())?;
     let serialized = serde_json::to_string(&file_node).map_err(|e| e.to_string())?;
-    db.insert_file_with_index(&file_id, serialized.as_str(), file_node.parent_id.as_deref())
-        .map_err(|e| e.to_string())?;
+    db.insert_file_with_index(
+        &file_id,
+        serialized.as_str(),
+        file_node.parent_id.as_deref(),
+    )
+    .map_err(|e| e.to_string())?;
 
     // Index in Tantivy
-    let content_text = String::from_utf8(bytes.iter().take(65536).copied().collect()).unwrap_or_default();
+    let content_text =
+        String::from_utf8(bytes.iter().take(65536).copied().collect()).unwrap_or_default();
     let tantivy_index = state.tantivy_index.write().map_err(|e| e.to_string())?;
     if let Err(e) = tantivy_index.add_document(
         &file_id,
@@ -576,7 +591,12 @@ pub fn import_from_url(
         log::warn!("Failed to index URL-imported file {}: {}", file_id, e);
     }
 
-    log::info!("Imported from URL {} ({}) in {}ms", url, size_bytes, start.elapsed().as_millis());
+    log::info!(
+        "Imported from URL {} ({}) in {}ms",
+        url,
+        size_bytes,
+        start.elapsed().as_millis()
+    );
     Ok(file_node)
 }
 

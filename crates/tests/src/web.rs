@@ -38,15 +38,7 @@ fn test_handle_request_health() {
     let db_path = dir.path().join("test.redb");
     let d = WebDashboard::new(3456, db_path.to_str().unwrap());
     let db_guard = d.db().lock().unwrap();
-    let resp = cybermanju_web::handle_request(
-        &d,
-        &db_guard,
-        "GET",
-        "/api/health",
-        "",
-        None,
-        None,
-    );
+    let resp = cybermanju_web::handle_request(&d, &db_guard, "GET", "/api/health", "", None, None);
     assert!(resp.contains("200"));
 }
 
@@ -56,15 +48,8 @@ fn test_handle_request_404() {
     let db_path = dir.path().join("test.redb");
     let d = WebDashboard::new(3456, db_path.to_str().unwrap());
     let db_guard = d.db().lock().unwrap();
-    let resp = cybermanju_web::handle_request(
-        &d,
-        &db_guard,
-        "GET",
-        "/api/nonexistent",
-        "",
-        None,
-        None,
-    );
+    let resp =
+        cybermanju_web::handle_request(&d, &db_guard, "GET", "/api/nonexistent", "", None, None);
     assert!(resp.contains("404"));
 }
 
@@ -124,10 +109,22 @@ fn test_rate_limit_different_ips() {
 
 #[test]
 fn test_mime_type() {
-    assert_eq!(cybermanju_web::mime_type("test.html"), "text/html; charset=utf-8");
-    assert_eq!(cybermanju_web::mime_type("style.css"), "text/css; charset=utf-8");
-    assert_eq!(cybermanju_web::mime_type("app.js"), "application/javascript; charset=utf-8");
-    assert_eq!(cybermanju_web::mime_type("data.json"), "application/json; charset=utf-8");
+    assert_eq!(
+        cybermanju_web::mime_type("test.html"),
+        "text/html; charset=utf-8"
+    );
+    assert_eq!(
+        cybermanju_web::mime_type("style.css"),
+        "text/css; charset=utf-8"
+    );
+    assert_eq!(
+        cybermanju_web::mime_type("app.js"),
+        "application/javascript; charset=utf-8"
+    );
+    assert_eq!(
+        cybermanju_web::mime_type("data.json"),
+        "application/json; charset=utf-8"
+    );
     assert_eq!(cybermanju_web::mime_type("image.png"), "image/png");
     assert_eq!(cybermanju_web::mime_type("photo.jpg"), "image/jpeg");
     assert_eq!(cybermanju_web::mime_type("photo.jpeg"), "image/jpeg");
@@ -140,15 +137,30 @@ fn test_mime_type() {
     assert_eq!(cybermanju_web::mime_type("doc.pdf"), "application/pdf");
     assert_eq!(cybermanju_web::mime_type("archive.zip"), "application/zip");
     assert_eq!(cybermanju_web::mime_type("code.wasm"), "application/wasm");
-    assert_eq!(cybermanju_web::mime_type("data.xml"), "application/xml; charset=utf-8");
-    assert_eq!(cybermanju_web::mime_type("readme.txt"), "text/plain; charset=utf-8");
-    assert_eq!(cybermanju_web::mime_type("data.csv"), "text/csv; charset=utf-8");
-    assert_eq!(cybermanju_web::mime_type("unknown.xyz"), "application/octet-stream");
+    assert_eq!(
+        cybermanju_web::mime_type("data.xml"),
+        "application/xml; charset=utf-8"
+    );
+    assert_eq!(
+        cybermanju_web::mime_type("readme.txt"),
+        "text/plain; charset=utf-8"
+    );
+    assert_eq!(
+        cybermanju_web::mime_type("data.csv"),
+        "text/csv; charset=utf-8"
+    );
+    assert_eq!(
+        cybermanju_web::mime_type("unknown.xyz"),
+        "application/octet-stream"
+    );
 }
 
 #[test]
 fn test_mime_type_no_extension() {
-    assert_eq!(cybermanju_web::mime_type("Makefile"), "application/octet-stream");
+    assert_eq!(
+        cybermanju_web::mime_type("Makefile"),
+        "application/octet-stream"
+    );
 }
 
 #[test]

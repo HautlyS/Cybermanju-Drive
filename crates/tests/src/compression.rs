@@ -1,6 +1,6 @@
-use cybermanju_compression::layers::{Lz4Layer, ZstdLayer, BrotliLayer};
+use cybermanju_compression::layers::{BrotliLayer, Lz4Layer, ZstdLayer};
 use cybermanju_compression::triple::TripleCompressor;
-use cybermanju_compression::types::{CompressionType, CompressionStats, LayerDetail};
+use cybermanju_compression::types::{CompressionStats, CompressionType, LayerDetail};
 
 // ─── CompressionType tests ─────────────────────────────────────────
 
@@ -28,7 +28,9 @@ fn test_compression_type_speed_labels() {
     assert_eq!(CompressionType::None.speed_label(), "N/A");
     assert!(CompressionType::Lz4.speed_label().contains("400 MB/s"));
     assert!(CompressionType::Zstd.speed_label().contains("configurable"));
-    assert!(CompressionType::TripleLayer.speed_label().contains("maximum ratio"));
+    assert!(CompressionType::TripleLayer
+        .speed_label()
+        .contains("maximum ratio"));
 }
 
 #[test]

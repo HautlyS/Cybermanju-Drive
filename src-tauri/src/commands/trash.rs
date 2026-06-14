@@ -30,10 +30,7 @@ pub fn empty_trash(state: State<'_, AppState>) -> Result<u32, String> {
 
 /// Permanently delete a single item from the trash (no restore).
 #[tauri::command]
-pub fn delete_from_trash(
-    file_id: String,
-    state: State<'_, AppState>,
-) -> Result<bool, String> {
+pub fn delete_from_trash(file_id: String, state: State<'_, AppState>) -> Result<bool, String> {
     let db = state.db.write().map_err(|e| e.to_string())?;
     let tx = db.begin_write().map_err(|e| e.to_string())?;
     let removed = {

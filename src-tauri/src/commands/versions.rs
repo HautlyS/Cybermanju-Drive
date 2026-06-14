@@ -1,8 +1,8 @@
+use crate::db::schema::{FileNode, FileVersion};
+use crate::AppState;
 use chrono::Utc;
 use redb::ReadableTable;
 use tauri::State;
-use crate::db::schema::{FileNode, FileVersion};
-use crate::AppState;
 
 /// List all versions of a specific file.
 #[tauri::command]
@@ -37,14 +37,8 @@ pub fn create_file_version(
         .create_file_version(&file_node, None)
         .map_err(|e| e.to_string())?;
 
-    db.log_audit(
-        "create_version",
-        "file_version",
-        &version.id,
-        None,
-        None,
-    )
-    .map_err(|e| e.to_string())?;
+    db.log_audit("create_version", "file_version", &version.id, None, None)
+        .map_err(|e| e.to_string())?;
 
     Ok(version)
 }
@@ -63,14 +57,8 @@ pub fn revert_file_version(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Version not found: {}", version_id))?;
 
-    db.log_audit(
-        "revert_version",
-        "file_version",
-        &version_id,
-        None,
-        None,
-    )
-    .map_err(|e| e.to_string())?;
+    db.log_audit("revert_version", "file_version", &version_id, None, None)
+        .map_err(|e| e.to_string())?;
 
     Ok(version)
 }

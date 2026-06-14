@@ -80,7 +80,9 @@ pub fn search_files_paginated(
         limit: None,
         offset: None,
     };
-    let all_matching = tantivy_index.search(&count_request).map_err(|e| e.to_string())?;
+    let all_matching = tantivy_index
+        .search(&count_request)
+        .map_err(|e| e.to_string())?;
     let total = all_matching.len();
 
     let mapped: Vec<SearchResult> = results

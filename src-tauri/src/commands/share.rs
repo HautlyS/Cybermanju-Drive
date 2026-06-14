@@ -34,9 +34,14 @@ pub fn generate_share_link(
 }
 
 #[tauri::command]
-pub fn get_shared_file(token: String, state: State<'_, AppState>) -> Result<Option<crate::db::schema::FileNode>, String> {
+pub fn get_shared_file(
+    token: String,
+    state: State<'_, AppState>,
+) -> Result<Option<crate::db::schema::FileNode>, String> {
     let db = state.db.read().map_err(|e| e.to_string())?;
-    let link = db.get_share_link_by_token(&token).map_err(|e| e.to_string())?;
+    let link = db
+        .get_share_link_by_token(&token)
+        .map_err(|e| e.to_string())?;
 
     match link {
         Some(link) => {

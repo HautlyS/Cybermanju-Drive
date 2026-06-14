@@ -39,7 +39,8 @@ fn test_begin_read_write() {
 fn test_insert_file_with_index() {
     let (db, _dir) = temp_db();
     let file_json = r#"{"id":"f1","name":"test.txt"}"#;
-    db.insert_file_with_index("f1", file_json, Some("root")).unwrap();
+    db.insert_file_with_index("f1", file_json, Some("root"))
+        .unwrap();
 
     let children = db.list_by_parent("root").unwrap();
     assert_eq!(children.len(), 1);
@@ -133,9 +134,11 @@ fn test_list_by_parent_empty() {
 #[test]
 fn test_move_file_with_index() {
     let (db, _dir) = temp_db();
-    db.insert_file_with_index("f1", "j1", Some("old_parent")).unwrap();
+    db.insert_file_with_index("f1", "j1", Some("old_parent"))
+        .unwrap();
 
-    db.move_file_with_index("f1", "j1_updated", Some("old_parent"), "new_parent").unwrap();
+    db.move_file_with_index("f1", "j1_updated", Some("old_parent"), "new_parent")
+        .unwrap();
 
     let old_children = db.list_by_parent("old_parent").unwrap();
     assert!(old_children.is_empty());
@@ -149,7 +152,8 @@ fn test_move_file_no_old_parent() {
     let (db, _dir) = temp_db();
     db.insert_file_with_index("f1", "j1", None).unwrap();
 
-    db.move_file_with_index("f1", "j1", None, "new_parent").unwrap();
+    db.move_file_with_index("f1", "j1", None, "new_parent")
+        .unwrap();
 
     let children = db.list_by_parent("new_parent").unwrap();
     assert_eq!(children, vec!["f1".to_string()]);

@@ -193,7 +193,12 @@ impl Database {
     // -----------------------------------------------------------------------
 
     /// Move a file node to the trash (soft delete).
-    pub fn trash_file(&self, file_id: &str, file_node: &schema::FileNode, deleted_by: Option<&str>) -> Result<()> {
+    pub fn trash_file(
+        &self,
+        file_id: &str,
+        file_node: &schema::FileNode,
+        deleted_by: Option<&str>,
+    ) -> Result<()> {
         let trash_item = schema::TrashItem {
             id: file_id.to_string(),
             original_file: file_node.clone(),
@@ -253,7 +258,10 @@ impl Database {
         let mut count = 0u32;
         {
             let trash_table = tx.open_table(TRASH_TABLE)?;
-            let keys: Vec<String> = trash_table.iter()?.filter_map(|e| e.ok().map(|(k, _)| k.value().to_string())).collect();
+            let keys: Vec<String> = trash_table
+                .iter()?
+                .filter_map(|e| e.ok().map(|(k, _)| k.value().to_string()))
+                .collect();
             drop(trash_table);
             let mut trash_table = tx.open_table(TRASH_TABLE)?;
             for key in keys {
@@ -270,7 +278,11 @@ impl Database {
     // -----------------------------------------------------------------------
 
     /// Create a new version snapshot for a file.
-    pub fn create_file_version(&self, file_node: &schema::FileNode, snapshot_data: Option<&str>) -> Result<schema::FileVersion> {
+    pub fn create_file_version(
+        &self,
+        file_node: &schema::FileNode,
+        snapshot_data: Option<&str>,
+    ) -> Result<schema::FileVersion> {
         let tx = self.db.begin_write()?;
         let version = {
             let versions_table = tx.open_table(FILE_VERSIONS_TABLE)?;
@@ -293,7 +305,10 @@ impl Database {
         };
         {
             let mut versions_table = tx.open_table(FILE_VERSIONS_TABLE)?;
-            versions_table.insert(version.id.as_str(), serde_json::to_string(&version)?.as_str())?;
+            versions_table.insert(
+                version.id.as_str(),
+                serde_json::to_string(&version)?.as_str(),
+            )?;
         }
         tx.commit()?;
         Ok(version)
@@ -313,16 +328,23 @@ impl Database {
     }
 
     /// Revert a file to a specific version.
-    pub fn revert_file_version(&self, file_id: &str, version_id: &str) -> Result<Option<schema::FileVersion>> {
+    pub fn revert_file_version(
+        &self,
+        file_id: &str,
+        version_id: &str,
+    ) -> Result<Option<schema::FileVersion>> {
         let tx = self.db.begin_write()?;
         let version = {
             let versions_table = tx.open_table(FILE_VERSIONS_TABLE)?;
-            versions_table.get(version_id)?.and_then(|v| serde_json::from_str::<schema::FileVersion>(v.value()).ok())
+            versions_table
+                .get(version_id)?
+                .and_then(|v| serde_json::from_str::<schema::FileVersion>(v.value()).ok())
         };
         if let Some(ref ver) = version {
             let mut files_table = tx.open_table(FILES_TABLE)?;
             if let Some(existing) = files_table.get(file_id)? {
-                let mut file_node: schema::FileNode = serde_json::from_str(existing.value()).unwrap();
+                let mut file_node: schema::FileNode =
+                    serde_json::from_str(existing.value()).unwrap();
                 file_node.hash_blake3 = ver.hash_blake3.clone();
                 file_node.size_bytes = ver.size_bytes;
                 file_node.modified_at = chrono::Utc::now().to_rfc3339();
@@ -464,7 +486,11 @@ impl Database {
     // -----------------------------------------------------------------------
 
     /// Generate a share link for a file with an expiry duration.
-    pub fn create_share_link(&self, file_id: &str, expires_in_hours: u64) -> Result<schema::ShareLink> {
+    pub fn create_share_link(
+        &self,
+        file_id: &str,
+        expires_in_hours: u64,
+    ) -> Result<schema::ShareLink> {
         use rand_core::RngCore;
         let mut token_bytes = [0u8; 32];
         rand_core::OsRng.fill_bytes(&mut token_bytes);

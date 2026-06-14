@@ -1691,8 +1691,8 @@ static ONNX_SESSIONS: OnceLock<OnnxSessions> = OnceLock::new();
 #[cfg(feature = "onnx-face")]
 fn init_ort_environment() -> anyhow::Result<()> {
     use ort::GraphOptimizationLevel;
-    let thread_count = std::num::NonZeroUsize::new(4)
-        .ok_or_else(|| anyhow::anyhow!("Invalid thread count"))?;
+    let thread_count =
+        std::num::NonZeroUsize::new(4).ok_or_else(|| anyhow::anyhow!("Invalid thread count"))?;
     ort::init()
         .with_global_thread_pool(Some(thread_count))
         .with_graph_optimization_level(GraphOptimizationLevel::Level3)
@@ -1737,9 +1737,13 @@ fn fn_onnx_detect_faces(file_node: &FileNode) -> Result<Vec<Vec<f32>>> {
     let sessions = get_or_init_sessions()?;
 
     // Read image — try thumbnail path first, then context_data, then name
-    let img_path = file_node.thumbnail_path.as_ref()
+    let img_path = file_node
+        .thumbnail_path
+        .as_ref()
         .or_else(|| {
-            file_node.context_data.as_ref()
+            file_node
+                .context_data
+                .as_ref()
                 .and_then(|c| c.get("original_path").and_then(|v| v.as_str()))
         })
         .unwrap_or(&file_node.name);
@@ -1756,12 +1760,13 @@ fn fn_onnx_detect_faces(file_node: &FileNode) -> Result<Vec<Vec<f32>>> {
     let input_tensor = preprocess_for_scrfd(&img, w, h);
 
     // Run SCRFD inference — takes &mut self per ort v2 API
-    let scrfd_output = sessions.scrfd.run(
-        ort::inputs!["input" => ort::TensorRef::from_array_view(
+    let scrfd_output =
+        sessions
+            .scrfd
+            .run(ort::inputs!["input" => ort::TensorRef::from_array_view(
             &ndarray::ArrayViewD::from_shape(input_tensor.len(), &input_tensor)
                 .map_err(|e| anyhow::anyhow!("Tensor shape error: {}", e))?
-        )?]
-    )?;
+        )?])?;
     let faces = postprocess_scrfd(&scrfd_output, w, h)?;
 
     if faces.is_empty() {
@@ -1773,12 +1778,13 @@ fn fn_onnx_detect_faces(file_node: &FileNode) -> Result<Vec<Vec<f32>>> {
     for (bbox, kps) in faces {
         let face_crop = crop_and_align(&img, &bbox, &kps, 112);
         let arcface_input = preprocess_for_arcface(&face_crop);
-        let arcface_output = sessions.arcface.run(
-            ort::inputs!["input" => ort::TensorRef::from_array_view(
+        let arcface_output =
+            sessions
+                .arcface
+                .run(ort::inputs!["input" => ort::TensorRef::from_array_view(
                 &ndarray::ArrayViewD::from_shape(arcface_input.len(), &arcface_input)
                     .map_err(|e| anyhow::anyhow!("Tensor shape error: {}", e))?
-            )?]
-        )?;
+            )?])?;
         let embedding = postprocess_arcface(&arcface_output);
 
         if embedding.len() == EMBEDDING_DIM {
@@ -1792,7 +1798,11 @@ fn fn_onnx_detect_faces(file_node: &FileNode) -> Result<Vec<Vec<f32>>> {
         }
     }
 
-    log::info!("ONNX detection: {} faces in {}", embeddings.len(), file_node.name);
+    log::info!(
+        "ONNX detection: {} faces in {}",
+        embeddings.len(),
+        file_node.name
+    );
     Ok(embeddings)
 }
 
@@ -1809,11 +1819,18 @@ fn ensure_model(path: &std::path::Path, url: &str) -> Result<()> {
     let resp = reqwest::blocking::get(url)
         .map_err(|e| anyhow::anyhow!("Failed to download model from {}: {}", url, e))?;
     if !resp.status().is_success() {
-        return Err(anyhow::anyhow!("Download failed with HTTP {}", resp.status()));
+        return Err(anyhow::anyhow!(
+            "Download failed with HTTP {}",
+            resp.status()
+        ));
     }
     let bytes = resp.bytes()?;
     std::fs::write(path, &bytes)?;
-    log::info!("Downloaded ONNX model: {} ({} bytes)", path.display(), bytes.len());
+    log::info!(
+        "Downloaded ONNX model: {} ({} bytes)",
+        path.display(),
+        bytes.len()
+    );
     Ok(())
 }
 
@@ -1821,7 +1838,8 @@ fn ensure_model(path: &std::path::Path, url: &str) -> Result<()> {
 #[cfg(feature = "onnx-face")]
 fn preprocess_for_scrfd(img: &image::RgbImage, w: u32, h: u32) -> Vec<f32> {
     let target = 640;
-    let resized = image::imageops::resize(img, target, target, image::imageops::FilterType::Triangle);
+    let resized =
+        image::imageops::resize(img, target, target, image::imageops::FilterType::Triangle);
     let mut tensor = Vec::with_capacity(3 * target * target);
     for y in 0..target {
         for x in 0..target {
@@ -1837,7 +1855,9 @@ fn preprocess_for_scrfd(img: &image::RgbImage, w: u32, h: u32) -> Vec<f32> {
 // ArcFace preprocessing: resize to 112×112, normalize to [-1, 1]
 #[cfg(feature = "onnx-face")]
 fn preprocess_for_arcface(img: &image::DynamicImage) -> Vec<f32> {
-    let resized = img.resize_exact(112, 112, image::imageops::FilterType::Lanczos3).to_rgb8();
+    let resized = img
+        .resize_exact(112, 112, image::imageops::FilterType::Lanczos3)
+        .to_rgb8();
     let mut tensor = Vec::with_capacity(3 * 112 * 112);
     for y in 0..112u32 {
         for x in 0..112u32 {
@@ -1853,7 +1873,8 @@ fn preprocess_for_arcface(img: &image::DynamicImage) -> Vec<f32> {
 // SCRFD preprocessing: resize to 640×640, normalize RGB to [0, 1]
 fn preprocess_for_scrfd(img: &image::RgbImage, w: u32, h: u32) -> Vec<f32> {
     let target = 640;
-    let resized = image::imageops::resize(img, target, target, image::imageops::FilterType::Triangle);
+    let resized =
+        image::imageops::resize(img, target, target, image::imageops::FilterType::Triangle);
     let mut tensor = Vec::with_capacity(3 * target * target);
     for y in 0..target {
         for x in 0..target {
@@ -1868,7 +1889,9 @@ fn preprocess_for_scrfd(img: &image::RgbImage, w: u32, h: u32) -> Vec<f32> {
 
 // ArcFace preprocessing: resize to 112×112, normalize to [-1, 1]
 fn preprocess_for_arcface(img: &image::DynamicImage) -> Vec<f32> {
-    let resized = img.resize_exact(112, 112, image::imageops::FilterType::Lanczos3).to_rgb8();
+    let resized = img
+        .resize_exact(112, 112, image::imageops::FilterType::Lanczos3)
+        .to_rgb8();
     let mut tensor = Vec::with_capacity(3 * 112 * 112);
     for y in 0..112u32 {
         for x in 0..112u32 {
@@ -1969,11 +1992,22 @@ fn postprocess_scrfd(
             keypoints[kp_idx] = [kx, ky];
         }
 
-        boxes.push(ScoredBox { x1, y1, x2, y2, score, keypoints });
+        boxes.push(ScoredBox {
+            x1,
+            y1,
+            x2,
+            y2,
+            score,
+            keypoints,
+        });
     }
 
     // Sort by score descending
-    boxes.sort_unstable_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    boxes.sort_unstable_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // Non-maximum suppression
     let mut selected = Vec::new();
@@ -2014,7 +2048,8 @@ fn crop_and_align(
     // Estimate scale from eye distance
     let left_eye = &keypoints[0];
     let right_eye = &keypoints[1];
-    let eye_dist = ((right_eye[0] - left_eye[0]).powi(2) + (right_eye[1] - left_eye[1]).powi(2)).sqrt();
+    let eye_dist =
+        ((right_eye[0] - left_eye[0]).powi(2) + (right_eye[1] - left_eye[1]).powi(2)).sqrt();
     let scale = eye_dist.max(10.0) * 2.5;
 
     // Crop a square region around face center
@@ -2029,30 +2064,33 @@ fn crop_and_align(
 
     if crop_w < 2 || crop_h < 2 {
         // Fallback: use full image resized
-        return image::DynamicImage::ImageRgb8(
-            image::imageops::resize(img, out_size, out_size, image::imageops::FilterType::Lanczos3)
-        );
-    }
-
-    let face_crop = img.view(x_start, y_start, crop_w, crop_h).to_image();
-    image::DynamicImage::ImageRgb8(
-        image::imageops::resize(
-            &face_crop,
+        return image::DynamicImage::ImageRgb8(image::imageops::resize(
+            img,
             out_size,
             out_size,
             image::imageops::FilterType::Lanczos3,
-        )
-    )
+        ));
+    }
+
+    let face_crop = img.view(x_start, y_start, crop_w, crop_h).to_image();
+    image::DynamicImage::ImageRgb8(image::imageops::resize(
+        &face_crop,
+        out_size,
+        out_size,
+        image::imageops::FilterType::Lanczos3,
+    ))
 }
 
 /// Extract the 512-d embedding vector from ArcFace model output.
 #[cfg(feature = "onnx-face")]
 fn postprocess_arcface(output: &ort::SessionOutputs) -> Vec<f32> {
-    let data: Vec<f32> = output["output"].try_extract::<f32>()
+    let data: Vec<f32> = output["output"]
+        .try_extract::<f32>()
         .map(|v| v.view().to_owned().into_iter().collect())
         .unwrap_or_else(|_| {
             // Try alternative output name
-            output["embedding"].try_extract::<f32>()
+            output["embedding"]
+                .try_extract::<f32>()
                 .map(|v| v.view().to_owned().into_iter().collect())
                 .unwrap_or_default()
         });

@@ -13,13 +13,19 @@ fn test_encryption_algo_nist_levels() {
 
 #[test]
 fn test_encryption_algo_display_names() {
-    assert!(EncryptionAlgo::Kyber1024.display_name().contains("ML-KEM-1024"));
+    assert!(EncryptionAlgo::Kyber1024
+        .display_name()
+        .contains("ML-KEM-1024"));
     assert!(EncryptionAlgo::Hybrid.display_name().contains("Hybrid"));
     assert!(EncryptionAlgo::MlDsa44.display_name().contains("ML-DSA-44"));
     assert!(EncryptionAlgo::MlDsa65.display_name().contains("ML-DSA-65"));
     assert!(EncryptionAlgo::MlDsa87.display_name().contains("ML-DSA-87"));
-    assert!(EncryptionAlgo::ClassicalSign.display_name().contains("HMAC"));
-    assert!(EncryptionAlgo::Aes256.display_name().contains("ChaCha20Poly1305"));
+    assert!(EncryptionAlgo::ClassicalSign
+        .display_name()
+        .contains("HMAC"));
+    assert!(EncryptionAlgo::Aes256
+        .display_name()
+        .contains("ChaCha20Poly1305"));
 }
 
 #[test]
@@ -46,14 +52,32 @@ fn test_encryption_algo_signature_only() {
 
 #[test]
 fn test_algorithm_from_str() {
-    assert_eq!(algorithm_from_str("kyber1024"), Some(EncryptionAlgo::Kyber1024));
+    assert_eq!(
+        algorithm_from_str("kyber1024"),
+        Some(EncryptionAlgo::Kyber1024)
+    );
     assert_eq!(algorithm_from_str("hybrid"), Some(EncryptionAlgo::Hybrid));
     assert_eq!(algorithm_from_str("kyber768"), Some(EncryptionAlgo::Hybrid));
-    assert_eq!(algorithm_from_str("ml-dsa-44"), Some(EncryptionAlgo::MlDsa44));
-    assert_eq!(algorithm_from_str("ml-dsa-65"), Some(EncryptionAlgo::MlDsa65));
-    assert_eq!(algorithm_from_str("ml-dsa-87"), Some(EncryptionAlgo::MlDsa87));
-    assert_eq!(algorithm_from_str("dilithium2"), Some(EncryptionAlgo::MlDsa44));
-    assert_eq!(algorithm_from_str("hmac"), Some(EncryptionAlgo::ClassicalSign));
+    assert_eq!(
+        algorithm_from_str("ml-dsa-44"),
+        Some(EncryptionAlgo::MlDsa44)
+    );
+    assert_eq!(
+        algorithm_from_str("ml-dsa-65"),
+        Some(EncryptionAlgo::MlDsa65)
+    );
+    assert_eq!(
+        algorithm_from_str("ml-dsa-87"),
+        Some(EncryptionAlgo::MlDsa87)
+    );
+    assert_eq!(
+        algorithm_from_str("dilithium2"),
+        Some(EncryptionAlgo::MlDsa44)
+    );
+    assert_eq!(
+        algorithm_from_str("hmac"),
+        Some(EncryptionAlgo::ClassicalSign)
+    );
     assert_eq!(algorithm_from_str("chacha20"), Some(EncryptionAlgo::Aes256));
     assert_eq!(algorithm_from_str("unknown"), None);
 }
@@ -71,7 +95,9 @@ fn test_generate_keypair_aes256() {
 #[test]
 fn test_generate_keypair_classical_sign() {
     let mut engine = PqcEngine::new();
-    let kp = engine.generate_keypair(EncryptionAlgo::ClassicalSign).unwrap();
+    let kp = engine
+        .generate_keypair(EncryptionAlgo::ClassicalSign)
+        .unwrap();
     assert_eq!(kp.algorithm, EncryptionAlgo::ClassicalSign);
     assert_eq!(kp.private_key.len(), 64);
     assert_eq!(kp.public_key.len(), 32);
@@ -224,14 +250,18 @@ fn test_encrypted_file_meta_serde() {
     let back_meta: EncryptedFileMeta = serde_json::from_str(&json).unwrap();
     assert_eq!(meta.algorithm, back_meta.algorithm);
     assert_eq!(meta.key_id, back_meta.key_id);
-    let restored = back_meta.to_encrypted_data(encrypted.ciphertext.clone()).unwrap();
+    let restored = back_meta
+        .to_encrypted_data(encrypted.ciphertext.clone())
+        .unwrap();
     assert_eq!(restored.ciphertext, encrypted.ciphertext);
 }
 
 #[test]
 fn test_sign_verify_hmac() {
     let mut engine = PqcEngine::new();
-    let kp = engine.generate_keypair(EncryptionAlgo::ClassicalSign).unwrap();
+    let kp = engine
+        .generate_keypair(EncryptionAlgo::ClassicalSign)
+        .unwrap();
     let message = b"sign this message";
     let sig = sign_message(message, &kp).unwrap();
     assert!(!sig.is_empty());
@@ -242,7 +272,9 @@ fn test_sign_verify_hmac() {
 #[test]
 fn test_verify_wrong_message() {
     let mut engine = PqcEngine::new();
-    let kp = engine.generate_keypair(EncryptionAlgo::ClassicalSign).unwrap();
+    let kp = engine
+        .generate_keypair(EncryptionAlgo::ClassicalSign)
+        .unwrap();
     let sig = sign_message(b"original", &kp).unwrap();
     let valid = verify_signature(b"tampered", &sig, &kp).unwrap();
     assert!(!valid);

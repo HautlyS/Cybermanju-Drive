@@ -40,7 +40,11 @@ pub fn batch_delete(file_ids: Vec<String>, state: State<'_, AppState>) -> Result
 
 /// Batch encrypt: encrypt multiple files with a single algorithm.
 #[tauri::command]
-pub fn batch_encrypt(file_ids: Vec<String>, algorithm: String, state: State<'_, AppState>) -> Result<u32, String> {
+pub fn batch_encrypt(
+    file_ids: Vec<String>,
+    algorithm: String,
+    state: State<'_, AppState>,
+) -> Result<u32, String> {
     let db = state.db.write().map_err(|e| e.to_string())?;
     let mut count = 0u32;
 
@@ -83,7 +87,11 @@ pub fn batch_encrypt(file_ids: Vec<String>, algorithm: String, state: State<'_, 
 
 /// Batch compress: compress multiple files with a single layer.
 #[tauri::command]
-pub fn batch_compress(file_ids: Vec<String>, layer: String, state: State<'_, AppState>) -> Result<u32, String> {
+pub fn batch_compress(
+    file_ids: Vec<String>,
+    layer: String,
+    state: State<'_, AppState>,
+) -> Result<u32, String> {
     let db = state.db.write().map_err(|e| e.to_string())?;
     let mut count = 0u32;
 

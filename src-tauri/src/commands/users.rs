@@ -553,7 +553,10 @@ pub fn delete_user(user_id: String, state: State<'_, AppState>) -> Result<bool, 
         let mut table = tx
             .open_table(crate::db::Database::get_users_table())
             .map_err(|e| e.to_string())?;
-        let removed = table.remove(user_id.as_str()).map_err(|e| e.to_string())?.is_some();
+        let removed = table
+            .remove(user_id.as_str())
+            .map_err(|e| e.to_string())?
+            .is_some();
         if !removed {
             return Err(format!("User not found: {}", user_id));
         }
@@ -570,7 +573,10 @@ pub fn update_user_role(
     state: State<'_, AppState>,
 ) -> Result<User, String> {
     if !["admin", "user", "viewer"].contains(&role.as_str()) {
-        return Err(format!("Invalid role: {}. Must be admin, user, or viewer", role));
+        return Err(format!(
+            "Invalid role: {}. Must be admin, user, or viewer",
+            role
+        ));
     }
     let db = state.db.write().map_err(|e| e.to_string())?;
     let tx = db.begin_write().map_err(|e| e.to_string())?;
@@ -593,7 +599,13 @@ pub fn update_user_role(
         let mut table = tx
             .open_table(crate::db::Database::get_users_table())
             .map_err(|e| e.to_string())?;
-        table.insert(user_id.as_str(), serde_json::to_string(&user).map_err(|e| e.to_string())?.as_str())
+        table
+            .insert(
+                user_id.as_str(),
+                serde_json::to_string(&user)
+                    .map_err(|e| e.to_string())?
+                    .as_str(),
+            )
             .map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
