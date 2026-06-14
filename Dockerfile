@@ -20,6 +20,7 @@ COPY index.html ./
 COPY tsconfig.json tsconfig.node.json env.d.ts ./
 COPY vite.config.wasm.ts ./
 COPY public/ ./public/
+COPY keymaps/ ./keymaps/
 COPY src/ ./src/
 
 # DOCKER_BUILD=true tells vite.config.wasm.ts to use base: "/" instead of

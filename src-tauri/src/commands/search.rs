@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::search::tantivy_index::{SearchRequest, SearchResult as TantivyResult};
+use crate::search::{SearchRequest, SearchResult as TantivyResult};
 use crate::AppState;
 
 /// Search result returned to the frontend.

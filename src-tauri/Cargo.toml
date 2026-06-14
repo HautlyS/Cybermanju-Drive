@@ -7,7 +7,7 @@ edition = "2021"
 
 [features]
 default = []
-onnx-face = ["ort", "dirs", "dep:ndarray"]
+onnx-face = ["cybermanju-faces/onnx-face"]
 
 [lib]
 name = "cybermanju_drive_lib"
@@ -17,6 +17,15 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+# Workspace crates
+cybermanju-types = { path = "../crates/types" }
+cybermanju-crypto = { path = "../crates/crypto" }
+cybermanju-compression = { path = "../crates/compression" }
+cybermanju-search = { path = "../crates/search" }
+cybermanju-db = { path = "../crates/db" }
+cybermanju-faces = { path = "../crates/faces" }
+
+# Tauri
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2"
@@ -26,62 +35,34 @@ tauri-plugin-store = "2"
 tauri-plugin-log = "2"
 tauri-plugin-os = "2"
 tauri-plugin-process = "2"
+
+# General
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 blake3 = "1"
-redb = "2"
-# Post-quantum cryptography — real ML-KEM (FIPS 203)
-pqcrypto-mlkem = "0.1"
-pqcrypto-traits = "0.3"
-# Post-quantum digital signatures — real ML-DSA (FIPS 204)
-ml-dsa = { version = "0.1.1", features = ["getrandom"] }
-signature = "3"
-# Hybrid classical component
-x25519-dalek = { version = "2", features = ["static_secrets"] }
-# Key derivation
-hkdf = "0.12"
-# HMAC signatures
-hmac = "0.12"
-sha2 = "0.10"
-# Compression
-lz4_flex = "0.11"
-zstd = "0.13"
-brotli = "7"
-# Full-text search
-tantivy = "0.22"
-# EXIF GPS
-kamadak-exif = "0.5"
-# Thumbnail generation
-image = "0.25"
-# MIME type detection
-infer = "0.16"
-mime_guess = "2"
-# Encryption at rest
-chacha20poly1305 = "0.10"
-# Logging
 log = "0.4"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-# Base64 for key serialization
 base64 = "0.22"
-# Password hashing
-argon2 = "0.5"
 rand_core = { version = "0.6", features = ["getrandom"] }
-# JWT authentication
+
+# Auth & crypto (additional)
+argon2 = "0.5"
 jsonwebtoken = "9"
-# HTTP client (replaces curl subprocess calls) — use rustls to avoid OpenSSL cross-compilation issues on Android
+
+# Image & media
+kamadak-exif = "0.5"
+image = "0.25"
+infer = "0.16"
+mime_guess = "2"
+
+# Networking
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "multipart", "rustls-tls"] }
-# URL parsing
 url = "2"
-# Parallel iterators
-rayon = "1.10"
-# Robust directory traversal
+
+# File ops
 walkdir = "2.5"
-# ONNX Runtime for real ML face detection (optional — falls back to BLAKE3 pseudo-embeddings)
-ndarray = { version = "0.16", optional = true }
-ort = { version = "2.0.0-rc.12", features = ["download-binaries", "ndarray"], optional = true }
-# System cache dir for ONNX model storage
-dirs = { version = "6", optional = true }
+rayon = "1.10"
