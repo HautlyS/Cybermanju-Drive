@@ -508,7 +508,7 @@ pub fn import_from_url(
     let url_path = url::Url::parse(&url)
         .map(|u| {
             u.path_segments()
-                .and_then(|s| s.last().map(String::from))
+                .and_then(|mut s| s.next_back().map(String::from))
                 .unwrap_or_else(|| "download".to_string())
         })
         .unwrap_or_else(|_| "download".to_string());
