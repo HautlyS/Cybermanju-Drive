@@ -1803,7 +1803,7 @@ fn preprocess_for_scrfd(img: &image::RgbImage, _w: u32, _h: u32) -> Vec<f32> {
     let mut tensor = Vec::with_capacity((3 * target * target) as usize);
     for y in 0..target {
         for x in 0..target {
-            let p = resized.get_pixel(x as u32, y as u32);
+            let p = resized.get_pixel(x, y);
             tensor.push(p[0] as f32 / 255.0);
             tensor.push(p[1] as f32 / 255.0);
             tensor.push(p[2] as f32 / 255.0);
@@ -1845,12 +1845,14 @@ struct ScoredBox {
     keypoints: [[f32; 2]; 5],
 }
 
+type FaceBox = ([f32; 4], [[f32; 2]; 5]);
+
 #[cfg(feature = "onnx-face")]
 fn postprocess_scrfd(
     output: &ort::session::SessionOutputs,
     img_w: u32,
     img_h: u32,
-) -> Result<Vec<([f32; 4], [[f32; 2]; 5])>> {
+) -> Result<Vec<FaceBox>> {
 
     let strides = [8, 16, 32];
     let input_size = 640;
@@ -1867,7 +1869,7 @@ fn postprocess_scrfd(
     let mut boxes = Vec::new();
     let mut stride_idx = 0;
 
-    for (_anchor_idx, anchor_global_idx) in (0..total_anchors).enumerate() {
+    for anchor_global_idx in 0..total_anchors {
         let fm_size = (input_size / strides[stride_idx]) as usize;
         let anchors_at_stride = fm_size * fm_size;
         if anchor_global_idx >= anchors_at_stride {
