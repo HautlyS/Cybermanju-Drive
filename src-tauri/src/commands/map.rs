@@ -1,4 +1,4 @@
-use redb::{Readable, ReadableTable};
+use redb::ReadableTable;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 

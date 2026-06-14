@@ -7,8 +7,7 @@ pub mod schema;
 
 use anyhow::Result;
 use redb::{
-    Database as RedbDatabase, ReadTransaction, Readable, ReadableTable, TableDefinition,
-    WriteTransaction,
+    Database as RedbDatabase, ReadTransaction, ReadableTable, TableDefinition, WriteTransaction,
 };
 
 // ---------------------------------------------------------------------------

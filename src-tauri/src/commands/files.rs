@@ -1,5 +1,5 @@
 use chrono::Utc;
-use redb::{Readable, ReadableTable};
+use redb::ReadableTable;
 use tauri::State;
 
 use crate::db::schema::FileNode;

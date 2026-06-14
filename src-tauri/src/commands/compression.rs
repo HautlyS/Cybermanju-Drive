@@ -1,5 +1,5 @@
 use chrono::Utc;
-use redb::Readable;
+use redb::ReadableTable;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
