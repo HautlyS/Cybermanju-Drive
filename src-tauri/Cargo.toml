@@ -7,7 +7,7 @@ edition = "2021"
 
 [features]
 default = []
-onnx-face = ["ort", "dirs"]
+onnx-face = ["ort", "dirs", "dep:ndarray"]
 
 [lib]
 name = "cybermanju_drive_lib"
@@ -81,6 +81,7 @@ rayon = "1.10"
 # Robust directory traversal
 walkdir = "2.5"
 # ONNX Runtime for real ML face detection (optional — falls back to BLAKE3 pseudo-embeddings)
+ndarray = { version = "0.16", optional = true }
 ort = { version = "2.0.0-rc.12", features = ["download-binaries", "ndarray"], optional = true }
 # System cache dir for ONNX model storage
 dirs = { version = "6", optional = true }

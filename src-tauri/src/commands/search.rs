@@ -19,6 +19,7 @@ pub struct SearchResult {
 pub fn search_files(
     query: String,
     limit: Option<usize>,
+    offset: Option<usize>,
     state: State<'_, AppState>,
 ) -> Result<Vec<SearchResult>, String> {
     let limit = limit.unwrap_or(50);
@@ -27,6 +28,7 @@ pub fn search_files(
     let request = SearchRequest {
         query: query.clone(),
         limit: Some(limit),
+        offset: None,
     };
 
     let results = tantivy_index.search(&request).map_err(|e| e.to_string())?;

@@ -7,7 +7,7 @@ pub mod schema;
 
 use anyhow::Result;
 use redb::{
-    Database as RedbDatabase, ReadTransaction, ReadableTable, TableDefinition, WriteTransaction,
+    Database as RedbDatabase, ReadTransaction, TableDefinition, WriteTransaction,
 };
 
 // ---------------------------------------------------------------------------
@@ -222,10 +222,10 @@ impl Database {
         let tx = self.db.begin_write()?;
         let result = {
             let trash_table = tx.open_table(TRASH_TABLE)?;
-            trash_table.get(file_id)?.map(|v| {
-                let item: schema::TrashItem = serde_json::from_str(v.value()).unwrap();
-                item
-            })
+            let found: Option<schema::TrashItem> = trash_table
+                .get(file_id)?
+                .map(|v| serde_json::from_str::<schema::TrashItem>(v.value()).unwrap());
+            found
         };
         if let Some(ref item) = result {
             let mut files_table = tx.open_table(FILES_TABLE)?;
@@ -336,15 +336,17 @@ impl Database {
         let tx = self.db.begin_write()?;
         let version = {
             let versions_table = tx.open_table(FILE_VERSIONS_TABLE)?;
-            versions_table
+            let found: Option<schema::FileVersion> = versions_table
                 .get(version_id)?
-                .and_then(|v| serde_json::from_str::<schema::FileVersion>(v.value()).ok())
+                .and_then(|v| serde_json::from_str::<schema::FileVersion>(v.value()).ok());
+            found
         };
         if let Some(ref ver) = version {
             let mut files_table = tx.open_table(FILES_TABLE)?;
-            if let Some(existing) = files_table.get(file_id)? {
-                let mut file_node: schema::FileNode =
-                    serde_json::from_str(existing.value()).unwrap();
+            let existing_node: Option<schema::FileNode> = files_table
+                .get(file_id)?
+                .map(|v| serde_json::from_str::<schema::FileNode>(v.value()).unwrap());
+            if let Some(mut file_node) = existing_node {
                 file_node.hash_blake3 = ver.hash_blake3.clone();
                 file_node.size_bytes = ver.size_bytes;
                 file_node.modified_at = chrono::Utc::now().to_rfc3339();
@@ -491,6 +493,7 @@ impl Database {
         file_id: &str,
         expires_in_hours: u64,
     ) -> Result<schema::ShareLink> {
+        use base64::Engine;
         use rand_core::RngCore;
         let mut token_bytes = [0u8; 32];
         rand_core::OsRng.fill_bytes(&mut token_bytes);
@@ -509,6 +512,7 @@ impl Database {
             token: token.clone(),
             expires_at,
             created_at: now.to_rfc3339(),
+            url: None,
         };
 
         let tx = self.db.begin_write()?;

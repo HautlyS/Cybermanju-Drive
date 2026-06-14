@@ -1690,12 +1690,8 @@ static ONNX_SESSIONS: OnceLock<OnnxSessions> = OnceLock::new();
 /// Initialize ort environment (must be called once before any session creation).
 #[cfg(feature = "onnx-face")]
 fn init_ort_environment() -> anyhow::Result<()> {
-    use ort::GraphOptimizationLevel;
-    let thread_count =
-        std::num::NonZeroUsize::new(4).ok_or_else(|| anyhow::anyhow!("Invalid thread count"))?;
     ort::init()
-        .with_global_thread_pool(Some(thread_count))
-        .with_graph_optimization_level(GraphOptimizationLevel::Level3)
+        .with_global_thread_pool(std::num::NonZeroUsize::new(4))
         .commit()?;
     log::info!("ONNX Runtime initialized with 4-thread global pool");
     Ok(())
@@ -1760,13 +1756,13 @@ fn fn_onnx_detect_faces(file_node: &FileNode) -> Result<Vec<Vec<f32>>> {
     let input_tensor = preprocess_for_scrfd(&img, w, h);
 
     // Run SCRFD inference — takes &mut self per ort v2 API
+    let scrfd_input =
+        ort::Value::from_array(ndarray::Array1::from_vec(input_tensor))
+            .map_err(|e| anyhow::anyhow!("Tensor creation error: {}", e))?;
     let scrfd_output =
         sessions
             .scrfd
-            .run(ort::inputs!["input" => ort::TensorRef::from_array_view(
-            &ndarray::ArrayViewD::from_shape(input_tensor.len(), &input_tensor)
-                .map_err(|e| anyhow::anyhow!("Tensor shape error: {}", e))?
-        )?])?;
+            .run(ort::inputs!["input" => scrfd_input])?;
     let faces = postprocess_scrfd(&scrfd_output, w, h)?;
 
     if faces.is_empty() {
@@ -1778,13 +1774,13 @@ fn fn_onnx_detect_faces(file_node: &FileNode) -> Result<Vec<Vec<f32>>> {
     for (bbox, kps) in faces {
         let face_crop = crop_and_align(&img, &bbox, &kps, 112);
         let arcface_input = preprocess_for_arcface(&face_crop);
+        let arcface_input_tensor =
+            ort::Value::from_array(ndarray::Array1::from_vec(arcface_input))
+                .map_err(|e| anyhow::anyhow!("Tensor creation error: {}", e))?;
         let arcface_output =
             sessions
                 .arcface
-                .run(ort::inputs!["input" => ort::TensorRef::from_array_view(
-                &ndarray::ArrayViewD::from_shape(arcface_input.len(), &arcface_input)
-                    .map_err(|e| anyhow::anyhow!("Tensor shape error: {}", e))?
-            )?])?;
+                .run(ort::inputs!["input" => arcface_input_tensor])?;
         let embedding = postprocess_arcface(&arcface_output);
 
         if embedding.len() == EMBEDDING_DIM {
