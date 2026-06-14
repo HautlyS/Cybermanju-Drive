@@ -1678,11 +1678,8 @@ static ONNX_SESSIONS: OnceLock<OnnxSessions> = OnceLock::new();
 /// Initialize ort environment (must be called once before any session creation).
 #[cfg(feature = "onnx-face")]
 fn init_ort_environment() -> anyhow::Result<()> {
-    let thread_count =
-        std::num::NonZeroUsize::new(4).ok_or_else(|| anyhow::anyhow!("Invalid thread count"))?;
     ort::init()
-        .with_global_thread_pool(Some(thread_count))
-        .with_graph_optimization_level(ort::GraphOptimizationLevel::Level3)
+        .with_global_thread_pool(std::num::NonZeroUsize::new(4))
         .commit()?;
     log::info!("ONNX Runtime initialized with 4-thread global pool");
     Ok(())
@@ -1744,10 +1741,10 @@ fn fn_onnx_detect_faces(file_node: &FileNode) -> Result<Vec<Vec<f32>>> {
 
     // Run SCRFD inference — requires &mut self, so lock the mutex
     let mut scrfd = sessions.scrfd.lock().unwrap();
-    let scrfd_output = scrfd.run(ort::inputs!["input" => ort::TensorRef::from_array_view(
-            &ndarray::ArrayViewD::from_shape(input_tensor.len(), &input_tensor)
-                .map_err(|e| anyhow::anyhow!("Tensor shape error: {}", e))?
-        )?])?;
+    let scrfd_input =
+        ort::Value::from_array(ndarray::Array1::from_vec(input_tensor))
+            .map_err(|e| anyhow::anyhow!("Tensor creation error: {}", e))?;
+    let scrfd_output = scrfd.run(ort::inputs!["input" => scrfd_input])?;
     drop(scrfd);
     let faces = postprocess_scrfd(&scrfd_output, w, h)?;
 
@@ -1761,11 +1758,10 @@ fn fn_onnx_detect_faces(file_node: &FileNode) -> Result<Vec<Vec<f32>>> {
         let arcface_input = preprocess_for_arcface(&face_crop);
 
         let mut arcface = sessions.arcface.lock().unwrap();
-        let arcface_output =
-            arcface.run(ort::inputs!["input" => ort::TensorRef::from_array_view(
-                &ndarray::ArrayViewD::from_shape(arcface_input.len(), &arcface_input)
-                    .map_err(|e| anyhow::anyhow!("Tensor shape error: {}", e))?
-            )?])?;
+        let arcface_input_tensor =
+            ort::Value::from_array(ndarray::Array1::from_vec(arcface_input))
+                .map_err(|e| anyhow::anyhow!("Tensor creation error: {}", e))?;
+        let arcface_output = arcface.run(ort::inputs!["input" => arcface_input_tensor])?;
         drop(arcface);
 
         let embedding = postprocess_arcface(&arcface_output);

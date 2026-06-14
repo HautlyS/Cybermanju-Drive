@@ -6,7 +6,7 @@ authors = ["Cybermanju Team"]
 edition = "2021"
 
 [features]
-default = ["onnx-face"]
+default = []
 onnx-face = ["ort", "dirs"]
 
 [lib]

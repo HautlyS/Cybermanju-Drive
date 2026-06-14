@@ -1870,41 +1870,6 @@ fn preprocess_for_arcface(img: &image::DynamicImage) -> Vec<f32> {
     tensor
 }
 
-// SCRFD preprocessing: resize to 640×640, normalize RGB to [0, 1]
-fn preprocess_for_scrfd(img: &image::RgbImage, w: u32, h: u32) -> Vec<f32> {
-    let target = 640;
-    let resized =
-        image::imageops::resize(img, target, target, image::imageops::FilterType::Triangle);
-    let mut tensor = Vec::with_capacity(3 * target * target);
-    for y in 0..target {
-        for x in 0..target {
-            let p = resized.get_pixel(x as u32, y as u32);
-            tensor.push(p[0] as f32 / 255.0);
-            tensor.push(p[1] as f32 / 255.0);
-            tensor.push(p[2] as f32 / 255.0);
-        }
-    }
-    tensor
-}
-
-// ArcFace preprocessing: resize to 112×112, normalize to [-1, 1]
-fn preprocess_for_arcface(img: &image::DynamicImage) -> Vec<f32> {
-    let resized = img
-        .resize_exact(112, 112, image::imageops::FilterType::Lanczos3)
-        .to_rgb8();
-    let mut tensor = Vec::with_capacity(3 * 112 * 112);
-    for y in 0..112u32 {
-        for x in 0..112u32 {
-            let p = resized.get_pixel(x, y);
-            // Normalize to [-1, 1] as expected by ArcFace
-            tensor.push((p[0] as f32 - 127.5) / 128.0);
-            tensor.push((p[1] as f32 - 127.5) / 128.0);
-            tensor.push((p[2] as f32 - 127.5) / 128.0);
-        }
-    }
-    tensor
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // SCRFD postprocessing: decode model outputs to face bounding boxes + keypoints
 // ═══════════════════════════════════════════════════════════════════════════
