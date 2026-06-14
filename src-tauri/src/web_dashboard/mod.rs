@@ -26,7 +26,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use log::{error, info, warn};
 use rand_core::{OsRng, RngCore};
-use redb::{Database as RedbDb, ReadableTable, TableDefinition};
+use redb::{Database as RedbDb, Readable, ReadableTable, TableDefinition};
 use serde::{Deserialize, Serialize};
 
 // ─── Table definitions (must match db/mod.rs) ────────────────────────

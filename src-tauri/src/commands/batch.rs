@@ -1,6 +1,7 @@
 use crate::db::schema::FileNode;
 use crate::AppState;
 use chrono::Utc;
+use redb::Readable;
 use tauri::State;
 
 /// Batch delete: move multiple files to trash in a single operation.

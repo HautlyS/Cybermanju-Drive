@@ -1,4 +1,5 @@
 use chrono::Utc;
+use redb::{Readable, ReadableTable};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use tauri::State;

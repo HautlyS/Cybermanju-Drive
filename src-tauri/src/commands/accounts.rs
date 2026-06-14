@@ -1,4 +1,5 @@
 use chrono::Utc;
+use redb::{Readable, ReadableTable};
 use tauri::State;
 
 use crate::db::schema::Account;
