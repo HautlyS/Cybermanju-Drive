@@ -8,6 +8,7 @@ members = [
     "crates/web",
     "crates/faces",
     "crates/tests",
+    "crates/drive-wasm",
     "src-tauri",
 ]
 resolver = "2"
