@@ -486,7 +486,9 @@ pub fn rebuild_parent_index(state: State<'_, AppState>) -> Result<u32, String> {
             .filter_map(|e| e.ok().map(|(k, _)| k.value().to_string()))
             .collect();
         for key in keys {
-            index_table.remove(key.as_str()).map_err(|e| e.to_string())?;
+            index_table
+                .remove(key.as_str())
+                .map_err(|e| e.to_string())?;
         }
     }
     tx_write.commit().map_err(|e| e.to_string())?;
