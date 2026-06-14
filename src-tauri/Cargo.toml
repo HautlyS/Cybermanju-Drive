@@ -1,6 +1,6 @@
 [package]
 name = "cybermanju-drive"
-version = "0.1.0"
+version = "0.0.1"
 description = "Cybermanju Drive — Quantum-resistant encrypted file manager"
 authors = ["Cybermanju Team"]
 edition = "2021"
