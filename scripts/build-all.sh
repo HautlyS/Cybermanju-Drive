@@ -26,5 +26,5 @@ npm run tauri:build
 
 echo ""
 echo "=== Build Complete ==="
-echo "Artifacts in: src-tauri/target/release/bundle/"
-ls -la src-tauri/target/release/bundle/ 2>/dev/null || echo "(no bundle directory found)"
+echo "Artifacts in: target/release/bundle/"
+ls -la target/release/bundle/ 2>/dev/null || echo "(no bundle directory found)"

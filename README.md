@@ -159,7 +159,7 @@ npm run tauri:build
 npm run tauri:build:debug
 ```
 
-Output installers are in `src-tauri/target/release/bundle/`.
+Output installers are in `target/release/bundle/`.
 
 #### CachyOS / Arch Linux
 

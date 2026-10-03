@@ -38,12 +38,12 @@ package() {
   cd "$pkgname-$pkgver"
 
   # Install the binary
-  install -Dm755 "src-tauri/target/release/cybermanju-drive" \
+  install -Dm755 "target/release/cybermanju-drive" \
     "$pkgdir/usr/bin/cybermanju-drive"
 
   # Install desktop file
   local desktop_file
-  desktop_file=$(find src-tauri/target/release/bundle -name '*.desktop' -type f 2>/dev/null | head -1)
+  desktop_file=$(find target/release/bundle -name '*.desktop' -type f 2>/dev/null | head -1)
   if [ -n "$desktop_file" ]; then
     install -Dm644 "$desktop_file" \
       "$pkgdir/usr/share/applications/cybermanju-drive.desktop"

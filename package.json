@@ -20,7 +20,7 @@
     "rust:fmt:fix": "cd src-tauri && cargo fmt",
     "rust:test": "cd src-tauri && cargo test 2>&1",
     "check:all": "npm run typecheck && npm run rust:check && npm run rust:clippy",
-    "clean": "rm -rf dist src-tauri/target cybermanju.db tantivy_index",
+    "clean": "rm -rf dist target src-tauri/target cybermanju.db tantivy_index",
     "db:reset": "rm -f cybermanju.db tantivy_index",
     "build:wasm": "vite build --mode production --config vite.config.wasm.ts --outDir dist-wasm"
   },
