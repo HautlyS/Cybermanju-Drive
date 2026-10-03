@@ -300,7 +300,11 @@ jobs:
             pkg-config \
             openssl \
             curl \
-            sudo
+            sudo \
+            xdg-utils \
+            rpm-tools \
+            fuse2 \
+            dpkg
 
       - name: Create build user
         run: |
@@ -395,7 +399,9 @@ jobs:
         run: npm run tauri android init
 
       - name: Build Android APK
-        run: npm run tauri android build
+        # ort-sys ships prebuilt ONNX Runtime only for aarch64-linux-android on
+        # Android; the other Rust ABIs have no dist entry, so build arm64-v8a.
+        run: npm run tauri android build -- --target aarch64
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/26.1.10909125
 

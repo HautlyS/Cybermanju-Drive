@@ -34,16 +34,36 @@ modules:
           exit 1
         fi
         echo "Extracting data: $data_tar"
-        tar -xf "$data_tar" -C /
-        # Find and symlink the binary
-        binary_path=$(find /opt -name 'cybermanju-drive' -type f 2>/dev/null | head -1)
-        if [ -n "$binary_path" ]; then
+        mkdir -p deb-root
+        tar -xf "$data_tar" -C deb-root
+        # '/' is read-only during a module build, so stage the payload in the
+        # sandbox build dir and copy it into the writable '/app' prefix.
+        for d in usr opt; do
+          if [ -d "deb-root/$d" ]; then
+            cp -a "deb-root/$d/." /app/
+          fi
+        done
+        # Make sure the launcher ends up at /app/bin (what 'command:' resolves)
+        if [ ! -x /app/bin/cybermanju-drive ]; then
+          binary_path=$(find /app -name 'cybermanju-drive' -type f 2>/dev/null | head -1)
+          if [ -z "$binary_path" ]; then
+            echo "ERROR: cybermanju-drive binary not found after extraction"
+            ls -R deb-root || true
+            exit 1
+          fi
           mkdir -p /app/bin
           ln -sf "$binary_path" /app/bin/cybermanju-drive
-        else
-          echo "ERROR: Binary not found in /opt"
-          exit 1
         fi
+        # Rewrite Exec/TryExec: the deb ships host paths (/usr/bin/...), which
+        # do not exist inside the sandbox.
+        for desktop in /app/share/applications/*.desktop; do
+          [ -f "$desktop" ] || continue
+          sed -i 's|^Exec=.*|Exec=cybermanju-drive|' "$desktop"
+          sed -i 's|^TryExec=.*|TryExec=cybermanju-drive|' "$desktop"
+        done
+        echo "Staged app files:"
+        ls -l /app/bin/cybermanju-drive
+        ls /app/share/applications/ || true
     sources:
       - type: dir
         path: ../../artifacts
