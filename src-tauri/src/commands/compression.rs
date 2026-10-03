@@ -357,7 +357,7 @@ pub fn decompress_file(
         ));
     };
 
-    let removed_layers: Vec<String> = file_node.compression_layers.drain(..).collect();
+    let removed_layers: Vec<String> = std::mem::take(&mut file_node.compression_layers);
     file_node.size_bytes = original_size;
     file_node.modified_at = now.clone();
     let duration_ms = start.elapsed().as_millis() as u64;
