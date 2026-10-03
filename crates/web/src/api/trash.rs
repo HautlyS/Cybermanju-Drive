@@ -30,7 +30,8 @@ pub fn delete(db: &Database, file_id: &str) -> Result<bool, String> {
         let mut table = tx
             .open_table(Database::get_trash_table())
             .map_err(|e| e.to_string())?;
-        table.remove(file_id).map_err(|e| e.to_string())?.is_some()
+        let removed = table.remove(file_id).map_err(|e| e.to_string())?.is_some();
+        removed
     };
     tx.commit().map_err(|e| e.to_string())?;
     Ok(removed)

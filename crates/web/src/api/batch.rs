@@ -2,7 +2,6 @@
 
 use cybermanju_db::Database;
 use cybermanju_types::schema::FileNode;
-use redb::ReadableTable;
 
 /// Batch delete: move multiple files to trash in a single operation.
 pub fn delete(db: &Database, file_ids: &[String]) -> Result<u32, String> {
