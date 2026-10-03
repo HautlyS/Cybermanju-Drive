@@ -1,10 +1,10 @@
-pub mod crypto;
 pub mod compression;
+pub mod crypto;
 
 use wasm_bindgen::prelude::*;
 
-pub use crypto::*;
 pub use compression::*;
+pub use crypto::*;
 
 #[wasm_bindgen(start)]
 pub fn init() {

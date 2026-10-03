@@ -80,8 +80,7 @@ pub fn hkdf_derive(secret: &[u8], salt: &[u8], info: &[u8], length: usize) -> Ve
 
 #[wasm_bindgen]
 pub fn hmac_sha512(key: &[u8], data: &[u8]) -> Vec<u8> {
-    let mut mac =
-        HmacSha512::new_from_slice(key).expect("HMAC key should be valid");
+    let mut mac = HmacSha512::new_from_slice(key).expect("HMAC key should be valid");
     mac.update(data);
     mac.finalize().into_bytes().to_vec()
 }
@@ -144,8 +143,7 @@ pub fn ml_dsa65_generate_keypair() -> Result<js_sys::Object, JsValue> {
 pub fn ml_dsa65_sign(message: &[u8], private_key: &[u8]) -> Result<Vec<u8>, JsValue> {
     let signing_key = SigningKey::<MlDsa65>::from_bytes(private_key)
         .map_err(|e| JsValue::from_str(&format!("Invalid private key: {}", e)))?;
-    let signature = signing_key
-        .sign(message);
+    let signature = signing_key.sign(message);
     Ok(signature.to_vec())
 }
 

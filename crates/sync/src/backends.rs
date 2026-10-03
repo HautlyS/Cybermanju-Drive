@@ -2,8 +2,8 @@
 // Five backend implementations: Local, GitHub, GitLab, Google Drive, Google Photos
 // All HTTP backends use reqwest::blocking (no curl subprocess).
 
-use crate::sync::models::*;
-use crate::sync::oauth::{self, OAuthCredentials};
+use crate::oauth::{self, OAuthCredentials};
+use cybermanju_types::sync::*;
 use log::info;
 use std::fs;
 use std::path::Path;

@@ -59,9 +59,18 @@ import { useAppStore } from '@/stores/app'
 import { isWebMode } from '@/composables/useTauri'
 
 const store = useAppStore()
-const isSyncActive = computed(() =>
-  store.syncProgress !== null && store.syncProgress.status !== 'idle' && store.syncProgress.status !== 'done'
-)
+const isSyncActive = computed(() => {
+  const status = store.syncProgress?.status
+  if (!status) return false
+  return (
+    status === 'scanning' ||
+    status === 'compressing' ||
+    status === 'uploading' ||
+    status === 'linking' ||
+    status === 'cleaning' ||
+    status === 'syncing'
+  )
+})
 </script>
 
 <style scoped>

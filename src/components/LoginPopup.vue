@@ -91,6 +91,8 @@ async function handleLogin() {
       password: password.value,
     })
     store.currentUser = result
+    // Persist the JWT so REST calls are authenticated after a reload (F2)
+    store.setSessionToken(result.token ?? '')
     store.showLoginPopup = false
     notify('success', `LOGGED IN AS ${result.username}`)
     username.value = ''

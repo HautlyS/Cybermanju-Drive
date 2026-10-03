@@ -21,7 +21,7 @@ fn test_web_dashboard_db_accessor() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.redb");
     let d = WebDashboard::new(3456, db_path.to_str().unwrap());
-    let _guard = d.db().lock().unwrap();
+    let _guard = d.db().read().unwrap();
 }
 
 #[test]
@@ -37,8 +37,7 @@ fn test_handle_request_health() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.redb");
     let d = WebDashboard::new(3456, db_path.to_str().unwrap());
-    let db_guard = d.db().lock().unwrap();
-    let resp = cybermanju_web::handle_request(&d, &db_guard, "GET", "/api/health", "", None, None);
+    let resp = cybermanju_web::handle_request(&d, &d.db, "GET", "/api/health", "", None, None);
     assert!(resp.contains("200"));
 }
 
@@ -47,9 +46,7 @@ fn test_handle_request_404() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.redb");
     let d = WebDashboard::new(3456, db_path.to_str().unwrap());
-    let db_guard = d.db().lock().unwrap();
-    let resp =
-        cybermanju_web::handle_request(&d, &db_guard, "GET", "/api/nonexistent", "", None, None);
+    let resp = cybermanju_web::handle_request(&d, &d.db, "GET", "/api/nonexistent", "", None, None);
     assert!(resp.contains("404"));
 }
 
@@ -58,10 +55,9 @@ fn test_handle_request_options_cors() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("test.redb");
     let d = WebDashboard::new(3456, db_path.to_str().unwrap());
-    let db_guard = d.db().lock().unwrap();
     let resp = cybermanju_web::handle_request(
         &d,
-        &db_guard,
+        &d.db,
         "OPTIONS",
         "/api/health",
         "",

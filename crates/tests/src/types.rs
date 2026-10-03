@@ -323,6 +323,8 @@ fn test_sync_config_serde() {
         create_previews: true,
         delete_raw_after_sync: false,
         max_concurrent_uploads: 4,
+        created_at: None,
+        updated_at: None,
     };
     let json = serde_json::to_string(&sc).unwrap();
     assert!(json.contains("\"backendType\""));

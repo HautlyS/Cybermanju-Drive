@@ -24,6 +24,8 @@ cybermanju-compression = { path = "../crates/compression" }
 cybermanju-search = { path = "../crates/search" }
 cybermanju-db = { path = "../crates/db" }
 cybermanju-faces = { path = "../crates/faces" }
+cybermanju-sync = { path = "../crates/sync" }
+cybermanju-web = { path = "../crates/web" }
 
 # Tauri
 tauri = { version = "2", features = ["tray-icon"] }

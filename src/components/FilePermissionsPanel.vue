@@ -91,7 +91,7 @@ watch(() => store.selectedFileId, async (id) => {
 
 async function fetchPermissions(fileId: string) {
   try {
-    const perms = await invoke<FilePermission[]>('list_file_permissions', { fileId })
+    const perms = await invoke<FilePermission[]>('get_file_permissions', { fileId })
     permissions.value = perms
   } catch {
     permissions.value = []

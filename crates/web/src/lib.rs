@@ -14,43 +14,29 @@
 //   7. Proper shutdown via mpsc signal channel, thread join on Drop
 //   8. Rate limiting: 100 requests per minute per IP address
 
+pub mod api;
+
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use cybermanju_compression::TripleCompressor;
+use cybermanju_db::Database;
+use cybermanju_search::SearchIndex;
+use cybermanju_sync::SyncState;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use log::{error, info, warn};
 use rand_core::{OsRng, RngCore};
-use redb::{Database as RedbDb, ReadableTable, TableDefinition};
+use redb::{ReadableTable, TableDefinition};
 use serde::{Deserialize, Serialize};
 
-// ─── Table definitions (must match db/mod.rs) ────────────────────────
-
-const FILES_TABLE: TableDefinition<'static, &'static str, &'static str> =
-    TableDefinition::new("files");
-const ACCOUNTS_TABLE: TableDefinition<'static, &'static str, &'static str> =
-    TableDefinition::new("accounts");
-const COLLECTIONS_TABLE: TableDefinition<'static, &'static str, &'static str> =
-    TableDefinition::new("collections");
-const COLLECTION_ITEMS_TABLE: TableDefinition<'static, &'static str, &'static str> =
-    TableDefinition::new("collection_items");
-const FACE_GROUPS_TABLE: TableDefinition<'static, &'static str, &'static str> =
-    TableDefinition::new("face_groups");
-const LOOSE_GROUPS_TABLE: TableDefinition<'static, &'static str, &'static str> =
-    TableDefinition::new("loose_groups");
-const ENCRYPTION_KEYS_TABLE: TableDefinition<'static, &'static str, &'static str> =
-    TableDefinition::new("encryption_keys");
-const LOCATIONS_TABLE: TableDefinition<'static, &'static str, &'static str> =
-    TableDefinition::new("locations");
-const USERS_TABLE: TableDefinition<'static, &'static str, &'static str> =
-    TableDefinition::new("users");
-const USER_FILE_PERMS_TABLE: TableDefinition<'static, &'static str, &'static str> =
-    TableDefinition::new("user_file_perms");
+// Table definitions come from the shared `cybermanju-db` crate
+// (`Database::get_*_table()`), so the router can never drift from the schema.
 
 // ─── Security constants ─────────────────────────────────────────────
 
@@ -101,65 +87,71 @@ struct JwtClaims {
 // ─── WebDashboard struct ────────────────────────────────────────────
 
 pub struct WebDashboard {
-    #[allow(dead_code)]
     pub port: u16,
-    /// Always "127.0.0.1" — never bind to 0.0.0.0
-    #[allow(dead_code)]
+    /// Bind address — "127.0.0.1" for desktop, "0.0.0.0" for Docker
     pub bind_addr: String,
     /// Random 256-bit secret generated at startup for HMAC-SHA256 JWT signing
     pub jwt_secret: [u8; 32],
-    /// Shared database handle — opened once, shared across all request threads.
-    /// Using Arc<Mutex<>> since redb requires exclusive access for writes.
-    pub db: Arc<Mutex<RedbDb>>,
-    #[allow(dead_code)]
+    /// Shared database handle — opened exactly once and shared with the rest
+    /// of the application (redb allows only one open handle per file).
+    pub db: Arc<RwLock<Database>>,
+    /// Shared sync progress / cancellation state for `/api/sync/*`.
+    pub sync_state: Arc<SyncState>,
+    /// Shared Tantivy full-text index. `None` until the host wires one in
+    /// (`set_search_index`); search then falls back to a database scan.
+    pub search_index: Option<Arc<RwLock<SearchIndex>>>,
+    /// Shared triple compressor used by the sync pipeline.
+    pub compression: TripleCompressor,
     pub running: AtomicBool,
+    /// Live number of in-flight HTTP connections (reported by
+    /// `GET /api/dashboard/status` and the Tauri `dashboard_status` command).
+    pub active_connections: AtomicU64,
     /// Per-IP rate limit counters: IP → (count, window_start)
     pub rate_limits: Mutex<HashMap<String, (u32, Instant)>>,
-    #[allow(dead_code)]
     pub server_thread: Mutex<Option<thread::JoinHandle<()>>>,
-    #[allow(dead_code)]
     pub shutdown_tx: Mutex<Option<mpsc::Sender<()>>>,
 }
 
 impl WebDashboard {
+    /// Open (or create) the database at `db_path` and build a dashboard around it.
+    /// Prefer `new_shared` when the application already owns a database handle.
     pub fn new(port: u16, db_path: &str) -> Self {
-        // Generate a cryptographically random 256-bit JWT secret
-        let mut jwt_secret = [0u8; 32];
-        OsRng.fill_bytes(&mut jwt_secret);
-
-        // Open the database once and share it across all request threads
-        let db = RedbDb::open(db_path)
-            .or_else(|_| RedbDb::create(db_path))
-            .expect("Failed to open web dashboard database");
-
-        Self {
-            port,
-            bind_addr: "127.0.0.1".to_string(),
-            jwt_secret,
-            db: Arc::new(Mutex::new(db)),
-            running: AtomicBool::new(false),
-            rate_limits: Mutex::new(HashMap::new()),
-            server_thread: Mutex::new(None),
-            shutdown_tx: Mutex::new(None),
-        }
+        let db = Database::new(db_path).expect("Failed to open web dashboard database");
+        Self::new_shared(port, Arc::new(RwLock::new(db)))
     }
 
     /// Constructor that allows specifying a bind address (for Docker use case).
-    #[allow(dead_code)]
     pub fn new_with_bind_addr(port: u16, db_path: &str, bind_addr: &str) -> Self {
+        let db = Database::new(db_path).expect("Failed to open web dashboard database");
+        Self::new_shared_with_bind_addr(port, Arc::new(RwLock::new(db)), bind_addr)
+    }
+
+    /// Build a dashboard around an already-open database handle so the same
+    /// redb file is never opened twice (which would fail on the exclusive lock).
+    pub fn new_shared(port: u16, db: Arc<RwLock<Database>>) -> Self {
+        Self::new_shared_with_bind_addr(port, db, "127.0.0.1")
+    }
+
+    /// Like `new_shared`, but with an explicit bind address.
+    pub fn new_shared_with_bind_addr(
+        port: u16,
+        db: Arc<RwLock<Database>>,
+        bind_addr: &str,
+    ) -> Self {
+        // Generate a cryptographically random 256-bit JWT secret
         let mut jwt_secret = [0u8; 32];
         OsRng.fill_bytes(&mut jwt_secret);
-
-        let db = RedbDb::open(db_path)
-            .or_else(|_| RedbDb::create(db_path))
-            .expect("Failed to open web dashboard database");
 
         Self {
             port,
             bind_addr: bind_addr.to_string(),
             jwt_secret,
-            db: Arc::new(Mutex::new(db)),
+            db,
+            sync_state: Arc::new(SyncState::new()),
+            search_index: None,
+            compression: TripleCompressor::new(),
             running: AtomicBool::new(false),
+            active_connections: AtomicU64::new(0),
             rate_limits: Mutex::new(HashMap::new()),
             server_thread: Mutex::new(None),
             shutdown_tx: Mutex::new(None),
@@ -167,9 +159,19 @@ impl WebDashboard {
     }
 
     /// Accessor for the shared database handle.
-    #[allow(dead_code)]
-    pub fn db(&self) -> &Arc<Mutex<RedbDb>> {
+    pub fn db(&self) -> &Arc<RwLock<Database>> {
         &self.db
+    }
+
+    /// Accessor for the shared sync state.
+    pub fn sync_state(&self) -> &Arc<SyncState> {
+        &self.sync_state
+    }
+
+    /// Wire the application's Tantivy index into the dashboard so REST search
+    /// hits the same index as the desktop app.
+    pub fn set_search_index(&mut self, index: Arc<RwLock<SearchIndex>>) {
+        self.search_index = Some(index);
     }
 
     /// Start the web dashboard HTTP server on a background thread.
@@ -300,7 +302,19 @@ impl Drop for WebDashboard {
 
 // ─── Connection handler ──────────────────────────────────────────────
 
+/// Decrements `active_connections` when a connection handler returns.
+struct ActiveConnectionGuard<'a>(&'a AtomicU64);
+
+impl Drop for ActiveConnectionGuard<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 fn handle_connection(dashboard: &WebDashboard, mut stream: TcpStream) {
+    dashboard.active_connections.fetch_add(1, Ordering::SeqCst);
+    let _active = ActiveConnectionGuard(&dashboard.active_connections);
+
     stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
     stream.set_write_timeout(Some(Duration::from_secs(5))).ok();
 
@@ -340,25 +354,16 @@ fn handle_connection(dashboard: &WebDashboard, mut stream: TcpStream) {
 
     let effective_origin = effective_origin.as_deref();
 
-    // Handle the request — use the shared DB handle
-    let db_guard = match dashboard.db.lock() {
-        Ok(g) => g,
-        Err(_) => {
-            let _ = stream
-                .write_all(json_error(500, "Database lock poisoned", effective_origin).as_bytes());
-            return;
-        }
-    };
+    // Handle the request — the database lock is taken inside `handle_request`
     let response = handle_request(
         dashboard,
-        &db_guard,
+        &dashboard.db,
         &method,
         &path,
         &body,
         auth_header.as_deref(),
         effective_origin,
     );
-    drop(db_guard);
 
     let _ = stream.write_all(response.as_bytes());
 }
@@ -483,9 +488,60 @@ fn write_http_json(stream: &mut TcpStream, status: u16, body: &str) {
 
 // ─── Request router ──────────────────────────────────────────────────
 
+/// Either flavour of database lock, so one code path can serve both readers
+/// (GET/HEAD) and writers (POST/PUT/DELETE) with a single route table.
+enum DbLock<'a> {
+    Read(std::sync::RwLockReadGuard<'a, Database>),
+    Write(std::sync::RwLockWriteGuard<'a, Database>),
+}
+
+impl<'a> DbLock<'a> {
+    fn db(&self) -> &Database {
+        match self {
+            DbLock::Read(guard) => guard,
+            DbLock::Write(guard) => guard,
+        }
+    }
+}
+
+/// Parse a JSON request body, returning an HTTP 400 response on failure.
+macro_rules! json_body {
+    ($body:expr, $origin:expr) => {
+        match serde_json::from_str($body) {
+            Ok(v) => v,
+            Err(e) => return json_error(400, &format!("Invalid JSON: {}", e), $origin),
+        }
+    };
+}
+
+/// Serialize a value as a 200 JSON response.
+fn json_ok<T: Serialize>(value: &T, origin: Option<&str>) -> String {
+    let body = match serde_json::to_string(value) {
+        Ok(body) => body,
+        Err(_) => "null".to_string(),
+    };
+    http_response(200, "application/json", &body, origin)
+}
+
+/// Render a shared-API `Result` as an HTTP response: 200 on success, 404
+/// when the message reports a missing entity, 400 otherwise.
+fn api_response<T: Serialize>(result: Result<T, String>, origin: Option<&str>) -> String {
+    match result {
+        Ok(value) => json_ok(&value, origin),
+        Err(message) => {
+            let status = if message.to_lowercase().contains("not found") {
+                404
+            } else {
+                400
+            };
+            json_error(status, &message, origin)
+        }
+    }
+}
+
 pub fn handle_request(
     dashboard: &WebDashboard,
-    db: &RedbDb,
+    db: &Arc<RwLock<Database>>,
     method: &str,
     path: &str,
     body: &str,
@@ -516,6 +572,7 @@ pub fn handle_request(
             | ["api", "auth", "login"]         // JWT login
             | ["api", "users", "login"]        // legacy login (backward compat)
             | ["api", "users", "register"] // user registration (first-time setup)
+            | ["api", "shared", _] // public share links (token-gated)
     );
 
     // Verify JWT for authenticated endpoints
@@ -524,6 +581,76 @@ pub fn handle_request(
             return resp;
         }
     }
+
+    // ─── Sync run lifecycle (lockless) ───────────────────────────────
+    // The sync pipeline acquires its own per-file locks, so a run must not
+    // hold the request lock (it would deadlock). These arms therefore return
+    // before the database lock is taken.
+    match path_segments.as_slice() {
+        ["api", "sync", "status"] if method == "GET" => {
+            let progress = api::sync_api::progress(dashboard.sync_state());
+            let status = serde_json::json!({
+                "syncEnabled": true,
+                "status": progress.status,
+                "lastSync": progress.started_at,
+                "provider": null,
+            });
+            return http_response(
+                200,
+                "application/json",
+                &serde_json::to_string(&status).unwrap_or_default(),
+                origin,
+            );
+        }
+        ["api", "sync", "progress"] if method == "GET" => {
+            return json_ok(&api::sync_api::progress(dashboard.sync_state()), origin);
+        }
+        ["api", "sync", "cancel"] if method == "POST" => {
+            return json_ok(&api::sync_api::cancel(dashboard.sync_state()), origin);
+        }
+        ["api", "sync", "start"] if method == "POST" => {
+            let req: api::sync_api::StartRequest = json_body!(body, origin);
+            return api_response(
+                api::sync_api::start(
+                    db,
+                    &dashboard.compression,
+                    dashboard.sync_state(),
+                    &req.config_id,
+                    req.file_ids,
+                ),
+                origin,
+            );
+        }
+        ["api", "sync", "test"] if method == "POST" => {
+            let req: api::sync_api::ConfigRequest = json_body!(body, origin);
+            return api_response(api::sync_api::test_connection(&req.config), origin);
+        }
+        ["api", "sync", "remote-files"] if method == "POST" => {
+            let req: api::sync_api::RemoteFilesRequest = json_body!(body, origin);
+            return api_response(
+                api::sync_api::list_remote_files(&req.config, &req.prefix),
+                origin,
+            );
+        }
+        _ => {}
+    }
+
+    // Take the database lock for the duration of the request. Readers share
+    // the lock; writers (POST/PUT/DELETE) take it exclusively. A poisoned lock
+    // is recovered from rather than propagated, so one panicking request can
+    // not wedge every later one.
+    let lock = if matches!(method, "GET" | "HEAD") {
+        match db.read() {
+            Ok(guard) => DbLock::Read(guard),
+            Err(poisoned) => DbLock::Read(poisoned.into_inner()),
+        }
+    } else {
+        match db.write() {
+            Ok(guard) => DbLock::Write(guard),
+            Err(poisoned) => DbLock::Write(poisoned.into_inner()),
+        }
+    };
+    let db: &Database = lock.db();
 
     // Route to appropriate handler
     match path_segments.as_slice() {
@@ -536,24 +663,222 @@ pub fn handle_request(
         ["api", "users", "register"] if method == "POST" => register_user_web(db, body, origin),
 
         // ─── File endpoints ───────────────────────────────────────
-        ["api", "files"] if method == "GET" => list_all_json(db, FILES_TABLE, origin),
-        ["api", "files", id] if method == "GET" => get_by_id(db, FILES_TABLE, id, origin),
-        ["api", "files", id] if method == "DELETE" => delete_by_id(db, FILES_TABLE, id, origin),
+        ["api", "files"] if method == "GET" => {
+            list_all_json(db, Database::get_files_table(), origin)
+        }
+        ["api", "files", "folder"] if method == "POST" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct CreateFolderBody {
+                name: String,
+                parent_id: String,
+            }
+            let req: CreateFolderBody = json_body!(body, origin);
+            api_response(
+                api::files::create_folder(db, req.name, req.parent_id),
+                origin,
+            )
+        }
+        ["api", "files", "rebuild-index"] if method == "POST" => {
+            api_response(api::files::rebuild_parent_index(db), origin)
+        }
+        ["api", "files", id] if method == "GET" => {
+            get_by_id(db, Database::get_files_table(), id, origin)
+        }
+        ["api", "files", id] if method == "DELETE" => {
+            api_response(api::files::delete(db, id), origin)
+        }
+        ["api", "files", id, "rename"] if method == "POST" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct RenameBody {
+                new_name: String,
+            }
+            let req: RenameBody = json_body!(body, origin);
+            api_response(api::files::rename(db, id, req.new_name), origin)
+        }
+        ["api", "files", id, "move"] if method == "POST" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct MoveBody {
+                parent_id: String,
+            }
+            let req: MoveBody = json_body!(body, origin);
+            api_response(api::files::move_to(db, id, req.parent_id), origin)
+        }
+        ["api", "files", id, "duplicate"] if method == "POST" => {
+            api_response(api::files::duplicate(db, id), origin)
+        }
+        ["api", "files", id, "preview"] if method == "GET" => {
+            api_response(api::files::preview(db, id), origin)
+        }
+        ["api", "files", id, "versions"] if method == "GET" => {
+            api_response(api::versions::list(db, id), origin)
+        }
+        ["api", "files", id, "versions"] if method == "POST" => {
+            api_response(api::versions::create(db, id), origin)
+        }
+        ["api", "files", id, "versions", version_id, "revert"] if method == "POST" => {
+            api_response(api::versions::revert(db, id, version_id), origin)
+        }
+
+        // ─── Trash endpoints ─────────────────────────────────────
+        ["api", "trash"] if method == "GET" => api_response(api::trash::list(db), origin),
+        ["api", "trash"] if method == "DELETE" => api_response(api::trash::empty(db), origin),
+        ["api", "trash", id] if method == "DELETE" => {
+            api_response(api::trash::delete(db, id), origin)
+        }
+        ["api", "trash", id, "restore"] if method == "POST" => {
+            api_response(api::trash::restore(db, id), origin)
+        }
+
+        // ─── Version snapshots ───────────────────────────────────
+        ["api", "versions", "snapshot-all"] if method == "POST" => {
+            api_response(api::versions::snapshot_all(db), origin)
+        }
+
+        // ─── Audit log ───────────────────────────────────────────
+        ["api", "audit"] if method == "GET" => {
+            let limit = parse_query_param(query, "limit").and_then(|v| v.parse::<u32>().ok());
+            let entity_type = parse_query_param(query, "entityType");
+            api_response(api::audit::list(db, limit, entity_type.as_deref()), origin)
+        }
+
+        // ─── Share links ─────────────────────────────────────────
+        ["api", "share-links"] if method == "GET" => api_response(api::share::list(db), origin),
+        ["api", "share-links"] if method == "POST" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct ShareBody {
+                file_id: String,
+                expires_in_hours: Option<u64>,
+            }
+            let req: ShareBody = json_body!(body, origin);
+            api_response(
+                api::share::generate(db, &req.file_id, req.expires_in_hours),
+                origin,
+            )
+        }
+        ["api", "shared", token] if method == "GET" => match api::share::resolve(db, token) {
+            Ok(Some(node)) => json_ok(&node, origin),
+            Ok(None) => json_error(404, "Share link not found", origin),
+            Err(e) => api_response::<serde_json::Value>(Err(e), origin),
+        },
+
+        // ─── Batch operations ────────────────────────────────────
+        ["api", "batch", "delete"] if method == "POST" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct BatchBody {
+                file_ids: Vec<String>,
+            }
+            let req: BatchBody = json_body!(body, origin);
+            api_response(api::batch::delete(db, &req.file_ids), origin)
+        }
+        ["api", "batch", "encrypt"] if method == "POST" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct BatchBody {
+                file_ids: Vec<String>,
+                algorithm: String,
+            }
+            let req: BatchBody = json_body!(body, origin);
+            api_response(
+                api::batch::encrypt(db, &req.file_ids, &req.algorithm),
+                origin,
+            )
+        }
+        ["api", "batch", "compress"] if method == "POST" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct BatchBody {
+                file_ids: Vec<String>,
+                layer: String,
+            }
+            let req: BatchBody = json_body!(body, origin);
+            api_response(api::batch::compress(db, &req.file_ids, &req.layer), origin)
+        }
 
         // ─── Account endpoints ────────────────────────────────────
-        ["api", "accounts"] if method == "GET" => list_all_json(db, ACCOUNTS_TABLE, origin),
+        ["api", "accounts"] if method == "GET" => {
+            list_all_json(db, Database::get_accounts_table(), origin)
+        }
+        ["api", "accounts"] if method == "POST" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct CreateAccountBody {
+                name: String,
+                account_type: String,
+                path: Option<String>,
+                color: Option<String>,
+            }
+            let req: CreateAccountBody = json_body!(body, origin);
+            api_response(
+                api::accounts::create(db, req.name, req.account_type, req.path, req.color),
+                origin,
+            )
+        }
+        ["api", "accounts", id, "switch"] if method == "POST" => {
+            api_response(api::accounts::switch(db, id), origin)
+        }
+        ["api", "accounts", id] if method == "DELETE" => {
+            api_response(api::accounts::delete(db, id), origin)
+        }
 
         // ─── Collection endpoints ─────────────────────────────────
-        ["api", "collections"] if method == "GET" => list_all_json(db, COLLECTIONS_TABLE, origin),
+        ["api", "collections"] if method == "GET" => {
+            list_all_json(db, Database::get_collections_table(), origin)
+        }
+        ["api", "collections"] if method == "POST" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct CreateCollectionBody {
+                name: String,
+                collection_type: String,
+                color: String,
+                description: Option<String>,
+            }
+            let req: CreateCollectionBody = json_body!(body, origin);
+            api_response(
+                api::collections::create(
+                    db,
+                    req.name,
+                    req.collection_type,
+                    req.color,
+                    req.description,
+                ),
+                origin,
+            )
+        }
+        ["api", "collections", id, "items"] if method == "POST" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct AddItemBody {
+                file_id: String,
+                note: Option<String>,
+            }
+            let req: AddItemBody = json_body!(body, origin);
+            api_response(
+                api::collections::add_item(db, id, &req.file_id, req.note),
+                origin,
+            )
+        }
+        ["api", "collections", id, "items", file_id] if method == "DELETE" => {
+            api_response(api::collections::remove_item(db, id, file_id), origin)
+        }
         ["api", "collection-items"] if method == "GET" => {
-            list_all_json(db, COLLECTION_ITEMS_TABLE, origin)
+            list_all_json(db, Database::get_collection_items_table(), origin)
         }
 
         // ─── Face group endpoints ─────────────────────────────────
-        ["api", "face-groups"] if method == "GET" => list_all_json(db, FACE_GROUPS_TABLE, origin),
+        ["api", "face-groups"] if method == "GET" => {
+            list_all_json(db, Database::get_face_groups_table(), origin)
+        }
 
         // ─── Loose group endpoints ────────────────────────────────
-        ["api", "loose-groups"] if method == "GET" => list_all_json(db, LOOSE_GROUPS_TABLE, origin),
+        ["api", "loose-groups"] if method == "GET" => {
+            list_all_json(db, Database::get_loose_groups_table(), origin)
+        }
 
         // ─── Encryption endpoints ─────────────────────────────────
         ["api", "encryption", "status"] if method == "GET" => {
@@ -578,13 +903,64 @@ pub fn handle_request(
         ["api", "geo-files"] if method == "GET" => list_geo_files(db, origin),
 
         // ─── Search ───────────────────────────────────────────────
-        ["api", "search"] if method == "GET" => search_files(db, query, origin),
+        ["api", "search", "suggest"] if method == "GET" => {
+            let prefix = parse_query_param(query, "q").unwrap_or_default();
+            let limit = parse_query_param(query, "limit")
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(10);
+            api_response(
+                api::search_api::suggest(&dashboard.search_index, db, &prefix, limit),
+                origin,
+            )
+        }
+        ["api", "search", "paginated"] if method == "GET" => {
+            let q = parse_query_param(query, "q").unwrap_or_default();
+            let limit = parse_query_param(query, "limit")
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(20);
+            let offset = parse_query_param(query, "offset")
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(0);
+            api_response(
+                api::search_api::search_paginated(&dashboard.search_index, db, &q, limit, offset),
+                origin,
+            )
+        }
+        ["api", "search"] if method == "GET" => {
+            let q = parse_query_param(query, "q").unwrap_or_default();
+            let limit = parse_query_param(query, "limit").and_then(|v| v.parse::<usize>().ok());
+            let offset = parse_query_param(query, "offset").and_then(|v| v.parse::<usize>().ok());
+            api_response(
+                api::search_api::search(&dashboard.search_index, db, &q, limit, offset),
+                origin,
+            )
+        }
 
         // ─── Location endpoints ───────────────────────────────────
-        ["api", "locations"] if method == "GET" => list_all_json(db, LOCATIONS_TABLE, origin),
+        ["api", "locations"] if method == "GET" => {
+            list_all_json(db, Database::get_locations_table(), origin)
+        }
 
         // ─── User endpoints ──────────────────────────────────────
         ["api", "users"] if method == "GET" => list_users_safe(db, origin),
+        ["api", "users"] if method == "POST" => register_user_web(db, body, origin),
+        ["api", "users", id] if method == "DELETE" => {
+            api_response(api::users::delete(db, id), origin)
+        }
+        ["api", "users", id, "role"] if method == "POST" => {
+            #[derive(Deserialize)]
+            struct RoleBody {
+                role: String,
+            }
+            let req: RoleBody = json_body!(body, origin);
+            match api::users::update_role(db, id, req.role) {
+                Ok(mut user) => {
+                    user.password_hash.clear();
+                    json_ok(&user, origin)
+                }
+                Err(e) => api_response::<cybermanju_types::schema::User>(Err(e), origin),
+            }
+        }
 
         // ─── Permission endpoints ─────────────────────────────────
         ["api", "permissions"] if method == "POST" => set_permission_web(db, body, origin),
@@ -595,21 +971,14 @@ pub fn handle_request(
 
         // ─── Sync config endpoints ────────────────────────────────
         ["api", "sync", "configs"] if method == "GET" => {
-            // Return empty array — sync configs not yet persisted to a table
-            http_response(200, "application/json", "[]", origin)
+            api_response(api::sync_api::list_configs(db), origin)
         }
-        ["api", "sync", "status"] if method == "GET" => {
-            let status = serde_json::json!({
-                "syncEnabled": false,
-                "lastSync": null,
-                "provider": null,
-            });
-            http_response(
-                200,
-                "application/json",
-                &serde_json::to_string(&status).unwrap_or_default(),
-                origin,
-            )
+        ["api", "sync", "configs"] if method == "POST" => {
+            let req: api::sync_api::ConfigRequest = json_body!(body, origin);
+            api_response(api::sync_api::save_config(db, req.config), origin)
+        }
+        ["api", "sync", "configs", id] if method == "DELETE" => {
+            api_response(api::sync_api::delete_config(db, id), origin)
         }
 
         // ─── Dashboard status ────────────────────────────────────
@@ -618,10 +987,14 @@ pub fn handle_request(
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_millis())
                 .unwrap_or(0);
+            // Shape matches the Tauri `DashboardStatus` command so the
+            // frontend can use one mapping in every transport.
             let status = serde_json::json!({
                 "service": "Cybermanju Drive Web Dashboard",
                 "running": dashboard.running.load(Ordering::SeqCst),
                 "port": dashboard.port,
+                "url": format!("http://localhost:{}", dashboard.port),
+                "activeConnections": dashboard.active_connections.load(Ordering::SeqCst),
                 "bindAddress": dashboard.bind_addr,
                 "timestamp": now,
                 "version": "1.0.0",
@@ -780,7 +1153,7 @@ fn cors_preflight_response(origin: Option<&str>) -> String {
 
 /// List all JSON values from a table.
 fn list_all_json(
-    db: &RedbDb,
+    db: &Database,
     table_def: TableDefinition<'static, &'static str, &'static str>,
     origin: Option<&str>,
 ) -> String {
@@ -825,12 +1198,12 @@ fn list_all_json(
 }
 
 /// List encryption keys with private_key fields STRIPPED for security.
-fn list_encryption_keys_safe(db: &RedbDb, origin: Option<&str>) -> String {
+fn list_encryption_keys_safe(db: &Database, origin: Option<&str>) -> String {
     let tx = match db.begin_read() {
         Ok(tx) => tx,
         Err(e) => return json_error(500, &format!("Read error: {}", e), origin),
     };
-    let table = match tx.open_table(ENCRYPTION_KEYS_TABLE) {
+    let table = match tx.open_table(Database::get_encryption_keys_table()) {
         Ok(t) => t,
         Err(e) => return json_error(500, &format!("Table open error: {}", e), origin),
     };
@@ -875,7 +1248,7 @@ fn list_encryption_keys_safe(db: &RedbDb, origin: Option<&str>) -> String {
 
 /// Get a single entry by key from a table.
 fn get_by_id(
-    db: &RedbDb,
+    db: &Database,
     table_def: TableDefinition<'static, &'static str, &'static str>,
     id: &str,
     origin: Option<&str>,
@@ -899,42 +1272,15 @@ fn get_by_id(
     }
 }
 
-/// Delete an entry by key.
-fn delete_by_id(
-    db: &RedbDb,
-    table_def: TableDefinition<'static, &'static str, &'static str>,
-    id: &str,
-    origin: Option<&str>,
-) -> String {
-    let tx = match db.begin_write() {
-        Ok(tx) => tx,
-        Err(e) => return json_error(500, &format!("Write error: {}", e), origin),
-    };
-    let result = {
-        let mut table = match tx.open_table(table_def) {
-            Ok(t) => t,
-            Err(e) => return json_error(500, &format!("Table open error: {}", e), origin),
-        };
-        let removed = table.remove(id).is_ok();
-        removed
-    };
-    if let Err(e) = tx.commit() {
-        return json_error(500, &format!("Commit error: {}", e), origin);
-    }
-    let body = serde_json::to_string(&serde_json::json!({"deleted": result, "id": id}))
-        .unwrap_or_default();
-    http_response(200, "application/json", &body, origin)
-}
-
 // ─── Domain-specific handlers ────────────────────────────────────────
 
 /// List files that have GPS coordinates.
-fn list_geo_files(db: &RedbDb, origin: Option<&str>) -> String {
+fn list_geo_files(db: &Database, origin: Option<&str>) -> String {
     let tx = match db.begin_read() {
         Ok(tx) => tx,
         Err(e) => return json_error(500, &format!("Read error: {}", e), origin),
     };
-    let table = match tx.open_table(FILES_TABLE) {
+    let table = match tx.open_table(Database::get_files_table()) {
         Ok(t) => t,
         Err(e) => return json_error(500, &format!("Table open error: {}", e), origin),
     };
@@ -957,66 +1303,15 @@ fn list_geo_files(db: &RedbDb, origin: Option<&str>) -> String {
     http_response(200, "application/json", &body, origin)
 }
 
-/// Simple search across file names and tags by scanning all entries.
-/// Query param: ?q=search_term
-fn search_files(db: &RedbDb, query: &str, origin: Option<&str>) -> String {
-    let search_term = parse_query_param(query, "q")
-        .unwrap_or_default()
-        .to_lowercase();
-
-    let tx = match db.begin_read() {
-        Ok(tx) => tx,
-        Err(e) => return json_error(500, &format!("Read error: {}", e), origin),
-    };
-    let table = match tx.open_table(FILES_TABLE) {
-        Ok(t) => t,
-        Err(e) => return json_error(500, &format!("Table open error: {}", e), origin),
-    };
-
-    let mut results: Vec<serde_json::Value> = Vec::new();
-    let iter = match table.iter() {
-        Ok(i) => i,
-        Err(e) => return json_error(500, &format!("Iteration error: {}", e), origin),
-    };
-    for (_, value) in iter.flatten() {
-        if let Ok(obj) = serde_json::from_str::<serde_json::Value>(value.value()) {
-            let name = obj
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_lowercase();
-            let path = obj
-                .get("path")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_lowercase();
-            let content = obj
-                .get("content_text")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_lowercase();
-
-            if name.contains(&search_term)
-                || path.contains(&search_term)
-                || content.contains(&search_term)
-            {
-                results.push(obj);
-            }
-        }
-    }
-    let body = serde_json::to_string(&results).unwrap_or_else(|_| "[]".to_string());
-    http_response(200, "application/json", &body, origin)
-}
-
 // ─── User management handlers ────────────────────────────────────────
 
 /// List users (without password hashes).
-fn list_users_safe(db: &RedbDb, origin: Option<&str>) -> String {
+fn list_users_safe(db: &Database, origin: Option<&str>) -> String {
     let tx = match db.begin_read() {
         Ok(tx) => tx,
         Err(e) => return json_error(500, &format!("Read error: {}", e), origin),
     };
-    let table = match tx.open_table(USERS_TABLE) {
+    let table = match tx.open_table(Database::get_users_table()) {
         Ok(t) => t,
         Err(e) => return json_error(500, &format!("Table open error: {}", e), origin),
     };
@@ -1042,7 +1337,7 @@ fn list_users_safe(db: &RedbDb, origin: Option<&str>) -> String {
 
 /// Login endpoint — expects JSON body: { "username": "...", "password": "..." }
 /// Verifies argon2 password hash and returns a JWT token.
-fn login_user(db: &RedbDb, body: &str, jwt_secret: &[u8; 32], origin: Option<&str>) -> String {
+fn login_user(db: &Database, body: &str, jwt_secret: &[u8; 32], origin: Option<&str>) -> String {
     let req: serde_json::Value = match serde_json::from_str(body) {
         Ok(v) => v,
         Err(e) => return json_error(400, &format!("Invalid JSON: {}", e), origin),
@@ -1060,7 +1355,7 @@ fn login_user(db: &RedbDb, body: &str, jwt_secret: &[u8; 32], origin: Option<&st
         Ok(tx) => tx,
         Err(e) => return json_error(500, &format!("Read error: {}", e), origin),
     };
-    let table = match tx.open_table(USERS_TABLE) {
+    let table = match tx.open_table(Database::get_users_table()) {
         Ok(t) => t,
         Err(e) => return json_error(500, &format!("Table open error: {}", e), origin),
     };
@@ -1142,116 +1437,46 @@ fn login_user(db: &RedbDb, body: &str, jwt_secret: &[u8; 32], origin: Option<&st
 }
 
 /// Register endpoint — expects JSON body:
-/// { "username": "...", "password": "...", "display_name": "...", "role": "..." }
-fn register_user_web(db: &RedbDb, body: &str, origin: Option<&str>) -> String {
-    let req: serde_json::Value = match serde_json::from_str(body) {
+/// Register a user from a JSON body — shared by `/api/users/register`
+/// (first-run setup) and `POST /api/users` (admin creation).
+fn register_user_web(db: &Database, body: &str, origin: Option<&str>) -> String {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct RegisterBody {
+        username: String,
+        password: String,
+        display_name: Option<String>,
+        role: Option<String>,
+    }
+
+    let req: RegisterBody = match serde_json::from_str(body) {
         Ok(v) => v,
         Err(e) => return json_error(400, &format!("Invalid JSON: {}", e), origin),
     };
 
-    let username = req.get("username").and_then(|v| v.as_str()).unwrap_or("");
-    let password = req.get("password").and_then(|v| v.as_str()).unwrap_or("");
-    let display_name = req
-        .get("displayName")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let role = req
-        .get("role")
-        .and_then(|v| v.as_str())
-        .unwrap_or("user")
-        .to_string();
-
-    if username.is_empty() || password.is_empty() {
-        return json_error(400, "username and password are required", origin);
-    }
-
-    // Check for duplicate username
-    let tx = match db.begin_read() {
-        Ok(tx) => tx,
-        Err(e) => return json_error(500, &format!("Read error: {}", e), origin),
-    };
-    let table = match tx.open_table(USERS_TABLE) {
-        Ok(t) => t,
-        Err(e) => return json_error(500, &format!("Table open error: {}", e), origin),
-    };
-
-    let iter = match table.iter() {
-        Ok(i) => i,
-        Err(e) => return json_error(500, &format!("Iteration error: {}", e), origin),
-    };
-    for (_, value) in iter.flatten() {
-        if let Ok(user) = serde_json::from_str::<serde_json::Value>(value.value()) {
-            if user.get("username").and_then(|v| v.as_str()) == Some(username) {
-                drop(tx);
-                return json_error(
-                    409,
-                    &format!("Username '{}' already exists", username),
-                    origin,
-                );
-            }
+    match api::users::register(db, req.username, req.password, req.display_name, req.role) {
+        Ok(mut user) => {
+            // SECURITY: never return the password hash to a client
+            user.password_hash.clear();
+            http_response(
+                201,
+                "application/json",
+                &serde_json::to_string(&user).unwrap_or_default(),
+                origin,
+            )
+        }
+        Err(e) => {
+            let status = if e.contains("already exists") {
+                409
+            } else {
+                400
+            };
+            json_error(status, &e, origin)
         }
     }
-    drop(tx);
-
-    // Hash password with argon2
-    let password_hash = match argon2_hash(password) {
-        Ok(h) => h,
-        Err(e) => return json_error(500, &format!("Hashing error: {}", e), origin),
-    };
-
-    let user_id = uuid::Uuid::new_v4().to_string();
-    let now = chrono::Utc::now().to_rfc3339();
-
-    let user = serde_json::json!({
-        "id": user_id,
-        "username": username,
-        "passwordHash": password_hash,
-        "displayName": display_name,
-        "role": role,
-        "isActive": true,
-        "createdAt": now.clone(),
-        "updatedAt": now,
-    });
-
-    let user_json = match serde_json::to_string(&user) {
-        Ok(s) => s,
-        Err(e) => return json_error(500, &format!("Serialization error: {}", e), origin),
-    };
-
-    let tx = match db.begin_write() {
-        Ok(tx) => tx,
-        Err(e) => return json_error(500, &format!("Write error: {}", e), origin),
-    };
-    {
-        let mut table = match tx.open_table(USERS_TABLE) {
-            Ok(t) => t,
-            Err(e) => return json_error(500, &format!("Table open error: {}", e), origin),
-        };
-        if table.insert(user_id.as_str(), user_json.as_str()).is_err() {
-            return json_error(500, "Failed to insert user", origin);
-        }
-    }
-    if tx.commit().is_err() {
-        return json_error(500, "Failed to commit user registration", origin);
-    }
-
-    // Strip password hash from response
-    let mut response = user;
-    if let Some(map) = response.as_object_mut() {
-        map.remove("passwordHash");
-        map.remove("password_hash");
-    }
-    http_response(
-        201,
-        "application/json",
-        &serde_json::to_string(&response).unwrap_or_default(),
-        origin,
-    )
 }
 
-/// Set file permission — expects JSON body:
-/// { "user_id": "...", "file_id": "...", "access": "read|write|admin" }
-fn set_permission_web(db: &RedbDb, body: &str, origin: Option<&str>) -> String {
+fn set_permission_web(db: &Database, body: &str, origin: Option<&str>) -> String {
     let req: serde_json::Value = match serde_json::from_str(body) {
         Ok(v) => v,
         Err(e) => return json_error(400, &format!("Invalid JSON: {}", e), origin),
@@ -1291,7 +1516,7 @@ fn set_permission_web(db: &RedbDb, body: &str, origin: Option<&str>) -> String {
         Err(e) => return json_error(500, &format!("Write error: {}", e), origin),
     };
     {
-        let mut table = match tx.open_table(USER_FILE_PERMS_TABLE) {
+        let mut table = match tx.open_table(Database::get_user_file_perms_table()) {
             Ok(t) => t,
             Err(e) => return json_error(500, &format!("Table open error: {}", e), origin),
         };
@@ -1313,7 +1538,7 @@ fn set_permission_web(db: &RedbDb, body: &str, origin: Option<&str>) -> String {
 
 /// Verify file access — expects JSON body:
 /// { "user_id": "...", "file_id": "...", "required_access": "read|write|admin" }
-fn verify_access_web(db: &RedbDb, body: &str, origin: Option<&str>) -> String {
+fn verify_access_web(db: &Database, body: &str, origin: Option<&str>) -> String {
     let req: serde_json::Value = match serde_json::from_str(body) {
         Ok(v) => v,
         Err(e) => return json_error(400, &format!("Invalid JSON: {}", e), origin),
@@ -1331,7 +1556,7 @@ fn verify_access_web(db: &RedbDb, body: &str, origin: Option<&str>) -> String {
         Ok(tx) => tx,
         Err(e) => return json_error(500, &format!("Read error: {}", e), origin),
     };
-    let users_table = match tx.open_table(USERS_TABLE) {
+    let users_table = match tx.open_table(Database::get_users_table()) {
         Ok(t) => t,
         Err(e) => return json_error(500, &format!("Table open error: {}", e), origin),
     };
@@ -1357,7 +1582,7 @@ fn verify_access_web(db: &RedbDb, body: &str, origin: Option<&str>) -> String {
     }
 
     // Check explicit permissions
-    let perms_table = match tx.open_table(USER_FILE_PERMS_TABLE) {
+    let perms_table = match tx.open_table(Database::get_user_file_perms_table()) {
         Ok(t) => t,
         Err(e) => return json_error(500, &format!("Table open error: {}", e), origin),
     };
@@ -1409,12 +1634,12 @@ fn verify_access_web(db: &RedbDb, body: &str, origin: Option<&str>) -> String {
 }
 
 /// Get all permissions for a specific file.
-fn get_permissions_for_file(db: &RedbDb, file_id: &str, origin: Option<&str>) -> String {
+fn get_permissions_for_file(db: &Database, file_id: &str, origin: Option<&str>) -> String {
     let tx = match db.begin_read() {
         Ok(tx) => tx,
         Err(e) => return json_error(500, &format!("Read error: {}", e), origin),
     };
-    let table = match tx.open_table(USER_FILE_PERMS_TABLE) {
+    let table = match tx.open_table(Database::get_user_file_perms_table()) {
         Ok(t) => t,
         Err(e) => return json_error(500, &format!("Table open error: {}", e), origin),
     };
@@ -1436,19 +1661,6 @@ fn get_permissions_for_file(db: &RedbDb, file_id: &str, origin: Option<&str>) ->
 }
 
 // ─── Argon2 helpers ──────────────────────────────────────────────────
-
-fn argon2_hash(password: &str) -> Result<String, String> {
-    use argon2::{
-        password_hash::{PasswordHasher, SaltString},
-        Argon2,
-    };
-
-    let salt = SaltString::generate(&mut OsRng);
-    Argon2::default()
-        .hash_password(password.as_bytes(), &salt)
-        .map(|h| h.to_string())
-        .map_err(|e| format!("Argon2 hash error: {}", e))
-}
 
 fn argon2_verify(password: &str, hash: &str) -> Result<bool, String> {
     use argon2::{
@@ -1476,7 +1688,7 @@ fn access_level_sufficient(granted: &str, required: &str) -> bool {
 
 /// Build an HTTP response with restricted CORS headers.
 /// CORS headers are only included if the origin matches ALLOWED_ORIGINS.
-fn http_response(status: u16, content_type: &str, body: &str, origin: Option<&str>) -> String {
+pub fn http_response(status: u16, content_type: &str, body: &str, origin: Option<&str>) -> String {
     let status_text = match status {
         200 => "OK",
         201 => "Created",

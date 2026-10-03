@@ -30,27 +30,42 @@ RUN DOCKER_BUILD=true npm run build:wasm
 # ─── Stage 2: Rust Backend Build ─────────────────────────────────────
 FROM rust:alpine AS backend-builder
 
-# musl-dev is required for linking on Alpine
-RUN apk add --no-cache musl-dev pkgconf
+# build-base (gcc/g++/make/musl-dev) + cmake/perl are required to compile the
+# C/asm parts of `ring` (pulled in by rustls → reqwest → cybermanju-sync)
+RUN apk add --no-cache build-base pkgconf cmake perl
 
 WORKDIR /build
 
-# Copy the standalone server project definition
-COPY docker/server/Cargo.toml ./Cargo.toml
-COPY docker/server/src/main.rs ./src/main.rs
+# ──1. Workspace manifests (change rarely → keeps the dependency layer) ──
+COPY Cargo.toml Cargo.lock ./
+COPY crates/types/Cargo.toml          crates/types/Cargo.toml
+COPY crates/crypto/Cargo.toml         crates/crypto/Cargo.toml
+COPY crates/compression/Cargo.toml    crates/compression/Cargo.toml
+COPY crates/search/Cargo.toml         crates/search/Cargo.toml
+COPY crates/db/Cargo.toml             crates/db/Cargo.toml
+COPY crates/web/Cargo.toml            crates/web/Cargo.toml
+COPY crates/sync/Cargo.toml           crates/sync/Cargo.toml
+COPY crates/faces/Cargo.toml          crates/faces/Cargo.toml
+COPY crates/tests/Cargo.toml          crates/tests/Cargo.toml
+COPY crates/drive-wasm/Cargo.toml     crates/drive-wasm/Cargo.toml
+COPY src-tauri/Cargo.toml             src-tauri/Cargo.toml
+COPY docker/server/Cargo.toml         docker/server/Cargo.toml
 
-# Create a stub to pre-cache dependency compilation (this file is
-# replaced with the real module in the next COPY layer)
-RUN echo "pub struct WebDashboard;" > src/web_dashboard.rs && \
-    cargo build --release 2>/dev/null || true && \
-    rm -f src/web_dashboard.rs
+# ──2. Stub sources: compile every third-party dependency once ───────────
+#     (the real sources land in the next COPY and only rebuild our crates)
+RUN mkdir -p crates/*/src src-tauri/src docker/server/src && \
+    for d in crates/*/; do printf '// stub\n' > "$d/src/lib.rs"; done && \
+    printf '// stub\n' > src-tauri/src/lib.rs && \
+    printf 'fn main() {}\n' > src-tauri/src/main.rs && \
+    printf 'fn main() {}\n' > docker/server/src/main.rs && \
+    cargo build --release -p cybermanju-drive-server || true
 
-# Now copy the actual web_dashboard module from the Tauri crate
-COPY src-tauri/src/web_dashboard/mod.rs ./src/web_dashboard.rs
+# ──3. Real sources ────────────────────────────────────────────────────
+COPY crates ./crates
+COPY src-tauri ./src-tauri
+COPY docker/server ./docker/server
 
-# Build the release binary
-# Touch the source to invalidate the cache placeholder
-RUN touch src/web_dashboard.rs && cargo build --release
+RUN cargo build --release -p cybermanju-drive-server
 
 # ─── Stage 3: Minimal Runtime ────────────────────────────────────────
 FROM alpine:3.21 AS runtime

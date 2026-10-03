@@ -22,8 +22,10 @@ use db::Database;
 use std::sync::{Arc, RwLock};
 
 pub struct AppState {
-    pub db: RwLock<Database>,
-    pub tantivy_index: RwLock<search::SearchIndex>,
+    /// Shared with the web dashboard so the redb file is only opened once.
+    pub db: Arc<RwLock<Database>>,
+    /// Shared with the web dashboard so REST search sees live index updates.
+    pub tantivy_index: Arc<RwLock<search::SearchIndex>>,
     pub compression: compression::TripleCompressor,
     pub hmac_secret: [u8; 32],
 }
@@ -38,9 +40,9 @@ pub fn run() {
         .init();
     tracing::info!("Cybermanju Drive starting...");
 
-    // Initialize redb database
+    // Initialize redb database (opened exactly once — shared with the web dashboard)
     let db = match Database::new("cybermanju.db") {
-        Ok(d) => d,
+        Ok(d) => Arc::new(RwLock::new(d)),
         Err(e) => {
             tracing::error!("Failed to initialize redb database: {}", e);
             std::process::exit(1);
@@ -67,8 +69,8 @@ pub fn run() {
     OsRng.fill_bytes(&mut hmac_secret);
 
     let state = AppState {
-        db: RwLock::new(db),
-        tantivy_index: RwLock::new(tantivy_index),
+        db: Arc::clone(&db),
+        tantivy_index: Arc::new(RwLock::new(tantivy_index)),
         compression: compressor,
         hmac_secret,
     };
@@ -76,14 +78,18 @@ pub fn run() {
     // Dashboard state for connection tracking and lifecycle
     let dashboard_state = Arc::new(dashboard::DashboardState::new());
 
-    // Sync state for progress tracking and cancellation
+    // Sync state for progress tracking and cancellation — shared with the web
+    // dashboard so REST and Tauri callers observe the same progress.
     let sync_state = Arc::new(sync_cmd::SyncState::new());
 
     // ─── Start Web Dashboard (localhost-only, JWT-authenticated) ────────
-    let dashboard = std::sync::Arc::new(web_dashboard::WebDashboard::new(
-        web_dashboard::DEFAULT_PORT,
-        "cybermanju.db",
-    ));
+    // It borrows the application's database handle instead of opening the
+    // redb file a second time (which would fail on the exclusive file lock).
+    let mut dashboard =
+        web_dashboard::WebDashboard::new_shared(web_dashboard::DEFAULT_PORT, Arc::clone(&db));
+    dashboard.sync_state = Arc::clone(&sync_state);
+    dashboard.set_search_index(Arc::clone(&state.tantivy_index));
+    let dashboard = Arc::new(dashboard);
     match dashboard.start() {
         Ok(()) => tracing::info!(
             "Web Dashboard started on port {} (localhost only, JWT auth)",
@@ -107,6 +113,7 @@ pub fn run() {
         .manage(state)
         .manage(dashboard_state)
         .manage(sync_state)
+        .manage(Arc::clone(&dashboard))
         .invoke_handler(tauri::generate_handler![
             // File operations
             files::list_files,

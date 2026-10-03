@@ -6,9 +6,11 @@ members = [
     "crates/search",
     "crates/db",
     "crates/web",
+    "crates/sync",
     "crates/faces",
     "crates/tests",
     "crates/drive-wasm",
     "src-tauri",
+    "docker/server",
 ]
 resolver = "2"

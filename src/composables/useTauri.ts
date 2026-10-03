@@ -8,17 +8,37 @@ import type { FileNode } from '@/types'
 
 // ── Module-level connection state ─────────────────────────────
 
+const AUTH_TOKEN_KEY = 'cybermanju.authToken'
+
 let _serverUrl = ''
+
+// Restore a previously issued JWT so a page reload stays authenticated.
 let _authToken = ''
+try {
+  _authToken = (typeof localStorage !== 'undefined' && localStorage.getItem(AUTH_TOKEN_KEY)) || ''
+} catch {
+  _authToken = ''
+}
 
 /** Configure the Web Dashboard REST API base URL. */
 export function setServerUrl(url: string): void {
   _serverUrl = url.replace(/\/+$/, '')
 }
 
-/** Configure the Bearer token for ZimaOS JWT auth. */
+/** Configure (and persist) the Bearer token for JWT auth. */
 export function setAuthToken(token: string): void {
   _authToken = token
+  try {
+    if (token) localStorage.setItem(AUTH_TOKEN_KEY, token)
+    else localStorage.removeItem(AUTH_TOKEN_KEY)
+  } catch {
+    // Storage unavailable (private mode) — token still works for this session
+  }
+}
+
+/** Read the current auth token (for diagnostics). */
+export function getAuthToken(): string {
+  return _authToken
 }
 
 /** Read the current server URL (for diagnostics). */
@@ -83,6 +103,10 @@ async function restFetch<T>(method: string, path: string, body?: unknown): Promi
   }
 
   if (!res.ok) {
+    // Expired / missing JWT — tell the app to offer a login (F2)
+    if (res.status === 401 && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('cybermanju:unauthorized'))
+    }
     let message = `HTTP ${res.status} ${res.statusText}`
     try {
       const errBody = await res.json()
@@ -323,31 +347,259 @@ const REST_ROUTES: Record<string, RestMapping> = {
   // ── Dashboard ─────────────────────────────────────────────
   dashboard_status: {
     method: 'GET',
-    buildPath: () => '/api/health',
-    transformResponse: (raw) => {
-      const data = transformResponseKeys(raw) as Record<string, unknown>
-      return {
-        running: data.status === 'ok',
-        port: 3456,
-        url: getBaseUrl(),
-        activeConnections: 0,
-        service: data.service,
-        timestamp: data.timestamp,
-      }
+    buildPath: () => '/api/dashboard/status',
+  },
+
+  // ── Files (write ops) ────────────────────────────────────
+  create_folder: {
+    method: 'POST',
+    buildPath: () => '/api/files/folder',
+    transformRequest: (args) => ({ name: args.name, parentId: args.parentId }),
+  },
+
+  rename_file: {
+    method: 'POST',
+    buildPath: (args) => `/api/files/${args.fileId}/rename`,
+    transformRequest: (args) => ({ newName: args.newName }),
+  },
+
+  move_file: {
+    method: 'POST',
+    buildPath: (args) => `/api/files/${args.fileId}/move`,
+    transformRequest: (args) => ({ parentId: args.newParentId }),
+  },
+
+  duplicate_file_context: {
+    method: 'POST',
+    buildPath: (args) => `/api/files/${args.fileId}/duplicate`,
+    transformRequest: () => ({}),
+  },
+
+  rebuild_parent_index: {
+    method: 'POST',
+    buildPath: () => '/api/files/rebuild-index',
+    transformRequest: () => ({}),
+  },
+
+  // ── Trash ────────────────────────────────────────────────
+  list_trash: {
+    method: 'GET',
+    buildPath: () => '/api/trash',
+  },
+
+  restore_from_trash: {
+    method: 'POST',
+    buildPath: (args) => `/api/trash/${args.fileId}/restore`,
+    transformRequest: () => ({}),
+  },
+
+  delete_from_trash: {
+    method: 'DELETE',
+    buildPath: (args) => `/api/trash/${args.fileId}`,
+  },
+
+  empty_trash: {
+    method: 'DELETE',
+    buildPath: () => '/api/trash',
+  },
+
+  // ── File versions ────────────────────────────────────────
+  list_file_versions: {
+    method: 'GET',
+    buildPath: (args) => `/api/files/${args.fileId}/versions`,
+  },
+
+  create_file_version: {
+    method: 'POST',
+    buildPath: (args) => `/api/files/${args.fileId}/versions`,
+    transformRequest: () => ({}),
+  },
+
+  revert_file_version: {
+    method: 'POST',
+    buildPath: (args) => `/api/files/${args.fileId}/versions/${args.versionId}/revert`,
+    transformRequest: () => ({}),
+  },
+
+  snapshot_all_versions: {
+    method: 'POST',
+    buildPath: () => '/api/versions/snapshot-all',
+    transformRequest: () => ({}),
+  },
+
+  // ── Audit log ────────────────────────────────────────────
+  get_audit_log: {
+    method: 'GET',
+    buildPath: (args) => {
+      const params = new URLSearchParams()
+      if (args.limit != null) params.set('limit', String(args.limit))
+      if (args.entityType) params.set('entityType', String(args.entityType))
+      const qs = params.toString()
+      return qs ? `/api/audit?${qs}` : '/api/audit'
     },
+  },
+
+  // ── Share links ──────────────────────────────────────────
+  generate_share_link: {
+    method: 'POST',
+    buildPath: () => '/api/share-links',
+    transformRequest: (args) => ({
+      fileId: args.fileId,
+      expiresInHours: args.expiresInHours,
+    }),
+  },
+
+  list_share_links: {
+    method: 'GET',
+    buildPath: () => '/api/share-links',
+  },
+
+  // ── Batch operations ─────────────────────────────────────
+  batch_delete: {
+    method: 'POST',
+    buildPath: () => '/api/batch/delete',
+    transformRequest: (args) => ({ fileIds: args.fileIds }),
+  },
+
+  batch_encrypt: {
+    method: 'POST',
+    buildPath: () => '/api/batch/encrypt',
+    transformRequest: (args) => ({ fileIds: args.fileIds, algorithm: args.algorithm }),
+  },
+
+  batch_compress: {
+    method: 'POST',
+    buildPath: () => '/api/batch/compress',
+    transformRequest: (args) => ({ fileIds: args.fileIds, layer: args.layer }),
+  },
+
+  // ── User management (admin) ──────────────────────────────
+  create_user: {
+    method: 'POST',
+    buildPath: () => '/api/users',
+    transformRequest: (args) => ({
+      username: args.username,
+      password: args.password,
+      role: args.role,
+    }),
+  },
+
+  delete_user: {
+    method: 'DELETE',
+    buildPath: (args) => `/api/users/${args.userId}`,
+  },
+
+  update_user_role: {
+    method: 'POST',
+    buildPath: (args) => `/api/users/${args.userId}/role`,
+    transformRequest: (args) => ({ role: args.role }),
+  },
+
+  // ── Accounts (write) ─────────────────────────────────────
+  create_account: {
+    method: 'POST',
+    buildPath: () => '/api/accounts',
+    transformRequest: (args) => ({
+      name: args.name,
+      accountType: args.accountType,
+      path: args.path,
+      color: args.color,
+    }),
+  },
+
+  switch_account: {
+    method: 'POST',
+    buildPath: (args) => `/api/accounts/${args.accountId}/switch`,
+    transformRequest: () => ({}),
+  },
+
+  // ── Collections (write) ──────────────────────────────────
+  create_collection: {
+    method: 'POST',
+    buildPath: () => '/api/collections',
+    transformRequest: (args) => ({
+      name: args.name,
+      collectionType: args.collectionType,
+      color: args.color,
+      description: args.description,
+    }),
+  },
+
+  add_to_collection: {
+    method: 'POST',
+    buildPath: (args) => `/api/collections/${args.collectionId}/items`,
+    transformRequest: (args) => ({ fileId: args.fileId, note: args.note }),
+  },
+
+  remove_from_collection: {
+    method: 'DELETE',
+    buildPath: (args) => `/api/collections/${args.collectionId}/items/${args.fileId}`,
+  },
+
+  // ── Sync ─────────────────────────────────────────────────
+  list_sync_configs: {
+    method: 'GET',
+    buildPath: () => '/api/sync/configs',
+  },
+
+  create_sync_config: {
+    method: 'POST',
+    buildPath: () => '/api/sync/configs',
+    transformRequest: (args) => ({ config: args.config }),
+  },
+
+  delete_sync_config: {
+    method: 'DELETE',
+    buildPath: (args) => `/api/sync/configs/${args.configId}`,
+  },
+
+  start_sync: {
+    method: 'POST',
+    buildPath: () => '/api/sync/start',
+    transformRequest: (args) => ({ configId: args.configId, fileIds: args.fileIds }),
+  },
+
+  cancel_sync: {
+    method: 'POST',
+    buildPath: () => '/api/sync/cancel',
+    transformRequest: () => ({}),
+  },
+
+  get_sync_progress: {
+    method: 'GET',
+    buildPath: () => '/api/sync/progress',
+  },
+
+  test_sync_connection: {
+    method: 'POST',
+    buildPath: () => '/api/sync/test',
+    transformRequest: (args) => ({ config: args.config }),
+  },
+
+  list_remote_files: {
+    method: 'POST',
+    buildPath: () => '/api/sync/remote-files',
+    transformRequest: (args) => ({ config: args.config, prefix: args.prefix ?? '' }),
+  },
+
+  // ── Search (paginated) ───────────────────────────────────
+  search_files_paginated: {
+    method: 'GET',
+    buildPath: (args) => {
+      const params = new URLSearchParams()
+      params.set('q', String(args.query ?? ''))
+      params.set('limit', String(args.limit ?? 20))
+      params.set('offset', String(args.offset ?? 0))
+      return `/api/search/paginated?${params.toString()}`
+    },
+    transformResponse: (raw) => transformResponseKeys(raw),
   },
 }
 
-// Commands that exist in Tauri but have NO REST equivalent (write-heavy / Tauri-only).
+// Commands that exist in Tauri but have NO REST equivalent yet
+// (native dialogs, ONNX face models, local file system, desktop-only controls).
 const WRITE_ONLY_COMMANDS = new Set([
-  'create_folder',
-  'rename_file',
-  'duplicate_file_context',
-  'create_collection',
-  'add_to_collection',
-  'remove_from_collection',
-  'create_account',
-  'switch_account',
+  // Face detection — ONNX runtime + model files stay desktop-only
   'detect_faces',
   'detect_faces_batch_cmd',
   'recluster_faces',
@@ -355,6 +607,7 @@ const WRITE_ONLY_COMMANDS = new Set([
   'merge_face_groups',
   'delete_face_group',
   'find_similar_faces',
+  // Local crypto / compression / parsing over on-disk file paths
   'generate_keypair',
   'encrypt_file',
   'decrypt_file',
@@ -363,15 +616,10 @@ const WRITE_ONLY_COMMANDS = new Set([
   'parse_file',
   'start_dashboard',
   'stop_dashboard',
-  'start_sync',
-  'cancel_sync',
-  'create_sync_config',
-  'delete_sync_config',
-  'test_sync_connection',
-  'list_remote_files',
   'revoke_file_permission',
-  'list_sync_configs',
-  'get_sync_progress',
+  // Byte-level transfers that still need a dedicated REST upload endpoint
+  'upload_file',
+  'import_from_url',
 ])
 
 /** The core invoke — works in both Tauri and Web modes. */

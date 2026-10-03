@@ -10,6 +10,10 @@ argon2 = "0.5"
 base64 = "0.22"
 blake3 = "1"
 chrono = { version = "0.4", features = ["serde"] }
+cybermanju-compression = { path = "../compression" }
+cybermanju-db = { path = "../db" }
+cybermanju-search = { path = "../search" }
+cybermanju-sync = { path = "../sync" }
 cybermanju-types = { path = "../types" }
 jsonwebtoken = "9"
 log = "0.4"

@@ -2,196 +2,28 @@
 //
 // Unified HTTP server that:
 // 1. Serves compiled Vue frontend as static files (binary-safe)
-// 2. Routes /api/* to the web dashboard REST API handlers
+// 2. Routes /api/* to the shared cybermanju-web REST API
 //
 // Environment variables:
 //   PORT          — listening port (default: 3456)
-//   DB_PATH      — path to redb database (default: /data/cybermanju.db)
-//   STATIC_DIR   — path to frontend dist files (default: ./static)
-//   RUST_LOG     — log level (default: info)
+//   DB_PATH       — path to redb database (default: /data/cybermanju.db)
+//   STATIC_DIR    — path to frontend dist files (default: ./static)
+//   RUST_LOG      — log level (default: info)
 
-mod web_dashboard;
-
+use cybermanju_db::Database;
+use cybermanju_web::{handle_request, http_response, serve_static_file, WebDashboard};
 use log::{error, info, warn};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
-use std::net::TcpStream;
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-
-/// MIME type lookup for common file extensions
-fn mime_type(path: &str) -> &'static str {
-    match path.rsplit('.').next() {
-        Some("html") | Some("htm") => "text/html; charset=utf-8",
-        Some("css") => "text/css; charset=utf-8",
-        Some("js") | Some("mjs") => "application/javascript; charset=utf-8",
-        Some("json") => "application/json; charset=utf-8",
-        Some("png") => "image/png",
-        Some("jpg") | Some("jpeg") => "image/jpeg",
-        Some("gif") => "image/gif",
-        Some("svg") => "image/svg+xml",
-        Some("ico") => "image/x-icon",
-        Some("woff") => "font/woff",
-        Some("woff2") => "font/woff2",
-        Some("ttf") => "font/ttf",
-        Some("otf") => "font/otf",
-        Some("webp") => "image/webp",
-        Some("webm") => "video/webm",
-        Some("mp4") => "video/mp4",
-        Some("mp3") => "audio/mpeg",
-        Some("wasm") => "application/wasm",
-        Some("xml") => "application/xml; charset=utf-8",
-        Some("txt") => "text/plain; charset=utf-8",
-        Some("csv") => "text/csv; charset=utf-8",
-        Some("pdf") => "application/pdf",
-        Some("zip") => "application/zip",
-        Some("gz") | Some("gzip") => "application/gzip",
-        Some("map") => "application/json",
-        _ => "application/octet-stream",
-    }
-}
-
-/// Build an HTTP status text from a status code
-fn status_text(status: u16) -> &'static str {
-    match status {
-        200 => "OK",
-        201 => "Created",
-        400 => "Bad Request",
-        403 => "Forbidden",
-        404 => "Not Found",
-        405 => "Method Not Allowed",
-        500 => "Internal Server Error",
-        _ => "Unknown",
-    }
-}
-
-fn http_response(status: u16, content_type: &str, body: &str) -> String {
-    format!(
-        "HTTP/1.1 {status} {}\r\n\
-         Content-Type: {content_type}\r\n\
-         Content-Length: {}\r\n\
-         Access-Control-Allow-Origin: *\r\n\
-         Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n\
-         Access-Control-Allow-Headers: Content-Type, Authorization\r\n\
-         \r\n\
-         {body}",
-        status_text(status),
-        body.len()
-    )
-}
-
-/// Serve a static file, writing binary-safe HTTP response directly to the stream.
-/// Returns true if the file was served, false if a text-based error was written.
-fn serve_static_file(stream: &mut TcpStream, static_dir: &Path, request_path: &str) -> bool {
-    // Default to index.html for root or directory paths
-    let file_path = if request_path == "/" || request_path.ends_with('/') {
-        static_dir.join("index.html")
-    } else {
-        static_dir.join(request_path.trim_start_matches('/'))
-    };
-
-    // Security: prevent path traversal
-    let resolved = match file_path.canonicalize() {
-        Ok(p) => p,
-        Err(_) => {
-            let resp = http_response(
-                404,
-                "text/html; charset=utf-8",
-                "<html><body><h1>404 Not Found</h1></body></html>",
-            );
-            let _ = stream.write_all(resp.as_bytes());
-            return true;
-        }
-    };
-
-    let static_resolved = match static_dir.canonicalize() {
-        Ok(p) => p,
-        Err(_) => {
-            let resp = http_response(
-                500,
-                "text/html; charset=utf-8",
-                "<html><body><h1>500 Internal Server Error</h1></body></html>",
-            );
-            let _ = stream.write_all(resp.as_bytes());
-            return true;
-        }
-    };
-
-    if !resolved.starts_with(&static_resolved) {
-        let resp = http_response(
-            403,
-            "text/html; charset=utf-8",
-            "<html><body><h1>403 Forbidden</h1></body></html>",
-        );
-        let _ = stream.write_all(resp.as_bytes());
-        return true;
-    }
-
-    // SPA fallback: if the file doesn't exist, serve index.html
-    let actual_path = if resolved.is_file() {
-        resolved
-    } else {
-        let index = static_dir.join("index.html");
-        if index.is_file() {
-            index
-        } else {
-            let resp = http_response(
-                404,
-                "text/html; charset=utf-8",
-                "<html><body><h1>404 Not Found</h1></body></html>",
-            );
-            let _ = stream.write_all(resp.as_bytes());
-            return true;
-        }
-    };
-
-    let contents = match fs::read(&actual_path) {
-        Ok(c) => c,
-        Err(e) => {
-            warn!("Failed to read static file {:?}: {}", actual_path, e);
-            let resp = http_response(
-                500,
-                "text/html; charset=utf-8",
-                "<html><body><h1>500 Internal Server Error</h1></body></html>",
-            );
-            let _ = stream.write_all(resp.as_bytes());
-            return true;
-        }
-    };
-
-    let content_type = mime_type(&actual_path.to_string_lossy());
-    let content_length = contents.len();
-
-    // Build and write the HTTP response header
-    let header = format!(
-        "HTTP/1.1 200 OK\r\n\
-         Content-Type: {content_type}\r\n\
-         Content-Length: {content_length}\r\n\
-         Cache-Control: public, max-age=3600\r\n\
-         Access-Control-Allow-Origin: *\r\n\
-         Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n\
-         Access-Control-Allow-Headers: Content-Type, Authorization\r\n\
-         \r\n"
-    );
-
-    if let Err(e) = stream.write_all(header.as_bytes()) {
-        warn!("Failed to write response header: {}", e);
-        return true;
-    }
-
-    // Write the raw file bytes (binary-safe, no String conversion)
-    if let Err(e) = stream.write_all(&contents) {
-        warn!("Failed to write file body: {}", e);
-    }
-
-    true
-}
+use std::sync::{Arc, RwLock};
 
 /// Shared application state passed to each connection handler
 struct AppState {
     static_dir: PathBuf,
     db_path: String,
-    dashboard: web_dashboard::WebDashboard,
+    dashboard: WebDashboard,
 }
 
 fn handle_connection(state: &AppState, mut stream: TcpStream) {
@@ -270,29 +102,34 @@ fn handle_connection(state: &AppState, mut stream: TcpStream) {
         }
     }
 
-    // Route: /api/* → web dashboard handlers, everything else → static files
+    let origin = origin_header.as_deref();
+
+    // Route: /api/* → shared REST handlers, everything else → static files
     if path.starts_with("/api/") || path == "/api" {
-        let db_guard = state.dashboard.db.lock().unwrap();
-        let response = web_dashboard::handle_request(
+        let response = handle_request(
             &state.dashboard,
-            &db_guard,
+            &state.dashboard.db,
             method,
             path,
             &body,
             auth_header.as_deref(),
-            origin_header.as_deref(),
+            origin,
         );
-        drop(db_guard);
         let _ = stream.write_all(response.as_bytes());
     } else if method == "OPTIONS" {
         // CORS preflight for static assets
-        let resp = http_response(200, "text/plain", "");
+        let resp = http_response(204, "text/plain", "", origin);
         let _ = stream.write_all(resp.as_bytes());
     } else if method == "GET" || method == "HEAD" {
         // Serve static files (binary-safe, writes directly to stream)
         serve_static_file(&mut stream, &state.static_dir, path);
     } else {
-        let resp = http_response(405, "application/json", r#"{"error":"Method Not Allowed"}"#);
+        let resp = http_response(
+            405,
+            "application/json",
+            r#"{"error":"Method Not Allowed"}"#,
+            None,
+        );
         let _ = stream.write_all(resp.as_bytes());
     }
 }
@@ -325,14 +162,25 @@ fn main() {
         std::process::exit(1);
     }
 
+    // Open the database exactly once and share it with the REST handlers.
+    let db = match Database::new(&db_path) {
+        Ok(db) => Arc::new(RwLock::new(db)),
+        Err(e) => {
+            error!("Failed to open database {}: {}", db_path, e);
+            std::process::exit(1);
+        }
+    };
+
+    let dashboard = WebDashboard::new_shared_with_bind_addr(port, Arc::clone(&db), "0.0.0.0");
+
     let state = Arc::new(AppState {
         static_dir,
         db_path: db_path.clone(),
-        dashboard: web_dashboard::WebDashboard::new(port, &db_path),
+        dashboard,
     });
 
     let addr = format!("0.0.0.0:{}", port);
-    let listener = match std::net::TcpListener::bind(&addr) {
+    let listener = match TcpListener::bind(&addr) {
         Ok(l) => l,
         Err(e) => {
             error!("Failed to bind on port {}: {}", port, e);
@@ -348,7 +196,7 @@ fn main() {
     info!("  Static:     {}", state.static_dir.display());
     info!("═══════════════════════════════════════════════════════");
 
-    // Serve requests in a thread-per-connection model (same as web_dashboard)
+    // Serve requests in a thread-per-connection model (same as cybermanju-web)
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {

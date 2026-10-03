@@ -1,20 +1,20 @@
-use serde::{Deserialize, Serialize};
+// Cybermanju Drive — Search commands (thin wrappers over the shared API)
+
+use std::sync::Arc;
+
+use cybermanju_web::api;
 use tauri::State;
 
-use crate::search::{SearchRequest, SearchResult as TantivyResult};
 use crate::AppState;
 
 /// Search result returned to the frontend.
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SearchResult {
-    pub file_id: String,
-    pub file_name: String,
-    pub score: f64,
-    pub snippet: Option<String>,
-}
+pub use cybermanju_web::api::search_api::SearchHit as SearchResult;
 
-/// Search files using the Tantivy full-text search index.
+/// Paginated search results with total count.
+pub use cybermanju_web::api::search_api::PaginatedHits as PaginatedSearchResult;
+
+/// Search files using the shared full-text index (falls back to a substring
+/// scan when no index is attached).
 #[tauri::command]
 pub fn search_files(
     query: String,
@@ -22,40 +22,9 @@ pub fn search_files(
     offset: Option<usize>,
     state: State<'_, AppState>,
 ) -> Result<Vec<SearchResult>, String> {
-    let limit = limit.unwrap_or(50);
-    let tantivy_index = state.tantivy_index.read().map_err(|e| e.to_string())?;
-
-    let request = SearchRequest {
-        query: query.clone(),
-        limit: Some(limit),
-        offset,
-    };
-
-    let results = tantivy_index.search(&request).map_err(|e| e.to_string())?;
-
-    let mapped: Vec<SearchResult> = results
-        .into_iter()
-        .map(|r: TantivyResult| SearchResult {
-            file_id: r.file_id,
-            file_name: r.file_name,
-            score: r.score,
-            snippet: if r.snippet.is_empty() {
-                None
-            } else {
-                Some(r.snippet)
-            },
-        })
-        .collect();
-
-    Ok(mapped)
-}
-
-/// Paginated search results with total count.
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PaginatedSearchResult {
-    pub results: Vec<SearchResult>,
-    pub total: usize,
+    let db = state.db.read().map_err(|e| e.to_string())?;
+    let index = Some(Arc::clone(&state.tantivy_index));
+    api::search_api::search(&index, &db, &query, limit, offset)
 }
 
 /// Search files with pagination (offset + limit) and total count.
@@ -66,45 +35,9 @@ pub fn search_files_paginated(
     offset: usize,
     state: State<'_, AppState>,
 ) -> Result<PaginatedSearchResult, String> {
-    let tantivy_index = state.tantivy_index.read().map_err(|e| e.to_string())?;
-
-    let request = SearchRequest {
-        query: query.clone(),
-        limit: Some(limit),
-        offset: Some(offset),
-    };
-
-    let results = tantivy_index.search(&request).map_err(|e| e.to_string())?;
-
-    // To get total count, search with no limit to get all matching docs
-    let count_request = SearchRequest {
-        query,
-        limit: None,
-        offset: None,
-    };
-    let all_matching = tantivy_index
-        .search(&count_request)
-        .map_err(|e| e.to_string())?;
-    let total = all_matching.len();
-
-    let mapped: Vec<SearchResult> = results
-        .into_iter()
-        .map(|r: TantivyResult| SearchResult {
-            file_id: r.file_id,
-            file_name: r.file_name,
-            score: r.score,
-            snippet: if r.snippet.is_empty() {
-                None
-            } else {
-                Some(r.snippet)
-            },
-        })
-        .collect();
-
-    Ok(PaginatedSearchResult {
-        results: mapped,
-        total,
-    })
+    let db = state.db.read().map_err(|e| e.to_string())?;
+    let index = Some(Arc::clone(&state.tantivy_index));
+    api::search_api::search_paginated(&index, &db, &query, limit, offset)
 }
 
 /// Get type-ahead suggestions for a prefix query.
@@ -114,13 +47,7 @@ pub fn suggest(
     limit: usize,
     state: State<'_, AppState>,
 ) -> Result<Vec<String>, String> {
-    let tantivy_index = state.tantivy_index.read().map_err(|e| e.to_string())?;
-
-    let suggestions = tantivy_index
-        .suggest(&prefix, limit)
-        .map_err(|e| e.to_string())?;
-
-    let texts: Vec<String> = suggestions.into_iter().map(|s| s.text).collect();
-
-    Ok(texts)
+    let db = state.db.read().map_err(|e| e.to_string())?;
+    let index = Some(Arc::clone(&state.tantivy_index));
+    api::search_api::suggest(&index, &db, &prefix, limit)
 }

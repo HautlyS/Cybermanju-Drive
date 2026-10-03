@@ -1723,7 +1723,11 @@ fn get_or_init_sessions() -> anyhow::Result<&'static OnnxSessions> {
 
         result
     });
-    ONNX_SESSIONS.get().unwrap().as_ref().map_err(|e| anyhow::anyhow!("{}", e))
+    ONNX_SESSIONS
+        .get()
+        .unwrap()
+        .as_ref()
+        .map_err(|e| anyhow::anyhow!("{}", e))
 }
 
 #[cfg(feature = "onnx-face")]
@@ -1752,7 +1756,8 @@ fn fn_onnx_detect_faces(file_node: &FileNode) -> Result<Vec<Vec<f32>>> {
         let scrfd_array = ndarray::Array1::from_vec(input_tensor);
         let scrfd_input = ort::value::TensorRef::from_array_view(&scrfd_array)
             .map_err(|e| anyhow::anyhow!("Tensor creation error: {}", e))?;
-        let scrfd_output = scrfd.run(ort::inputs!["input" => scrfd_input])
+        let scrfd_output = scrfd
+            .run(ort::inputs!["input" => scrfd_input])
             .map_err(|e| anyhow::anyhow!("SCRFD inference failed: {}", e))?;
         postprocess_scrfd(&scrfd_output, w, h)?
     };
@@ -1771,7 +1776,8 @@ fn fn_onnx_detect_faces(file_node: &FileNode) -> Result<Vec<Vec<f32>>> {
             let arcface_array = ndarray::Array1::from_vec(arcface_input);
             let arcface_input_tensor = ort::value::TensorRef::from_array_view(&arcface_array)
                 .map_err(|e| anyhow::anyhow!("Tensor creation error: {}", e))?;
-            let arcface_output = arcface.run(ort::inputs!["input" => arcface_input_tensor])
+            let arcface_output = arcface
+                .run(ort::inputs!["input" => arcface_input_tensor])
                 .map_err(|e| anyhow::anyhow!("ArcFace inference failed: {}", e))?;
             postprocess_arcface(&arcface_output)
         };
@@ -1853,14 +1859,19 @@ fn postprocess_scrfd(
     img_w: u32,
     img_h: u32,
 ) -> Result<Vec<FaceBox>> {
-
     let strides = [8, 16, 32];
     let input_size = 640;
     let score_threshold = 0.5;
     let nms_threshold = 0.4;
 
-    let scores = output["scores"].try_extract_array::<f32>()?.view().to_owned();
-    let bboxes = output["bboxes"].try_extract_array::<f32>()?.view().to_owned();
+    let scores = output["scores"]
+        .try_extract_array::<f32>()?
+        .view()
+        .to_owned();
+    let bboxes = output["bboxes"]
+        .try_extract_array::<f32>()?
+        .view()
+        .to_owned();
     let kps = output["kps"].try_extract_array::<f32>()?.view().to_owned();
 
     let scores_shape = scores.shape();

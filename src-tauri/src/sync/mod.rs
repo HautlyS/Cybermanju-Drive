@@ -1,8 +1,8 @@
-pub mod backends;
-pub mod models;
-pub mod oauth;
-pub mod pipeline;
+// Cybermanju Drive — Storage Sync (re-export layer)
+//
+// The implementation lives in the shared `cybermanju-sync` crate so the Tauri
+// desktop app, the web dashboard and the Docker server all run the exact same
+// sync engine. This module only re-exports it under the historical paths.
 
-pub use models::*;
-pub use oauth::OAuthCredentials;
-pub use pipeline::SyncPipeline;
+pub use cybermanju_sync::*;
+pub use cybermanju_types::sync as models;

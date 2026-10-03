@@ -4,6 +4,8 @@ use tauri::State;
 
 use crate::db::schema::FileNode;
 use crate::db::schema::LooseGroup;
+use cybermanju_web::api;
+
 use crate::AppState;
 
 /// List all file nodes whose parent_id matches the given parent_path.
@@ -79,74 +81,15 @@ pub fn create_folder(
     parent_id: String,
     state: State<'_, AppState>,
 ) -> Result<FileNode, String> {
-    let folder_id = uuid::Uuid::new_v4().to_string();
-    let now = Utc::now().to_rfc3339();
-
-    let folder = FileNode {
-        id: folder_id.clone(),
-        name,
-        file_type: "folder".to_string(),
-        parent_id: Some(parent_id.clone()),
-        size_bytes: 0,
-        mime_type: None,
-        hash_blake3: None,
-        encrypted: false,
-        encryption_algorithm: None,
-        compression_layers: Vec::new(),
-        thumbnail_path: None,
-        created_at: now.clone(),
-        modified_at: now,
-        context_data: None,
-        tags: Vec::new(),
-        collection_ids: Vec::new(),
-        face_group_ids: Vec::new(),
-        loose_group_ids: Vec::new(),
-        gps_lat: None,
-        gps_lon: None,
-    };
-
     let db = state.db.write().map_err(|e| e.to_string())?;
-    let serialized = serde_json::to_string(&folder).map_err(|e| e.to_string())?;
-    db.insert_file_with_index(&folder_id, serialized.as_str(), Some(&parent_id))
-        .map_err(|e| e.to_string())?;
-
-    Ok(folder)
+    api::files::create_folder(&db, name, parent_id)
 }
 
 /// Delete a file or folder by its ID (soft-delete to trash).
 #[tauri::command]
 pub fn delete_file(file_id: String, state: State<'_, AppState>) -> Result<bool, String> {
     let db = state.db.write().map_err(|e| e.to_string())?;
-
-    // Read the file node
-    let tx_read = db.begin_read().map_err(|e| e.to_string())?;
-    let table_read = tx_read
-        .open_table(crate::db::Database::get_files_table())
-        .map_err(|e| e.to_string())?;
-    let file_node: Option<FileNode> = table_read
-        .get(file_id.as_str())
-        .map_err(|e| e.to_string())?
-        .and_then(|val| serde_json::from_str::<FileNode>(val.value()).ok());
-    let parent_id = file_node.as_ref().and_then(|n| n.parent_id.clone());
-    drop(tx_read);
-
-    let node = file_node.ok_or_else(|| format!("File not found: {}", file_id))?;
-
-    // Move to trash
-    db.trash_file(&file_id, &node, None)
-        .map_err(|e| e.to_string())?;
-
-    // Remove from parent index
-    if let Some(pid) = &parent_id {
-        db.remove_from_parent_index(&file_id, pid)
-            .map_err(|e| e.to_string())?;
-    }
-
-    // Log audit
-    db.log_audit("delete", "file", &file_id, None, None)
-        .map_err(|e| e.to_string())?;
-
-    Ok(true)
+    api::files::delete(&db, &file_id)
 }
 
 /// Rename a file or folder.
@@ -157,108 +100,17 @@ pub fn rename_file(
     state: State<'_, AppState>,
 ) -> Result<FileNode, String> {
     let db = state.db.write().map_err(|e| e.to_string())?;
-
-    // Read existing
-    let tx_read = db.begin_read().map_err(|e| e.to_string())?;
-    let table_read = tx_read
-        .open_table(crate::db::Database::get_files_table())
-        .map_err(|e| e.to_string())?;
-    let value = table_read
-        .get(file_id.as_str())
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("File not found: {}", file_id))?;
-    let mut file_node: FileNode = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
-
-    file_node.name = new_name;
-    file_node.modified_at = Utc::now().to_rfc3339();
-
-    // Write back
-    let serialized = serde_json::to_string(&file_node).map_err(|e| e.to_string())?;
-    let tx = db.begin_write().map_err(|e| e.to_string())?;
-    {
-        let mut table = tx
-            .open_table(crate::db::Database::get_files_table())
-            .map_err(|e| e.to_string())?;
-        table
-            .insert(file_id.as_str(), serialized.as_str())
-            .map_err(|e| e.to_string())?;
-    }
-    tx.commit().map_err(|e| e.to_string())?;
-
-    Ok(file_node)
+    api::files::rename(&db, &file_id, new_name)
 }
 
-/// Context-preserving duplication: copies a file node, preserves context_data,
-/// generates a new blake3 hash placeholder, creates a link-style preview reference,
-/// and stores in redb.
+/// Context-preserving duplication: copies a file node and preserves context_data.
 #[tauri::command]
 pub fn duplicate_file_context(
     file_id: String,
     state: State<'_, AppState>,
 ) -> Result<FileNode, String> {
     let db = state.db.write().map_err(|e| e.to_string())?;
-
-    // Read the original file node
-    let tx_read = db.begin_read().map_err(|e| e.to_string())?;
-    let table_read = tx_read
-        .open_table(crate::db::Database::get_files_table())
-        .map_err(|e| e.to_string())?;
-    let value = table_read
-        .get(file_id.as_str())
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("File not found: {}", file_id))?;
-    let original: FileNode = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
-
-    let new_id = uuid::Uuid::new_v4().to_string();
-    let now = Utc::now().to_rfc3339();
-
-    // A duplicate contains identical bytes — its content hash is the same.
-    // The new_id distinguishes it as a separate FileNode.
-    let new_hash = original.hash_blake3.clone();
-    // If the original was never hashed (e.g. a folder), leave it as None.
-
-    // Build context link reference
-    let link_preview = serde_json::json!({
-        "type": "duplicate_link",
-        "source_file_id": file_id,
-        "source_hash": original.hash_blake3,
-        "duplicated_at": now,
-    });
-
-    // Preserve context_data and augment with duplication metadata
-    let mut context_data = original
-        .context_data
-        .clone()
-        .unwrap_or(serde_json::Value::Null);
-    if let Some(obj) = context_data.as_object_mut() {
-        obj.insert("duplicated_from".to_string(), serde_json::json!(file_id));
-        obj.insert("duplicate_created_at".to_string(), serde_json::json!(now));
-    }
-
-    // Clone fields needed after the move BEFORE moving
-    let tags = original.tags.clone();
-
-    let mut duplicated = original;
-    duplicated.id = new_id.clone();
-    duplicated.name = format!("{} (copy)", duplicated.name);
-    duplicated.hash_blake3 = new_hash;
-    duplicated.thumbnail_path = Some(link_preview.to_string());
-    duplicated.created_at = now.clone();
-    duplicated.modified_at = now;
-    duplicated.context_data = Some(context_data);
-    duplicated.tags = tags;
-    duplicated.collection_ids = Vec::new(); // fresh copy is not in any collection yet
-
-    // Store the duplicated file node atomically with parent index update
-    let serialized = serde_json::to_string(&duplicated).map_err(|e| e.to_string())?;
-    db.insert_file_with_index(
-        &new_id,
-        serialized.as_str(),
-        duplicated.parent_id.as_deref(),
-    )
-    .map_err(|e| e.to_string())?;
-
-    Ok(duplicated)
+    api::files::duplicate(&db, &file_id)
 }
 
 /// Move a file to a new parent.
@@ -269,34 +121,7 @@ pub fn move_file(
     state: State<'_, AppState>,
 ) -> Result<FileNode, String> {
     let db = state.db.write().map_err(|e| e.to_string())?;
-
-    // Read existing
-    let tx_read = db.begin_read().map_err(|e| e.to_string())?;
-    let table_read = tx_read
-        .open_table(crate::db::Database::get_files_table())
-        .map_err(|e| e.to_string())?;
-    let value = table_read
-        .get(file_id.as_str())
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("File not found: {}", file_id))?;
-    let mut file_node: FileNode = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
-
-    // Update parent index: remove from old parent, add to new parent
-    let old_parent = file_node.parent_id.clone();
-    file_node.parent_id = Some(new_parent_id.clone());
-    file_node.modified_at = Utc::now().to_rfc3339();
-
-    // Write back the updated file node + update indices atomically
-    let serialized = serde_json::to_string(&file_node).map_err(|e| e.to_string())?;
-    db.move_file_with_index(
-        &file_id,
-        serialized.as_str(),
-        old_parent.as_deref(),
-        &new_parent_id,
-    )
-    .map_err(|e| e.to_string())?;
-
-    Ok(file_node)
+    api::files::move_to(&db, &file_id, new_parent_id)
 }
 
 /// Get preview metadata for a file.
@@ -306,37 +131,9 @@ pub fn get_preview(
     state: State<'_, AppState>,
 ) -> Result<serde_json::Value, String> {
     let db = state.db.read().map_err(|e| e.to_string())?;
-    let tx = db.begin_read().map_err(|e| e.to_string())?;
-    let table = tx
-        .open_table(crate::db::Database::get_files_table())
-        .map_err(|e| e.to_string())?;
-
-    let value = table
-        .get(file_id.as_str())
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("File not found: {}", file_id))?;
-
-    let file_node: FileNode = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
-
-    let preview = serde_json::json!({
-        "file_id": file_node.id,
-        "name": file_node.name,
-        "file_type": file_node.file_type,
-        "mime_type": file_node.mime_type,
-        "size_bytes": file_node.size_bytes,
-        "thumbnail_path": file_node.thumbnail_path,
-        "encrypted": file_node.encrypted,
-        "compression_layers": file_node.compression_layers,
-        "tags": file_node.tags,
-        "gps_lat": file_node.gps_lat,
-        "gps_lon": file_node.gps_lon,
-        "context_data": file_node.context_data,
-    });
-
-    Ok(preview)
+    api::files::preview(&db, &file_id)
 }
 
-/// Create a new loose file group.
 #[tauri::command]
 pub fn create_loose_group(
     name: String,
@@ -457,51 +254,5 @@ pub fn list_loose_groups(state: State<'_, AppState>) -> Result<Vec<LooseGroup>, 
 #[tauri::command]
 pub fn rebuild_parent_index(state: State<'_, AppState>) -> Result<u32, String> {
     let db = state.db.write().map_err(|e| e.to_string())?;
-
-    let tx_read = db.begin_read().map_err(|e| e.to_string())?;
-    let table = tx_read
-        .open_table(crate::db::Database::get_files_table())
-        .map_err(|e| e.to_string())?;
-
-    let file_nodes: Vec<FileNode> = table
-        .iter()
-        .map_err(|e| e.to_string())?
-        .filter_map(|entry| {
-            let (_, value) = entry.ok()?;
-            serde_json::from_str::<FileNode>(value.value()).ok()
-        })
-        .collect();
-    drop(tx_read);
-
-    // Clear existing index and rebuild
-    let tx_write = db.begin_write().map_err(|e| e.to_string())?;
-    {
-        let mut index_table = tx_write
-            .open_table(crate::db::Database::get_parent_index_table())
-            .map_err(|e| e.to_string())?;
-        // Clear index
-        let keys: Vec<String> = index_table
-            .iter()
-            .map_err(|e| e.to_string())?
-            .filter_map(|e| e.ok().map(|(k, _)| k.value().to_string()))
-            .collect();
-        for key in keys {
-            index_table
-                .remove(key.as_str())
-                .map_err(|e| e.to_string())?;
-        }
-    }
-    tx_write.commit().map_err(|e| e.to_string())?;
-
-    // Re-insert each file into index
-    let mut count = 0u32;
-    for node in &file_nodes {
-        if let Some(ref parent_id) = node.parent_id {
-            db.add_to_parent_index(&node.id, parent_id)
-                .map_err(|e| e.to_string())?;
-            count += 1;
-        }
-    }
-
-    Ok(count)
+    api::files::rebuild_parent_index(&db)
 }

@@ -13,7 +13,7 @@ import type {
   DashboardStatus,
 } from '@/types'
 import { MODULE_METADATA } from '@/types'
-import { setAuthToken } from '@/composables/useTauri'
+import { setAuthToken, getAuthToken, isWebMode } from '@/composables/useTauri'
 
 export const useAppStore = defineStore('cybermanju', () => {
   // ── Navigation State ──────────────────────────────────────
@@ -71,9 +71,22 @@ export const useAppStore = defineStore('cybermanju', () => {
 
   // ── Auth State ────────────────────────────────────────────
   const currentUser = ref<AuthResult | null>(null)
-  const authToken = ref('')
+  const authToken = ref(getAuthToken())
   const isAuthenticated = computed(() => !!currentUser.value)
   const showLoginPopup = ref(false)
+
+  /** Persist the JWT (store + localStorage) so REST calls stay authenticated. */
+  function setSessionToken(token: string) {
+    authToken.value = token
+    setAuthToken(token)
+  }
+
+  // Web mode: a 401 means the session is missing or expired — offer login (F2).
+  if (typeof window !== 'undefined') {
+    window.addEventListener('cybermanju:unauthorized', () => {
+      if (isWebMode()) showLoginPopup.value = true
+    })
+  }
 
   // ── User Management State ──────────────────────────────────
   const users = ref<User[]>([])
@@ -592,10 +605,14 @@ export const useAppStore = defineStore('cybermanju', () => {
   async function pollSyncProgress() {
     try {
       syncProgress.value = await invoke<SyncProgress>('get_sync_progress')
-      if (syncProgress.value &&
-          syncProgress.value.status !== 'idle' &&
-          syncProgress.value.status !== 'done' &&
-          syncProgress.value.status !== 'error') {
+      const status = syncProgress.value?.status
+      const terminal =
+        status === 'idle' ||
+        status === 'done' ||
+        status === 'error' ||
+        status === 'completed' ||
+        status === 'cancelled'
+      if (syncProgress.value && !terminal) {
         setTimeout(() => pollSyncProgress(), 1000)
       }
     } catch (e) {
@@ -913,6 +930,8 @@ export const useAppStore = defineStore('cybermanju', () => {
     generateShareLink, fetchShareLinks,
     // URL Import
     importFromUrl,
+    // Auth
+    setSessionToken,
     // Utility
     rebuildParentIndex,
     notifySuccess,

@@ -329,7 +329,18 @@ export const COMPRESSION_INFO: Record<CompressionType, { name: string; descripti
 }
 
 export type SyncBackendType = 'local' | 'github' | 'gitlab' | 'googleDrive' | 'googlePhotos' | 'telegram'
-export type SyncStatusType = 'idle' | 'scanning' | 'compressing' | 'uploading' | 'linking' | 'cleaning' | 'error' | 'done'
+export type SyncStatusType =
+  | 'idle'
+  | 'scanning'
+  | 'compressing'
+  | 'uploading'
+  | 'linking'
+  | 'cleaning'
+  | 'error'
+  | 'done'
+  | 'syncing'
+  | 'completed'
+  | 'cancelled'
 
 export interface SyncConfig {
   id: string

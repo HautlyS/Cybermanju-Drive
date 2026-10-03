@@ -1,8 +1,8 @@
 use anyhow::Result;
+use cybermanju_types::schema::{AuditEntry, FileNode, FileVersion, ShareLink, TrashItem};
 use redb::{
     Database as RedbDatabase, ReadTransaction, ReadableTable, TableDefinition, WriteTransaction,
 };
-use cybermanju_types::schema::{AuditEntry, FileNode, FileVersion, ShareLink, TrashItem};
 
 const FILES_TABLE: TableDefinition<'static, &'static str, &'static str> =
     TableDefinition::new("files");
@@ -304,11 +304,7 @@ impl Database {
         Ok(version)
     }
 
-    pub fn create_share_link(
-        &self,
-        file_id: &str,
-        expires_in_hours: u64,
-    ) -> Result<ShareLink> {
+    pub fn create_share_link(&self, file_id: &str, expires_in_hours: u64) -> Result<ShareLink> {
         use base64::Engine;
         use rand_core::RngCore;
         let mut token_bytes = [0u8; 32];

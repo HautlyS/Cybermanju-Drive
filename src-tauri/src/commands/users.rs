@@ -196,7 +196,7 @@ pub fn verify_session_token(token: &str, hmac_secret: &[u8]) -> Result<(String, 
 // Tauri commands
 // ---------------------------------------------------------------------------
 
-/// Register a new user with argon2id password hashing.
+/// Register a new user (arg validation + persistence live in the shared API).
 #[tauri::command]
 pub fn register_user(
     username: String,
@@ -205,71 +205,10 @@ pub fn register_user(
     role: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<User, String> {
-    // Validate role BEFORE constructing user
-    let role = role.unwrap_or_else(|| "user".to_string());
-    if !["admin", "user", "viewer"].contains(&role.as_str()) {
-        return Err(format!(
-            "Invalid role: {}. Must be admin, user, or viewer",
-            role
-        ));
-    }
-
-    if username.is_empty() || password.is_empty() {
-        return Err("Username and password are required".to_string());
-    }
-
-    // Validate username uniqueness
     let db = state.db.write().map_err(|e| e.to_string())?;
-    let tx_check = db.begin_read().map_err(|e| e.to_string())?;
-    let users_table = tx_check
-        .open_table(crate::db::Database::get_users_table())
-        .map_err(|e| e.to_string())?;
-    for entry in users_table.iter().map_err(|e| e.to_string())? {
-        let (_, value) = entry.map_err(|e| e.to_string())?;
-        let existing: User = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
-        if existing.username == username {
-            return Err(format!("Username '{}' already exists", username));
-        }
-    }
-    drop(tx_check);
-
-    // Hash the password with argon2id
-    let password_hash = argon2_hash_password(&password)?;
-
-    let user_id = uuid::Uuid::new_v4().to_string();
-    let now = Utc::now().to_rfc3339();
-
-    let user = User {
-        id: user_id.clone(),
-        username,
-        password_hash,
-        display_name,
-        role,
-        is_active: true,
-        created_at: now.clone(),
-        updated_at: now,
-    };
-
-    let serialized = serde_json::to_string(&user).map_err(|e| e.to_string())?;
-    let tx = db.begin_write().map_err(|e| e.to_string())?;
-    {
-        let mut table = tx
-            .open_table(crate::db::Database::get_users_table())
-            .map_err(|e| e.to_string())?;
-        table
-            .insert(user_id.as_str(), serialized.as_str())
-            .map_err(|e| e.to_string())?;
-    }
-    tx.commit().map_err(|e| e.to_string())?;
-
-    Ok(user)
+    cybermanju_web::api::users::register(&db, username, password, display_name, role)
 }
 
-/// Authenticate a user — returns AuthResult with a cryptographically secure token.
-///
-/// The session token uses HMAC-SHA256 with the server's random secret, includes
-/// a 16-byte nonce and timestamp, and expires after 24 hours.
-/// Unlike the previous blake3 hash, this token cannot be forged without the secret.
 #[tauri::command]
 pub fn authenticate_user(
     username: String,
@@ -548,21 +487,7 @@ pub fn create_user(
 #[tauri::command]
 pub fn delete_user(user_id: String, state: State<'_, AppState>) -> Result<bool, String> {
     let db = state.db.write().map_err(|e| e.to_string())?;
-    let tx = db.begin_write().map_err(|e| e.to_string())?;
-    {
-        let mut table = tx
-            .open_table(crate::db::Database::get_users_table())
-            .map_err(|e| e.to_string())?;
-        let removed = table
-            .remove(user_id.as_str())
-            .map_err(|e| e.to_string())?
-            .is_some();
-        if !removed {
-            return Err(format!("User not found: {}", user_id));
-        }
-    }
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(true)
+    cybermanju_web::api::users::delete(&db, &user_id)
 }
 
 /// Update a user's role.
@@ -572,47 +497,9 @@ pub fn update_user_role(
     role: String,
     state: State<'_, AppState>,
 ) -> Result<User, String> {
-    if !["admin", "user", "viewer"].contains(&role.as_str()) {
-        return Err(format!(
-            "Invalid role: {}. Must be admin, user, or viewer",
-            role
-        ));
-    }
     let db = state.db.write().map_err(|e| e.to_string())?;
-    let tx = db.begin_write().map_err(|e| e.to_string())?;
-    let user = {
-        let table = tx
-            .open_table(crate::db::Database::get_users_table())
-            .map_err(|e| e.to_string())?;
-        let existing = table.get(user_id.as_str()).map_err(|e| e.to_string())?;
-        match existing {
-            Some(v) => {
-                let mut user: User = serde_json::from_str(v.value()).map_err(|e| e.to_string())?;
-                user.role = role;
-                user.updated_at = chrono::Utc::now().to_rfc3339();
-                user
-            }
-            None => return Err(format!("User not found: {}", user_id)),
-        }
-    };
-    {
-        let mut table = tx
-            .open_table(crate::db::Database::get_users_table())
-            .map_err(|e| e.to_string())?;
-        table
-            .insert(
-                user_id.as_str(),
-                serde_json::to_string(&user)
-                    .map_err(|e| e.to_string())?
-                    .as_str(),
-            )
-            .map_err(|e| e.to_string())?;
-    }
-    tx.commit().map_err(|e| e.to_string())?;
-    Ok(user)
+    cybermanju_web::api::users::update_role(&db, &user_id, role)
 }
-
-/// Get all file permissions for a specific file.
 #[tauri::command]
 pub fn get_file_permissions(
     file_id: String,
