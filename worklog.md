@@ -35,3 +35,19 @@ Stage Summary:
 - Full ZimaOS compatibility: Docker Compose with x-casaos metadata, /DATA/AppData/ volume, port_map
 - CI/CD: 4-job GitHub Actions pipeline with Docker, WASM, and Pages deployment
 - 12 files modified/created, ~4164 total lines written
+## 2026-10-04 — release-readiness pass
+
+- Arch AppImage: gdk-pixbuf2 2.44 on Arch dropped `/usr/lib/gdk-pixbuf-2.0/2.10.0`
+  (loaders moved to glycin) while its .pc still advertises the path, so
+  linuxdeploy's gtk plugin aborted with `cp: cannot stat ''`. CI now recreates
+  the loader directory; release job also mirrors the NO_STRIP /
+  APPIMAGE_EXTRACT_AND_RUN / patchelf fixes.
+- Android: `tauri android init` generates no release signingConfig, so CI
+  uploaded `app-universal-release-unsigned.apk` — Android refuses to install
+  it. New `scripts/android-signing.sh` injects the keystore (repo secrets
+  ANDROID_KEYSTORE_B64 / _PASSWORD / _ALIAS) into the generated project,
+  verifies the signature with apksigner and renames the APK to
+  `Cybermanju-Drive-<version>-arm64-v8a.apk`.
+- Release workflow: fails if any format artifact is missing (previously only
+  `warn`), fixes setup-android's removed `tools` package, and publishes
+  SHA256SUMS.txt with the release assets.

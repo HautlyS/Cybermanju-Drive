@@ -234,6 +234,7 @@ jobs:
           name: dist-windows
           path: target/release/bundle/**/*
           retention-days: 7
+          if-no-files-found: error
 
   # ─── Linux: Build .deb, .AppImage & .rpm ──────────────────────────
   linux-build:
@@ -283,6 +284,7 @@ jobs:
             target/release/bundle/deb/*.deb
             target/release/bundle/appimage/*.AppImage
           retention-days: 7
+          if-no-files-found: error
 
       - name: Upload Debian package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -290,6 +292,7 @@ jobs:
           name: dist-linux-deb
           path: target/release/bundle/deb/*.deb
           retention-days: 7
+          if-no-files-found: error
 
       - name: Upload RPM package
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -297,6 +300,7 @@ jobs:
           name: dist-linux-rpm
           path: target/release/bundle/rpm/*.rpm
           retention-days: 7
+          if-no-files-found: error
 
   # ─── Linux: Build RPM ────────────────────────────────────────────
   rpm-build:
@@ -318,6 +322,7 @@ jobs:
           name: dist-rpm
           path: rpm-out/*.rpm
           retention-days: 7
+          if-no-files-found: error
 
   # ─── Linux: Build Flatpak ────────────────────────────────────────
   flatpak-build:
@@ -357,6 +362,7 @@ jobs:
           name: dist-flatpak
           path: cybermanju-drive.flatpak
           retention-days: 7
+          if-no-files-found: error
 
   # ─── Linux: Build Arch Package ────────────────────────────────────
   arch-build:
@@ -452,6 +458,7 @@ jobs:
           name: dist-arch
           path: dist-arch/
           retention-days: 7
+          if-no-files-found: error
 
   # ─── Android: Build APK ──────────────────────────────────────────
   android-build:
@@ -499,6 +506,16 @@ jobs:
       - name: Initialize Android project
         run: npm run tauri android init
 
+      # Without this Gradle emits `*-release-unsigned.apk`, which Android
+      # refuses to install. The keystore only exists as a repo secret.
+      - name: Configure Android release signing
+        run: bash scripts/android-signing.sh prepare
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
       - name: Build Android APK
         # ort-sys ships prebuilt ONNX Runtime only for aarch64-linux-android on
         # Android; the other Rust ABIs have no dist entry, so build arm64-v8a.
@@ -506,12 +523,16 @@ jobs:
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/26.1.10909125
 
+      - name: Verify Android APK signature
+        run: bash scripts/android-signing.sh verify
+
       - name: Upload Android artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dist-android
           path: src-tauri/gen/android/app/build/outputs/apk/**/*.apk
           retention-days: 7
+          if-no-files-found: error
 
   # ─── macOS: Build Desktop ────────────────────────────────────────
   macos-build:

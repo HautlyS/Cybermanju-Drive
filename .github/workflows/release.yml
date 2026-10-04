@@ -440,12 +440,28 @@ jobs:
       - name: Initialize Android project
         run: npx tauri android init
 
+      # A release APK must be installable, so a missing keystore is a hard
+      # failure here (REQUIRE_SIGNING) rather than a warning.
+      - name: Configure Android release signing
+        run: bash scripts/android-signing.sh prepare
+        env:
+          REQUIRE_SIGNING: "1"
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
       - name: Build Android APK
         # ort-sys only ships prebuilt ONNX Runtime for aarch64 on Android.
         run: npx tauri android build --target aarch64
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/26.1.10909125
           NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/26.1.10909125
+
+      - name: Verify Android APK signature
+        run: bash scripts/android-signing.sh verify
+        env:
+          REQUIRE_SIGNING: "1"
 
       - name: Upload Android artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -529,12 +545,42 @@ jobs:
       - name: List downloaded artifacts
         run: find artifacts/ -type f | head -100
 
+      # A job can go green while producing nothing (an upload with the default
+      # `warn` policy). Fail here instead of shipping a release with a hole.
+      - name: Check every release format is present
+        run: |
+          missing=0
+          check() {
+            local dir="$1"; shift
+            if [ ! -d "artifacts/$dir" ]; then
+              echo "::error::artifact '$dir' was not produced"
+              missing=1
+              return
+            fi
+            local pat
+            for pat in "$@"; do
+              if ! find "artifacts/$dir" -name "$pat" -print -quit | grep -q .; then
+                echo "::error::artifact '$dir' contains no $pat"
+                missing=1
+              fi
+            done
+          }
+          check release-windows  "*.exe" "*.msi"
+          check release-linux    "*.deb" "*.AppImage"
+          check release-rpm      "*.rpm"
+          check release-flatpak  "*.flatpak"
+          check release-arch     "*.AppImage"
+          check release-macos    "*.dmg"
+          check release-android  "*.apk"
+          check dist-wasm        "index.html"
+          exit $missing
+
       - name: Generate release notes
         id: notes
         run: |
-          # Get the previous tag
-          PREV_TAG=$(git tag --sort=-creatordate | head -2 | tail -1 || echo "")
           CURRENT_TAG=${GITHUB_REF#refs/tags/}
+          # Previous tag = newest tag other than the one being released.
+          PREV_TAG=$(git tag --sort=-creatordate | grep -vx "$CURRENT_TAG" | head -1 || true)
           # Published image name — must match the docker-build job above.
           OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           IMAGE="ghcr.io/${OWNER}/cybermanju-drive"
@@ -564,7 +610,7 @@ jobs:
           echo "| Linux (Flatpak) | \`dist-flatpak.zip\` (Universal Linux) |" >> release_notes.md
           echo "| Linux (Arch) | \`dist-arch.zip\` (deb + AppImage on Arch) |" >> release_notes.md
           echo "| macOS | \`dist-macos.zip\` (DMG) |" >> release_notes.md
-          echo "| Android | \`dist-android.zip\` (APK) |" >> release_notes.md
+          echo "| Android | \`dist-android.zip\` (signed APK, arm64-v8a) |" >> release_notes.md
           echo "| Web (WASM) | \`dist-wasm.zip\` (static files for any web server) |" >> release_notes.md
           echo "| Docker | \`docker pull ${IMAGE}:latest\` |" >> release_notes.md
           echo "" >> release_notes.md
@@ -583,8 +629,14 @@ jobs:
           echo "- **Linux (Flatpak)**: \`flatpak install cybermanju-drive.flatpak\`" >> release_notes.md
           echo "- **Linux (Arch/CachyOS)**: Run the \`.AppImage\` or build from AUR" >> release_notes.md
           echo "- **macOS**: Open the \`.dmg\` and drag to Applications" >> release_notes.md
-          echo "- **Android**: Enable unknown sources, install the \`.apk\`" >> release_notes.md
+          echo "- **Android**: Enable unknown sources, install the \`.apk\` (arm64-v8a devices only)" >> release_notes.md
           echo "- **Web**: Extract \`.zip\` and serve with any static file server" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "### Verify downloads" >> release_notes.md
+          echo "" >> release_notes.md
+          echo '```bash' >> release_notes.md
+          echo "sha256sum -c SHA256SUMS.txt" >> release_notes.md
+          echo '```' >> release_notes.md
 
       - name: Package artifacts
         run: |
@@ -648,6 +700,11 @@ jobs:
           
           # List all packages
           ls -la packages/
+
+      - name: Generate checksums
+        run: |
+          (cd packages && sha256sum * > SHA256SUMS.txt)
+          cat packages/SHA256SUMS.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
