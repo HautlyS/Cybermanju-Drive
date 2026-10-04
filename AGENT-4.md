@@ -198,3 +198,21 @@ _(append here; do not edit their files)_
   (reachable only since AGENT-3 wired `cybermanju-crypto` into the server graph);
   Arch died in `linuxdeploy` because the container has no `/dev/fuse` —
   `APPIMAGE_EXTRACT_AND_RUN=1` makes the AppImage tools unpack instead of mount.
+- **2026-10-04 — run 37220719686 (`7f1a530`) green except Arch → Arch `NO_STRIP`
+  fix — CI: pending.**
+  Eleven of twelve jobs passed: Rust Lint & Test (clippy `-D warnings`, fmt, full
+  workspace suite), Build WASM, Docker Build, Deploy to Pages, both audits, Android,
+  Flatpak, RPM, deb+AppImage+rpm, Windows, macOS and Version & Metadata. Only
+  `Build Linux (Arch/CachyOS)` stayed red with the opaque
+  `failed to run linuxdeploy`. The previous entry's FUSE diagnosis was wrong —
+  `APPIMAGE_EXTRACT_AND_RUN=1` was already exported on that run (it never got past
+  download). The real cause matches tauri#8929/#13113 exactly, including the same
+  one-line message and reports from Garuda: linuxdeploy's *bundled* `strip` cannot
+  read the `.relr.dyn` sections Arch-built system libraries carry
+  (`unknown type [0x13] section .relr.dyn`), and the Tauri bundler throws that
+  stderr away at the default log level. Fix in this entry's commit: `NO_STRIP=true`
+  in the `Build Arch package` step, `patchelf` + `desktop-file-utils` added to the
+  pacman list (neither is in `base-devel`), and
+  `npm run tauri build || npm run tauri -- build --verbose` so a residual failure
+  prints linuxdeploy's actual output instead of the one-liner while a green run
+  stays quiet.
