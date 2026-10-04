@@ -39,12 +39,19 @@ log() { echo "[$(TS)] $*" | tee -a "$LOGDIR/supervisor.log"; }
 
 brief()      { echo "$ROOT/AGENT-$1.md"; }
 agent_log()  { echo "$LOGDIR/agent-$1.log"; }
-alive()      { pgrep -f "cybermanju-agent-$1" >/dev/null 2>&1; }
+alive() {
+  local pidf="$LOGDIR/agent-$1.pid" pid
+  [ -f "$pidf" ] || return 1
+  pid=$(cat "$pidf" 2>/dev/null)
+  [ -n "$pid" ] || return 1
+  kill -0 "$pid" 2>/dev/null
+}
 remaining()  { local c; c=$(grep -c '^- \[ \]' "$(brief "$1")" 2>/dev/null); echo "${c:-0}"; }
 
 # Free space guard — one shared target/ for three agents on a 5.5 GB box.
 disk_guard() {
-  local mb; mb=$(df -Pm "$ROOT" | awk 'NR==2{print $4}')
+  local kb; kb=$(df -Pk "$ROOT" 2>/dev/null | awk 'NR==2{print $4}')
+  local mb=$(( ${kb:-0} / 1024 ))
   if [ "$mb" -lt "$MIN_FREE_MB" ]; then
     log "HALT: only ${mb}MB free (< ${MIN_FREE_MB}MB). Free space, then re-run."
     exit 70
@@ -116,18 +123,23 @@ launch() {
   log "launch AGENT-$n (open todos: $(remaining "$n")) -> $(basename "$logf")"
   # --auto: headless must never block on an `ask` permission.
   nohup opencode run --auto --title "cybermanju-agent-$n" \
-    -f "AGENT-$n.md" \
-    "$(cat "$promptf")" >> "$logf" 2>&1 &
+    "$(cat "$promptf")" -f "AGENT-$n.md" >> "$logf" 2>&1 &
+  local pid=$!
+  echo "$pid" > "$LOGDIR/agent-$n.pid"
   LAUNCH_STAMP[$n]=$(date +%s)
-  echo "" >> "$logf"; log "  pid $!"
+  echo "" >> "$logf"; log "  pid $pid"
 }
 
 kill_agent() {
-  local n="$1" why="$2"
+  local n="$1" why="$2" pid
   log "kill AGENT-$n: $why"
+  pid=$(cat "$LOGDIR/agent-$n.pid" 2>/dev/null)
+  if [ -n "$pid" ]; then
+    kill "$pid" 2>/dev/null; sleep 3
+    kill -9 "$pid" 2>/dev/null; sleep 2
+  fi
+  # opencode forks a child worker; sweep anything still holding this title.
   pkill -f "cybermanju-agent-$n" 2>/dev/null
-  sleep 3
-  pkill -9 -f "cybermanju-agent-$n" 2>/dev/null
   sleep 2
 }
 
@@ -190,7 +202,23 @@ commit_and_push() {
   return 1
 }
 
+# `os-supervisor.sh --prompt N` prints the prompt for one agent without
+# launching anything (used to sanity-check the brief wiring).
+if [ "${1:-}" = "--prompt" ]; then
+  build_prompt "${2:?agent number}" ""
+  exit 0
+fi
+
 # ── Main loop ────────────────────────────────────────────────────────────────
+# Refuse to start twice — duplicate supervisors double-launch the agents.
+LOCK="$LOGDIR/supervisor.lock"
+if [ -f "$LOCK" ] && kill -0 "$(cat "$LOCK" 2>/dev/null)" 2>/dev/null; then
+  echo "supervisor already running (pid $(cat "$LOCK")); exiting" >&2
+  exit 73
+fi
+echo $$ > "$LOCK"
+trap 'rm -f "$LOCK"' EXIT
+
 log "=== supervisor start (pid $$) ==="
 log "workspace: $ROOT"
 log "briefs: $(for n in "${AGENTS[@]}"; do printf 'AGENT-%s:%s-open ' "$n" "$(remaining "$n")"; done)"
