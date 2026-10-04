@@ -464,6 +464,14 @@ jobs:
   android-build:
     name: Build Android
     runs-on: ubuntu-latest
+    env:
+      # Pinned to the AGP default (AGP 9.x release notes). The Tauri template
+      # sets compileSdk/targetSdk 36 with no ndkVersion, so Gradle demands
+      # platform android-36, build-tools 36.0.0 and this exact NDK. Both
+      # NDK vars must point here: Tauri reads NDK_HOME for the Rust linker,
+      # and without it the runner's newest preinstalled NDK (r29) is used
+      # for Rust while Gradle wants this one.
+      NDK_VERSION: 28.2.13676358
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -481,6 +489,11 @@ jobs:
           # the legacy 'tools' package was removed from the SDK repository.
           packages: platform-tools
 
+      - name: Install Android SDK components
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;$NDK_VERSION"
+
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -494,9 +507,6 @@ jobs:
         run: |
           rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
 
-      - name: Install Android NDK
-        run: sdkmanager "ndk;26.1.10909125"
-
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
@@ -505,6 +515,9 @@ jobs:
 
       - name: Initialize Android project
         run: npm run tauri android init
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
 
       # Without this Gradle emits `*-release-unsigned.apk`, which Android
       # refuses to install. The keystore only exists as a repo secret.
@@ -521,7 +534,8 @@ jobs:
         # Android; the other Rust ABIs have no dist entry, so build arm64-v8a.
         run: npm run tauri android build -- --target aarch64
         env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/26.1.10909125
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+          NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
 
       - name: Verify Android APK signature
         run: bash scripts/android-signing.sh verify
