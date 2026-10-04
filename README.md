@@ -124,8 +124,8 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/cybermanju/cybermanju-drive.git
-cd cybermanju-drive
+git clone https://github.com/HautlyS/Cybermanju-Drive.git
+cd Cybermanju-Drive
 
 # Install frontend dependencies
 npm install

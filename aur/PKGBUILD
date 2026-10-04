@@ -4,7 +4,7 @@ pkgver=0.1.0
 pkgrel=1
 pkgdesc="Encrypted file sync and management with post-quantum cryptography"
 arch=('x86_64')
-url="https://github.com/cybermanju/cybermanju-drive"
+url="https://github.com/HautlyS/Cybermanju-Drive"
 license=('MIT')
 depends=(
   'webkit2gtk-4.1'

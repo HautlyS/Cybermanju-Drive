@@ -10,6 +10,10 @@
 #   scripts/android-signing.sh prepare   # after `tauri android init`, before the build
 #   scripts/android-signing.sh verify    # after the build
 #
+# `prepare` appends a signing block to the generated app/build.gradle.kts and
+# drops `release-signing.properties` next to it. Values are read from that
+# file (not from the environment) because a reused Gradle daemon would report
+# its own `System.getenv`.
 # REQUIRE_SIGNING=1 turns "signing unavailable" into an error — used by the
 # release workflow, which must never publish an uninstallable APK.
 set -euo pipefail
@@ -40,38 +44,37 @@ prepare() {
     return 0
   fi
 
-  printf '%s' "$ANDROID_KEYSTORE_B64" | base64 -d > "$APP_DIR/cybermanju-release.keystore"
+  printf '%s' "$ANDROID_KEYSTORE_B64" | base64 -d > "$APP_DIR/cybermanju-release.keystore" \
+    || { echo "::error::ANDROID_KEYSTORE_B64 is not valid base64" >&2; exit 1; }
+  chmod 600 "$APP_DIR/cybermanju-release.keystore"
+
   # PKCS12 stores the key with the store password, so keyPassword mirrors it.
-  cat > "$APP_DIR/keystore.properties" <<EOF
-storeFile=$PWD/$APP_DIR/cybermanju-release.keystore
+  cat > "$APP_DIR/release-signing.properties" <<EOF
 storePassword=${ANDROID_KEYSTORE_PASSWORD:-}
 keyAlias=${ANDROID_KEY_ALIAS:-cybermanju-drive}
 keyPassword=${ANDROID_KEY_PASSWORD:-${ANDROID_KEYSTORE_PASSWORD:-}}
 EOF
-  chmod 600 "$APP_DIR/cybermanju-release.keystore" "$APP_DIR/keystore.properties"
-  touch "$EXPECTED_MARKER"
+  chmod 600 "$APP_DIR/release-signing.properties"
 
   # Idempotent: `tauri android init` regenerates the file on a fresh runner.
-  if grep -q "$UNSIGNED_MARK" "$GRADLE_FILE"; then
-    echo "release signing already configured"
-    return 0
-  fi
-
-  cat >> "$GRADLE_FILE" <<'EOF'
+  if ! grep -q "$UNSIGNED_MARK" "$GRADLE_FILE"; then
+    cat >> "$GRADLE_FILE" <<'EOF'
 
 // Android release signing (CI) — injected by scripts/android-signing.sh.
-val androidReleaseKeystore = file("keystore.properties")
-if (androidReleaseKeystore.exists()) {
-    val androidReleaseProps = java.util.Properties().apply {
-        androidReleaseKeystore.inputStream().use { load(it) }
-    }
+// Values come from a file (java.util.* is unresolved in Kotlin DSL scripts,
+// and a reused Gradle daemon would report a stale environment).
+val androidReleaseSigningFile = file("release-signing.properties")
+if (androidReleaseSigningFile.exists()) {
+    val androidReleaseSigningProps = androidReleaseSigningFile.readLines()
+        .filter { it.contains('=') }
+        .associate { it.substringBefore('=') to it.substringAfter('=') }
     android {
         signingConfigs {
             create("release") {
-                storeFile = file(androidReleaseProps.getProperty("storeFile"))
-                storePassword = androidReleaseProps.getProperty("storePassword")
-                keyAlias = androidReleaseProps.getProperty("keyAlias")
-                keyPassword = androidReleaseProps.getProperty("keyPassword")
+                storeFile = file("cybermanju-release.keystore")
+                storePassword = androidReleaseSigningProps["storePassword"]
+                keyAlias = androidReleaseSigningProps["keyAlias"]
+                keyPassword = androidReleaseSigningProps["keyPassword"]
             }
         }
         buildTypes {
@@ -82,6 +85,9 @@ if (androidReleaseKeystore.exists()) {
     }
 }
 EOF
+  fi
+
+  touch "$EXPECTED_MARKER"
   echo "release signing configured"
 }
 
