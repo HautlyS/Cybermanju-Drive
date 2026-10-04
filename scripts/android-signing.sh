@@ -97,12 +97,28 @@ public class KeyCheck {
   }
 }
 EOF
+  local store_pass="${ANDROID_KEYSTORE_PASSWORD:-}"
+  local key_alias="${ANDROID_KEY_ALIAS:-cybermanju-drive}"
+  local key_pass="${ANDROID_KEY_PASSWORD:-$store_pass}"
+  local fell_back=0
   local probe_out probe_code
   probe_code=0
   probe_out="$(java "$probe_dir/KeyCheck.java" \
     "$APP_DIR/cybermanju-release.keystore" \
-    "${ANDROID_KEYSTORE_PASSWORD:-}" "${ANDROID_KEY_ALIAS:-cybermanju-drive}" \
-    "${ANDROID_KEY_PASSWORD:-${ANDROID_KEYSTORE_PASSWORD:-}}" 2>&1)" || probe_code=$?
+    "$store_pass" "$key_alias" "$key_pass" 2>&1)" || probe_code=$?
+  # Modern keytool forces the key password to equal the store password for
+  # PKCS12, so a stale/wrong ANDROID_KEY_PASSWORD is worth one retry with
+  # the store password before declaring the secrets broken.
+  if [ "$probe_code" = "40" ] && [ -n "${ANDROID_KEY_PASSWORD:-}" ] \
+      && [ "$key_pass" != "$store_pass" ]; then
+    fell_back=1
+    echo "::warning::ANDROID_KEY_PASSWORD was rejected by the keystore; retrying with the store password" >&2
+    key_pass="$store_pass"
+    probe_code=0
+    probe_out="$(java "$probe_dir/KeyCheck.java" \
+      "$APP_DIR/cybermanju-release.keystore" \
+      "$store_pass" "$key_alias" "$key_pass" 2>&1)" || probe_code=$?
+  fi
   rm -rf "$probe_dir"
   case "$probe_code" in
     0) ;;
@@ -120,7 +136,11 @@ EOF
       exit 1
       ;;
     40)
-      echo "::error::Android key password rejected — ANDROID_KEY_PASSWORD does not match the key entry (store password and alias are fine)" >&2
+      if [ "$fell_back" = "1" ]; then
+        echo "::error::Android key password rejected — neither ANDROID_KEY_PASSWORD nor the store password unlocks the key entry (store password and alias are fine)" >&2
+      else
+        echo "::error::Android key password rejected — ANDROID_KEY_PASSWORD does not match the key entry (store password and alias are fine)" >&2
+      fi
       echo "$probe_out" >&2
       exit 1
       ;;
@@ -135,9 +155,9 @@ EOF
   # store password (keytool/Android Studio default); otherwise it must be
   # the key entry's own password, which may differ from the store password.
   cat > "$APP_DIR/release-signing.properties" <<EOF
-storePassword=${ANDROID_KEYSTORE_PASSWORD:-}
-keyAlias=${ANDROID_KEY_ALIAS:-cybermanju-drive}
-keyPassword=${ANDROID_KEY_PASSWORD:-${ANDROID_KEYSTORE_PASSWORD:-}}
+storePassword=${store_pass}
+keyAlias=${key_alias}
+keyPassword=${key_pass}
 EOF
   chmod 600 "$APP_DIR/release-signing.properties"
 
