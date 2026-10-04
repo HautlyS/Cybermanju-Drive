@@ -390,6 +390,15 @@ jobs:
             patchelf \
             desktop-file-utils
 
+      # gdk-pixbuf2 2.44 on Arch moved image decoding into glycin and no
+      # longer ships the legacy loader directory, but gdk-pixbuf-2.0.pc still
+      # reports gdk_pixbuf_binarydir=/usr/lib/gdk-pixbuf-2.0/2.10.0.
+      # linuxdeploy's gtk plugin `realpath`s that path and aborts with
+      # `cp: cannot stat ''` when it is absent. Recreate it (empty, exactly
+      # what a current Arch install has) so the plugin can copy it.
+      - name: Restore gdk-pixbuf loader directory
+        run: mkdir -p /usr/lib/gdk-pixbuf-2.0/2.10.0/loaders
+
       - name: Create build user
         run: |
           useradd -m builder

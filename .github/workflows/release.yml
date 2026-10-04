@@ -286,7 +286,15 @@ jobs:
             xdg-utils \
             rpm-tools \
             fuse2 \
-            dpkg
+            dpkg \
+            patchelf \
+            desktop-file-utils
+
+      # See ci.yml: linuxdeploy's gtk plugin dies on the loader directory
+      # that gdk-pixbuf2 2.44 stopped shipping while its .pc file still
+      # advertises it. Recreate it so the AppImage bundle can proceed.
+      - name: Restore gdk-pixbuf loader directory
+        run: mkdir -p /usr/lib/gdk-pixbuf-2.0/2.10.0/loaders
 
       - name: Create build user
         run: |
@@ -307,14 +315,19 @@ jobs:
       - name: Install Node.js
         run: pacman -S --noconfirm nodejs npm
 
+      # NO_STRIP: linuxdeploy's bundled strip cannot read the .relr.dyn
+      # sections Arch-built libraries carry (tauri#8929).
+      # APPIMAGE_EXTRACT_AND_RUN: no /dev/fuse in this container.
       - name: Build Arch package
         run: |
           sudo -u builder bash -c "
             export HOME=/home/builder
             export PATH=\$HOME/.cargo/bin:\$PATH
+            export NO_STRIP=true
+            export APPIMAGE_EXTRACT_AND_RUN=1
             cd $GITHUB_WORKSPACE
             npm ci
-            npm run tauri build
+            npm run tauri build || npm run tauri -- build --verbose
           "
 
       - name: Collect artifacts
@@ -397,9 +410,14 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          # The pinned action's default ('tools platform-tools') fails:
+          # the legacy 'tools' package was removed from the SDK repository.
+          packages: platform-tools
 
       - name: Install Android SDK components
         run: |
+          yes | sdkmanager --licenses > /dev/null || true
           sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;26.1.10909125"
           sdkmanager --licenses <<< "y"
 
