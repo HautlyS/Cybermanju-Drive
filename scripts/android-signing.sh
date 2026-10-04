@@ -48,7 +48,92 @@ prepare() {
     || { echo "::error::ANDROID_KEYSTORE_B64 is not valid base64" >&2; exit 1; }
   chmod 600 "$APP_DIR/cybermanju-release.keystore"
 
-  # PKCS12 stores the key with the store password, so keyPassword mirrors it.
+  # Fail fast: a bad password/alias otherwise surfaces ~10 minutes later as
+  # a Gradle `KeytoolException ... Given final block not properly padded`.
+  # The probe below performs the exact calls Gradle/AGP makes (open the store,
+  # look up the alias, recover the key), so each secret is blamed precisely.
+  # NB: `keytool` cannot do the key-password step — for PKCS12 it silently
+  # recovers the key with the *store* password — hence the small Java probe.
+  command -v java > /dev/null \
+    || { echo "::error::java not found — cannot validate the Android keystore" >&2; exit 1; }
+  local probe_dir
+  probe_dir="$(mktemp -d)"
+  cat > "$probe_dir/KeyCheck.java" <<'EOF'
+import java.io.File;
+import java.security.KeyStore;
+
+public class KeyCheck {
+  public static void main(String[] args) throws Exception {
+    File file = new File(args[0]);
+    char[] storePass = args[1].toCharArray();
+    String alias = args[2];
+    char[] keyPass = args[3].toCharArray();
+    KeyStore ks;
+    try {
+      ks = KeyStore.getInstance(file, storePass);
+    } catch (Exception e) {
+      System.out.println("STORE_UNLOCK_FAILED " + e.getMessage());
+      System.exit(10);
+      return;
+    }
+    if (!ks.containsAlias(alias)) {
+      System.out.println("ALIAS_MISSING");
+      System.exit(20);
+    }
+    if (!ks.isKeyEntry(alias)) {
+      System.out.println("ALIAS_NOT_A_KEY");
+      System.exit(30);
+    }
+    try {
+      if (ks.getKey(alias, keyPass) == null) {
+        System.out.println("KEY_PASSWORD_REJECTED");
+        System.exit(40);
+      }
+    } catch (Exception e) {
+      System.out.println("KEY_PASSWORD_REJECTED " + e.getMessage());
+      System.exit(40);
+    }
+    System.out.println("OK");
+  }
+}
+EOF
+  local probe_out probe_code
+  probe_code=0
+  probe_out="$(java "$probe_dir/KeyCheck.java" \
+    "$APP_DIR/cybermanju-release.keystore" \
+    "${ANDROID_KEYSTORE_PASSWORD:-}" "${ANDROID_KEY_ALIAS:-cybermanju-drive}" \
+    "${ANDROID_KEY_PASSWORD:-${ANDROID_KEYSTORE_PASSWORD:-}}" 2>&1)" || probe_code=$?
+  rm -rf "$probe_dir"
+  case "$probe_code" in
+    0) ;;
+    10)
+      echo "::error::Android keystore unlock failed — ANDROID_KEYSTORE_PASSWORD is wrong (or the keystore is corrupt)" >&2
+      echo "$probe_out" >&2
+      exit 1
+      ;;
+    20)
+      echo "::error::ANDROID_KEY_ALIAS is not in the keystore (store password is fine)" >&2
+      exit 1
+      ;;
+    30)
+      echo "::error::ANDROID_KEY_ALIAS exists but holds no key entry" >&2
+      exit 1
+      ;;
+    40)
+      echo "::error::Android key password rejected — ANDROID_KEY_PASSWORD does not match the key entry (store password and alias are fine)" >&2
+      echo "$probe_out" >&2
+      exit 1
+      ;;
+    *)
+      echo "::error::Android keystore validation failed (exit $probe_code)" >&2
+      echo "$probe_out" >&2
+      exit 1
+      ;;
+  esac
+
+  # When ANDROID_KEY_PASSWORD is unset the key is assumed to share the
+  # store password (keytool/Android Studio default); otherwise it must be
+  # the key entry's own password, which may differ from the store password.
   cat > "$APP_DIR/release-signing.properties" <<EOF
 storePassword=${ANDROID_KEYSTORE_PASSWORD:-}
 keyAlias=${ANDROID_KEY_ALIAS:-cybermanju-drive}
