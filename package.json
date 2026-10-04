@@ -1,7 +1,7 @@
 {
   "name": "cybermanju-drive",
   "private": true,
-  "version": "0.0.1",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -14,36 +14,38 @@
     "typecheck": "vue-tsc --noEmit",
     "typecheck:watch": "vue-tsc --noEmit --watch",
     "lint": "vue-tsc --noEmit",
-    "rust:check": "cd src-tauri && cargo check 2>&1",
-    "rust:clippy": "cd src-tauri && cargo clippy -- -W clippy::all 2>&1",
-    "rust:fmt": "cd src-tauri && cargo fmt -- --check 2>&1",
-    "rust:fmt:fix": "cd src-tauri && cargo fmt",
-    "rust:test": "cd src-tauri && cargo test 2>&1",
+    "rust:check": "cargo check --workspace --all-targets",
+    "rust:clippy": "cargo clippy --workspace --all-targets -- -D warnings",
+    "rust:fmt": "cargo fmt --all -- --check",
+    "rust:fmt:fix": "cargo fmt --all",
+    "rust:test": "cargo test --workspace --no-fail-fast",
     "check:all": "npm run typecheck && npm run rust:check && npm run rust:clippy",
     "clean": "rm -rf dist target src-tauri/target cybermanju.db tantivy_index",
     "db:reset": "rm -f cybermanju.db tantivy_index",
-    "build:wasm": "vite build --mode production --config vite.config.wasm.ts --outDir dist-wasm"
+    "build:wasm": "vite build --mode production --config vite.config.wasm.ts --outDir dist-wasm",
+    "test": "vitest run"
   },
   "dependencies": {
-    "vue": "^3.5.13",
-    "pinia": "^3.0.2",
     "@tauri-apps/api": "^2.5.0",
-    "@tauri-apps/plugin-fs": "^2.2.1",
     "@tauri-apps/plugin-dialog": "^2.2.1",
-    "@tauri-apps/plugin-shell": "^2.2.1",
-    "@tauri-apps/plugin-notification": "^2.2.1",
-    "@tauri-apps/plugin-store": "^2.2.1",
+    "@tauri-apps/plugin-fs": "^2.2.1",
     "@tauri-apps/plugin-log": "^2.2.1",
+    "@tauri-apps/plugin-notification": "^2.2.1",
     "@tauri-apps/plugin-os": "^2.2.1",
     "@tauri-apps/plugin-process": "^2.2.1",
+    "@tauri-apps/plugin-shell": "^2.2.1",
+    "@tauri-apps/plugin-store": "^2.2.1",
+    "lucide-vue-next": "^0.525.0",
     "maplibre-gl": "^5.4.0",
-    "lucide-vue-next": "^0.525.0"
+    "pinia": "^3.0.2",
+    "vue": "^3.5.13"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.5.0",
     "@vitejs/plugin-vue": "^5.2.3",
     "typescript": "^5.8.3",
     "vite": "^6.3.5",
-    "vue-tsc": "^2.2.8",
-    "@tauri-apps/cli": "^2.5.0"
+    "vitest": "^5.0.3",
+    "vue-tsc": "^2.2.8"
   }
 }

@@ -1,10 +1,16 @@
 // Cybermanju Drive — Shared Sync State
 // Live progress + cancellation flag shared between the sync pipeline and
 // whichever front-end is driving it (Tauri IPC, REST or WASM).
+//
+// <<< AGENT-2 RUN REGISTRY (item 5): every run owns its own `SyncState`,
+// so two runs can never clobber each other's progress or cancel flag.
+// `RunRegistry` tracks live + recent runs by id — the REST job API and the
+// `sync_runs` history both hang off it.
 
-use cybermanju_types::sync::{SyncProgress, SyncStatus};
+use cybermanju_types::sync::{SyncProgress, SyncResult, SyncStatus};
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 
 pub struct SyncState {
     pub progress: Mutex<SyncProgress>,
@@ -66,8 +72,12 @@ impl SyncState {
     }
 
     /// Reset progress for a new run of `total` files.
+    ///
+    /// Deliberately does **not** touch the cancel flag: clearing it here was
+    /// how a cancel used to be silently un-cancelled (a second run's reset
+    /// flipped the first run's flag back to false). The flag belongs to the
+    /// run, and runs get fresh states via [`RunRegistry::begin`].
     pub fn reset(&self, total: u32) {
-        self.cancel_flag.store(false, Ordering::SeqCst);
         self.with_progress(|p| {
             p.total_files = total;
             p.processed_files = 0;
@@ -78,6 +88,16 @@ impl SyncState {
             p.started_at = None;
             p.estimated_remaining_seconds = None;
         });
+    }
+
+    /// Arm a state for a run that does not exist yet: clears any cancel
+    /// left by the *previous* run of this (shared) state. Safe by ordering —
+    /// callers do this **before** registering the run, so no cancel can
+    /// possibly target the run being armed; `RunRegistry::begin` refuses to
+    /// arm a state that still has an active run, which is what used to make
+    /// concurrent runs clobber each other.
+    pub fn prepare_run(&self) {
+        self.cancel_flag.store(false, Ordering::SeqCst);
     }
 
     pub fn set_total(&self, total: u32) {
@@ -129,5 +149,209 @@ impl SyncState {
 impl Default for SyncState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ─── Runs & registry ─────────────────────────────────────────────────
+
+/// Terminal bookkeeping for one run: when it finished and what came out.
+#[derive(Debug, Clone)]
+pub struct SyncRunOutcome {
+    pub finished_at: String,
+    pub result: Option<SyncResult>,
+    pub error: Option<String>,
+}
+
+/// One registered sync run: its id, the config it drives and the progress
+/// state every poller of this run reads.
+pub struct SyncRun {
+    pub run_id: String,
+    pub config_id: String,
+    pub state: Arc<SyncState>,
+    pub started_at: String,
+    outcome: Mutex<Option<SyncRunOutcome>>,
+}
+
+impl SyncRun {
+    pub fn is_finished(&self) -> bool {
+        self.outcome
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_some()
+    }
+
+    pub fn outcome(&self) -> Option<SyncRunOutcome> {
+        self.outcome
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
+    }
+
+    /// Request cancellation of this run only — scoped, never global.
+    pub fn cancel(&self) {
+        self.state.cancel();
+    }
+}
+
+/// How many finished runs stay in memory. Older lookups fall through to the
+/// `sync_runs` table, which keeps its own 20-row history.
+const MAX_LIVE_RUNS: usize = 16;
+
+static NEXT_RUN_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+struct RegistryInner {
+    runs: HashMap<String, Arc<SyncRun>>,
+    order: VecDeque<String>,
+    latest: Option<String>,
+}
+
+/// Process-wide registry of sync runs (item 5 / item 14).
+///
+/// A singleton is deliberate: the desktop app, the embedded web dashboard
+/// and the Docker server all live in one process, and the previous design —
+/// one un-scoped `SyncState` mutated by every run — is exactly what let two
+/// runs clobber each other.
+pub struct RunRegistry {
+    inner: Mutex<RegistryInner>,
+}
+
+impl RunRegistry {
+    fn new() -> Self {
+        Self {
+            inner: Mutex::new(RegistryInner {
+                runs: HashMap::new(),
+                order: VecDeque::new(),
+                latest: None,
+            }),
+        }
+    }
+
+    /// The process-wide registry.
+    pub fn global() -> &'static RunRegistry {
+        static GLOBAL: OnceLock<RunRegistry> = OnceLock::new();
+        GLOBAL.get_or_init(RunRegistry::new)
+    }
+
+    /// Register a new run driven by `state`.
+    ///
+    /// Ordering matters (see [`SyncState::prepare_run`]): this refuses a
+    /// state that already has an **active** run — the old un-cancel bug —
+    /// and only then arms and resets it, so a cancel can never be cleared
+    /// out from under a run that already exists.
+    pub fn begin(
+        &self,
+        config_id: &str,
+        state: Arc<SyncState>,
+        total: u32,
+    ) -> Result<Arc<SyncRun>, String> {
+        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        let active_on_state = inner
+            .runs
+            .values()
+            .any(|run| Arc::ptr_eq(&run.state, &state) && !run.is_finished());
+        if active_on_state {
+            return Err("a sync run is already in progress".to_string());
+        }
+
+        state.prepare_run();
+        state.reset(total);
+
+        let run_id = format!(
+            "run-{}-{}",
+            chrono::Utc::now().format("%Y%m%d%H%M%S%.6f"),
+            NEXT_RUN_SEQ.fetch_add(1, Ordering::SeqCst)
+        );
+        let run = Arc::new(SyncRun {
+            run_id: run_id.clone(),
+            config_id: config_id.to_string(),
+            state,
+            started_at: chrono::Utc::now().to_rfc3339(),
+            outcome: Mutex::new(None),
+        });
+        inner.runs.insert(run_id.clone(), Arc::clone(&run));
+        inner.order.push_back(run_id.clone());
+        inner.latest = Some(run_id);
+        self.evict(&mut inner);
+        Ok(run)
+    }
+
+    pub fn get(&self, run_id: &str) -> Option<Arc<SyncRun>> {
+        let inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        inner.runs.get(run_id).cloned()
+    }
+
+    /// Most recently started run (finished or not).
+    pub fn latest(&self) -> Option<Arc<SyncRun>> {
+        let inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        inner
+            .latest
+            .as_ref()
+            .and_then(|id| inner.runs.get(id))
+            .cloned()
+    }
+
+    /// Mark a run finished. Idempotent — first terminal state wins.
+    pub fn finish(&self, run: &Arc<SyncRun>, result: Option<SyncResult>, error: Option<String>) {
+        let mut inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+        {
+            let mut outcome = run.outcome.lock().unwrap_or_else(|p| p.into_inner());
+            if outcome.is_none() {
+                *outcome = Some(SyncRunOutcome {
+                    finished_at: chrono::Utc::now().to_rfc3339(),
+                    result,
+                    error,
+                });
+            }
+        }
+        self.evict(&mut inner);
+    }
+
+    /// Cancel one run by id, or the latest run when `run_id` is `None`.
+    ///
+    /// Returns `false` only for an unknown id — "nothing to cancel" is a
+    /// success (the REST route and its idempotency test rely on that).
+    pub fn cancel(&self, run_id: Option<&str>) -> bool {
+        let target = {
+            let inner = self.inner.lock().unwrap_or_else(|p| p.into_inner());
+            match run_id {
+                Some(id) => match inner.runs.get(id) {
+                    Some(run) => Some(Arc::clone(run)),
+                    None => return false,
+                },
+                None => inner
+                    .latest
+                    .as_ref()
+                    .and_then(|id| inner.runs.get(id))
+                    .cloned(),
+            }
+        };
+        if let Some(run) = target {
+            if !run.is_finished() {
+                run.cancel();
+            }
+        }
+        true
+    }
+
+    /// Drop finished runs past [`MAX_LIVE_RUNS`], never the latest one.
+    fn evict(&self, inner: &mut RegistryInner) {
+        while inner.order.len() > MAX_LIVE_RUNS {
+            let evictable = inner.order.iter().position(|id| {
+                Some(id) != inner.latest.as_ref()
+                    && inner
+                        .runs
+                        .get(id)
+                        .map(|run| run.is_finished())
+                        .unwrap_or(true)
+            });
+            match evictable {
+                Some(idx) => {
+                    if let Some(id) = inner.order.remove(idx) {
+                        inner.runs.remove(&id);
+                    }
+                }
+                None => break,
+            }
+        }
     }
 }

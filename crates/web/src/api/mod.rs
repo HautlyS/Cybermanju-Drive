@@ -10,6 +10,7 @@ pub mod audit;
 pub mod batch;
 pub mod collections;
 pub mod files;
+pub mod oauth;
 pub mod search_api;
 pub mod share;
 pub mod sync_api;

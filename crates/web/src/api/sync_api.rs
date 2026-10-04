@@ -1,13 +1,33 @@
 // Cybermanju Drive — Sync configuration + run lifecycle (shared by Tauri IPC and REST)
+//
+// <<< AGENT-2 JOBS: `POST /api/sync/start` no longer runs the pipeline on a
+// request thread. `start_job` registers a run and returns `202 {jobId}`
+// immediately; the pipeline executes on a worker thread, its progress is
+// polled through `job`/`latest_progress`, and terminal results are mirrored
+// into the `sync_runs` history table. The blocking `start` remains for the
+// Tauri transport, which already owns its own command thread — it registers
+// the same run, so both transports share ids, progress and cancel. >>>
 
+use std::fs;
+use std::panic::AssertUnwindSafe;
+use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 use cybermanju_compression::TripleCompressor;
+use cybermanju_crypto::keystore;
 use cybermanju_db::Database;
-use cybermanju_sync::{create_backend, SyncPipeline, SyncState, SyncStatus};
-use cybermanju_types::sync::{RemoteFile, SyncConfig, SyncProgress, SyncResult};
+use cybermanju_sync::manifest;
+use cybermanju_sync::pipeline::CYBE_MAGIC;
+use cybermanju_sync::state::{RunRegistry, SyncRun};
+use cybermanju_sync::{
+    create_backend, quota_usage, QuotaUsage, SyncPipeline, SyncState, SyncStatus,
+};
+use cybermanju_types::sync::{
+    RemoteFile, SyncConfig, SyncFile, SyncProgress, SyncResult, SyncRunRecord,
+};
+use log::error;
 use redb::ReadableTable;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 // ─── Request wire types ──────────────────────────────────────────────
 
@@ -33,7 +53,67 @@ pub struct RemoteFilesRequest {
     pub prefix: String,
 }
 
+/// `POST /api/sync/cancel` body — every field optional so an empty body
+/// stays a valid "cancel whatever is running".
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelRequest {
+    #[serde(default)]
+    pub job_id: Option<String>,
+}
+
+/// `POST /api/sync/restore` body: `fileId | remotePath` selects the copy,
+/// `destPath` defaults to the recorded original path.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreRequest {
+    pub config_id: String,
+    #[serde(default)]
+    pub file_id: Option<String>,
+    #[serde(default)]
+    pub remote_path: Option<String>,
+    #[serde(default)]
+    pub dest_path: Option<String>,
+}
+
+/// `DELETE /api/sync/remote` body.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDeleteRequest {
+    pub config_id: String,
+    pub remote_path: String,
+}
+
+/// `202` body of `POST /api/sync/start` and payload of `GET /api/sync/jobs/{id}`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncJob {
+    pub job_id: String,
+    pub config_id: String,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub status: SyncStatus,
+    pub progress: SyncProgress,
+    pub result: Option<SyncResult>,
+}
+
+/// Successful `POST /api/sync/restore` response.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreOutcome {
+    pub path: String,
+    pub bytes: u64,
+    /// Restored bytes matched the stored plaintext BLAKE3.
+    pub verified: bool,
+}
+
+// ─── Config CRUD ─────────────────────────────────────────────────────
+
 /// List all saved sync configurations.
+///
+/// Provider tokens live in the `sync_secrets` side table (the config row
+/// never serializes them — AGENT-3's `skip_serializing`), and are merged
+/// back here so the backends still see credentials.
 pub fn list_configs(db: &Database) -> Result<Vec<SyncConfig>, String> {
     let tx = db.begin_read().map_err(|e| e.to_string())?;
     let table = tx
@@ -43,7 +123,11 @@ pub fn list_configs(db: &Database) -> Result<Vec<SyncConfig>, String> {
     let mut configs = Vec::new();
     for entry in table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
-        let config: SyncConfig = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
+        let mut config: SyncConfig =
+            serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
+        if config.token.is_none() {
+            config.token = db.get_sync_secret(&config.id).map_err(|e| e.to_string())?;
+        }
         configs.push(config);
     }
 
@@ -57,6 +141,9 @@ pub fn save_config(db: &Database, config: SyncConfig) -> Result<SyncConfig, Stri
     } else {
         config.id.clone()
     };
+    // AGENT-3 request 6: validate caller-supplied identifiers before they
+    // become database keys.
+    crate::security::validate_id(&config_id)?;
 
     let now = chrono::Utc::now().to_rfc3339();
     let mut config = config;
@@ -66,6 +153,7 @@ pub fn save_config(db: &Database, config: SyncConfig) -> Result<SyncConfig, Stri
     }
     config.updated_at = Some(now);
 
+    let incoming_token = config.token.clone();
     let serialized = serde_json::to_string(&config).map_err(|e| e.to_string())?;
     let tx = db.begin_write().map_err(|e| e.to_string())?;
     {
@@ -78,11 +166,19 @@ pub fn save_config(db: &Database, config: SyncConfig) -> Result<SyncConfig, Stri
     }
     tx.commit().map_err(|e| e.to_string())?;
 
+    // The token never reaches the JSON row; it goes to the side table.
+    // An absent token on update leaves any stored secret untouched.
+    if let Some(token) = incoming_token {
+        db.put_sync_secret(&config_id, &token)
+            .map_err(|e| e.to_string())?;
+    }
+
     Ok(config)
 }
 
-/// Delete a sync configuration by ID.
+/// Delete a sync configuration by ID (row + its stored secret).
 pub fn delete_config(db: &Database, config_id: &str) -> Result<bool, String> {
+    crate::security::validate_id(config_id)?;
     let tx = db.begin_write().map_err(|e| e.to_string())?;
     {
         let mut table = tx
@@ -95,6 +191,10 @@ pub fn delete_config(db: &Database, config_id: &str) -> Result<bool, String> {
         if !removed {
             return Err(format!("Sync config not found: {}", config_id));
         }
+        let mut secrets = tx
+            .open_table(Database::get_sync_secrets_table())
+            .map_err(|e| e.to_string())?;
+        let _ = secrets.remove(config_id).map_err(|e| e.to_string())?;
     }
     tx.commit().map_err(|e| e.to_string())?;
     Ok(true)
@@ -110,7 +210,11 @@ pub fn get_config(db: &Database, config_id: &str) -> Result<SyncConfig, String> 
         .get(config_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Sync config not found: {}", config_id))?;
-    serde_json::from_str(value.value()).map_err(|e| e.to_string())
+    let mut config: SyncConfig = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
+    if config.token.is_none() {
+        config.token = db.get_sync_secret(config_id).map_err(|e| e.to_string())?;
+    }
+    Ok(config)
 }
 
 /// Test a configuration's remote connectivity.
@@ -125,12 +229,24 @@ pub fn list_remote_files(config: &SyncConfig, prefix: &str) -> Result<Vec<Remote
     backend.list_files(prefix)
 }
 
+// ─── Progress & cancel ───────────────────────────────────────────────
+
 /// Current sync progress snapshot (lockless).
 pub fn progress(sync_state: &Arc<SyncState>) -> SyncProgress {
     sync_state.snapshot()
 }
 
-/// Request cancellation of the current sync (lockless).
+/// Progress of the most recent registered run; falls back to the shared
+/// state when nothing has run yet. This is what `GET /api/sync/progress`
+/// serves so legacy pollers keep working across runs.
+pub fn latest_progress(fallback: &Arc<SyncState>) -> SyncProgress {
+    match RunRegistry::global().latest() {
+        Some(run) => run.state.snapshot(),
+        None => fallback.snapshot(),
+    }
+}
+
+/// Request cancellation of the current sync (lockless) — Tauri transport.
 pub fn cancel(sync_state: &Arc<SyncState>) -> bool {
     // Sets the flag the pipeline polls on every file, and flips the reported
     // status to `cancelled`.
@@ -138,10 +254,169 @@ pub fn cancel(sync_state: &Arc<SyncState>) -> bool {
     true
 }
 
-/// Start a sync run for `config_id`.
+/// Cancel a specific run by id, or the latest run when `job_id` is `None`.
+/// Unknown ids answer `false`; "nothing running" answers `true` (idempotent).
+pub fn cancel_job(job_id: Option<&str>) -> bool {
+    RunRegistry::global().cancel(job_id)
+}
+
+// ─── Run lifecycle ───────────────────────────────────────────────────
+
+/// Load a config and make sure a run against it may start.
+fn load_enabled_config(db: &RwLock<Database>, config_id: &str) -> Result<SyncConfig, String> {
+    crate::security::validate_id(config_id)?;
+    let db = db.read().map_err(|e| e.to_string())?;
+    let config = get_config(&db, config_id)?;
+    if !config.enabled {
+        return Err(format!("Sync config '{}' is not enabled", config_id));
+    }
+    Ok(config)
+}
+
+fn validate_file_ids(file_ids: &[String]) -> Result<(), String> {
+    for id in file_ids {
+        crate::security::validate_id(id)?;
+    }
+    Ok(())
+}
+
+fn job_snapshot(run: &SyncRun) -> SyncJob {
+    let progress = run.state.snapshot();
+    let outcome = run.outcome();
+    SyncJob {
+        job_id: run.run_id.clone(),
+        config_id: run.config_id.clone(),
+        started_at: run.started_at.clone(),
+        finished_at: outcome.as_ref().map(|o| o.finished_at.clone()),
+        status: progress.status.clone(),
+        progress,
+        result: outcome.and_then(|o| o.result),
+    }
+}
+
+/// Run the pipeline for an already-registered run, then record the outcome
+/// in the registry and the `sync_runs` history.
 ///
-/// The database lock is released before the pipeline runs: the pipeline
-/// acquires its own lock per file, so holding one here would deadlock.
+/// A history failure is logged, never returned — the run itself succeeded
+/// and pollers already have its result.
+fn execute_run(
+    db: &RwLock<Database>,
+    compression: &TripleCompressor,
+    run: &Arc<SyncRun>,
+    config: SyncConfig,
+    file_ids: Vec<String>,
+) -> Result<SyncResult, String> {
+    let pipeline = SyncPipeline::new(config, Arc::clone(&run.state));
+    let outcome = pipeline.sync_all(file_ids, db, compression);
+
+    let (result, error) = match outcome {
+        Ok(result) => {
+            if run.state.is_cancelled() {
+                run.state.set_status(SyncStatus::Cancelled);
+            } else {
+                run.state.set_status(SyncStatus::Completed);
+                run.state.set_current(None);
+                let total = run.state.snapshot().total_files;
+                run.state.set_processed(total);
+            }
+            (Some(result), None)
+        }
+        Err(e) => {
+            run.state.set_status(SyncStatus::Error);
+            run.state.add_error(e.clone());
+            (None, Some(e))
+        }
+    };
+
+    // Registry first — pollers must see the terminal state immediately.
+    RunRegistry::global().finish(run, result.clone(), error.clone());
+
+    // Then durable history (item 14).
+    let progress = run.state.snapshot();
+    let record = SyncRunRecord {
+        run_id: run.run_id.clone(),
+        config_id: run.config_id.clone(),
+        started_at: run.started_at.clone(),
+        finished_at: run
+            .outcome()
+            .map(|o| o.finished_at)
+            .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
+        status: progress.status.clone(),
+        files_synced: result.as_ref().map(|r| r.files_synced).unwrap_or(0),
+        bytes_uploaded: result.as_ref().map(|r| r.bytes_uploaded).unwrap_or(0),
+        errors: progress.errors.clone(),
+        progress,
+        result: result.clone(),
+    };
+    {
+        let db = db.read().map_err(|e| e.to_string())?;
+        if let Err(e) = db.save_sync_run(&record) {
+            error!("could not persist sync run {}: {}", run.run_id, e);
+        }
+    }
+
+    match result {
+        Some(result) => Ok(result),
+        None => Err(error.unwrap_or_else(|| "sync run failed".to_string())),
+    }
+}
+
+/// Start a sync run on a worker thread; returns as soon as the run is
+/// registered (the REST `202 {jobId}` path).
+pub fn start_job(
+    db: &Arc<RwLock<Database>>,
+    config_id: &str,
+    file_ids: Vec<String>,
+) -> Result<SyncJob, String> {
+    // Validate everything while the caller is still on the request thread:
+    // a bad config must be a 4xx, not a job that fails in the dark.
+    let config = load_enabled_config(db, config_id)?;
+    validate_file_ids(&file_ids)?;
+
+    let run = RunRegistry::global().begin(
+        config_id,
+        Arc::new(SyncState::new()),
+        file_ids.len() as u32,
+    )?;
+
+    let db2 = Arc::clone(db);
+    let run2 = Arc::clone(&run);
+    let spawned = std::thread::Builder::new()
+        .name(format!("sync-{}", run.run_id))
+        .spawn(move || {
+            let compression = TripleCompressor::new();
+            let outcome = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                execute_run(&db2, &compression, &run2, config, file_ids)
+            }));
+            if let Err(_panic) = outcome {
+                // A panicking worker must not leave pollers stuck on a
+                // status that never becomes terminal.
+                run2.state.set_status(SyncStatus::Error);
+                run2.state.add_error("sync worker panicked".to_string());
+                RunRegistry::global().finish(&run2, None, Some("sync worker panicked".to_string()));
+            }
+        })
+        .map_err(|e| {
+            // Registration already happened — close the run so it can never
+            // sit as "active" with nothing driving it.
+            RunRegistry::global().finish(
+                &run,
+                None,
+                Some(format!("could not start sync worker: {}", e)),
+            );
+            format!("could not start sync worker: {}", e)
+        })?;
+    drop(spawned);
+
+    Ok(job_snapshot(&run))
+}
+
+/// Start a sync run for `config_id` **on the calling thread** (Tauri path).
+///
+/// The run is registered like any REST job — same ids, same history, same
+/// scoped cancel — it just executes inline. The database lock is released
+/// before the pipeline runs: the pipeline acquires its own lock per file,
+/// so holding one here would deadlock.
 pub fn start(
     db: &RwLock<Database>,
     compression: &TripleCompressor,
@@ -149,41 +424,261 @@ pub fn start(
     config_id: &str,
     file_ids: Vec<String>,
 ) -> Result<SyncResult, String> {
-    // 1. Load the sync config from DB (lock released at end of this block)
+    let config = load_enabled_config(db, config_id)?;
+    validate_file_ids(&file_ids)?;
+
+    let run =
+        RunRegistry::global().begin(config_id, Arc::clone(sync_state), file_ids.len() as u32)?;
+    // `begin` armed the state (fresh cancel flag, reset progress, status
+    // `scanning`) — no explicit reset here, that used to clear cancels.
+    execute_run(db, compression, &run, config, file_ids)
+}
+
+/// Run status/progress/result by id — memory first, then `sync_runs`
+/// history (so a job id survives both eviction and restarts).
+pub fn job(db: &RwLock<Database>, job_id: &str) -> Result<SyncJob, String> {
+    crate::security::validate_id(job_id)?;
+    if let Some(run) = RunRegistry::global().get(job_id) {
+        return Ok(job_snapshot(&run));
+    }
+    let db = db.read().map_err(|e| e.to_string())?;
+    let record = db
+        .get_sync_run(job_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Sync job not found: {}", job_id))?;
+    Ok(SyncJob {
+        job_id: record.run_id,
+        config_id: record.config_id,
+        started_at: record.started_at,
+        finished_at: Some(record.finished_at),
+        status: record.status,
+        progress: record.progress,
+        result: record.result,
+    })
+}
+
+/// Run history, newest first (item 14).
+pub fn runs(db: &RwLock<Database>, limit: usize) -> Result<Vec<SyncRunRecord>, String> {
+    let db = db.read().map_err(|e| e.to_string())?;
+    db.list_sync_runs(limit.clamp(1, 50))
+        .map_err(|e| e.to_string())
+}
+
+// ─── Restore & remote delete (item 7) ────────────────────────────────
+
+/// Download a remote copy, verify it against the stored plaintext hash,
+/// decrypt/decompress as recorded, and write it locally.
+pub fn restore(db: &RwLock<Database>, req: RestoreRequest) -> Result<RestoreOutcome, String> {
+    crate::security::validate_id(&req.config_id)?;
+    if let Some(file_id) = &req.file_id {
+        crate::security::validate_id(file_id)?;
+    }
+
+    let config = {
+        let db = db.read().map_err(|e| e.to_string())?;
+        get_config(&db, &req.config_id)?
+    };
+
+    // Resolve locator candidates + the default destination.
+    let (candidates, record, default_dest) = {
+        let db = db.read().map_err(|e| e.to_string())?;
+        if let Some(file_id) = &req.file_id {
+            let record: SyncFile = db
+                .get_sync_file(file_id, &req.config_id)
+                .map_err(|e| e.to_string())?
+                .ok_or_else(|| format!("Sync record not found for file {}", file_id))?;
+            let mut candidates: Vec<String> = Vec::new();
+            // Stored path first (works for Local/GitHub/Drive/GitLab), then
+            // the provider locator upload returned (Telegram file_id,
+            // Photos media id) — tried in order until one downloads.
+            if let Some(path) = &record.remote_path {
+                candidates.push(path.clone());
+            }
+            if let Some(url) = &record.remote_url {
+                if !candidates.contains(url) {
+                    candidates.push(url.clone());
+                }
+            }
+            if candidates.is_empty() && record.manifest_ref.is_none() {
+                // Striped records legitimately have no single locator — the
+                // manifest branch below reassembles them instead.
+                return Err("Sync record has no remote locator".to_string());
+            }
+            let dest = record.original_path.clone();
+            (candidates, Some(record), Some(dest))
+        } else {
+            let remote = req
+                .remote_path
+                .clone()
+                .filter(|p| !p.trim().is_empty())
+                .ok_or_else(|| "remotePath or fileId is required".to_string())?;
+            (vec![remote], None, None)
+        }
+    };
+
+    let dest = match (&req.dest_path, &default_dest) {
+        (Some(dest), _) => dest.clone(),
+        (None, Some(dest)) => dest.clone(),
+        (None, None) => return Err("destPath is required when restoring by remotePath".to_string()),
+    };
+
+    // Striped placement (item 10): the manifest — not a single locator —
+    // says where the pieces live. Reassembly downloads, verifies every
+    // chunk's plaintext hash, verifies the whole file, and only then
+    // publishes `dest` (never a half-written destination).
+    if let Some(manifest_json) = record.as_ref().and_then(|r| r.manifest_ref.clone()) {
+        let manifest: manifest::ChunkManifest = serde_json::from_str(&manifest_json)
+            .map_err(|e| format!("integrity: stored manifest is malformed: {}", e))?;
+        let participants = {
+            let db = db.read().map_err(|e| e.to_string())?;
+            db.list_sync_configs().map_err(|e| e.to_string())?
+        };
+        let bytes = manifest::restore(&manifest, &participants, &dest)?;
+        if let Some(mut record) = record {
+            record.last_verified_at = Some(chrono::Utc::now().to_rfc3339());
+            record.status = SyncStatus::Completed;
+            let db = db.write().map_err(|e| e.to_string())?;
+            db.upsert_sync_file(&record).map_err(|e| e.to_string())?;
+        }
+        return Ok(RestoreOutcome {
+            path: dest,
+            bytes,
+            verified: true,
+        });
+    }
+
+    let backend = create_backend(&config)?;
+
+    // Download to a sidecar file; only a fully transformed, verified
+    // payload touches the destination path.
+    let part = format!("{}.restore.part", dest);
+    let mut last_err: Option<String> = None;
+    let mut downloaded = false;
+    for candidate in &candidates {
+        match backend.download_file(candidate, &part) {
+            Ok(()) => {
+                downloaded = true;
+                break;
+            }
+            Err(e) => last_err = Some(e),
+        }
+    }
+    if !downloaded {
+        let _ = fs::remove_file(&part);
+        return Err(
+            last_err.unwrap_or_else(|| "not_found: no remote copy could be downloaded".to_string())
+        );
+    }
+
+    let mut bytes = fs::read(&part).map_err(|e| format!("restore read failed: {}", e))?;
+    let _ = fs::remove_file(&part);
+
+    // Decrypt first (magic prefix), then decompress.
+    if bytes.starts_with(CYBE_MAGIC) {
+        let passphrase = keystore::master_passphrase().ok_or_else(|| {
+            "integrity: artifact is encrypted but no master passphrase is available".to_string()
+        })?;
+        bytes = keystore::open_sealed(&passphrase, &bytes[CYBE_MAGIC.len()..])
+            .map_err(|e| format!("integrity: restore could not decrypt: {}", e))?;
+    }
+
+    let expected = record.as_ref().and_then(|r| r.hash_blake3.clone());
+    let compressor = TripleCompressor::new();
+    let mut verified = false;
+    match expected {
+        Some(expected) => {
+            if cybermanju_sync::blake3_hex(&bytes) == expected {
+                verified = true;
+            } else {
+                // Must be a compressed artifact — decompress, then hold the
+                // plaintext against the stored baseline.
+                let (plain, _size) = compressor.decompress_triple(&bytes).map_err(|e| {
+                    format!(
+                        "integrity: restored bytes do not match the stored hash and \
+                             are not a compressed artifact: {}",
+                        e
+                    )
+                })?;
+                if cybermanju_sync::blake3_hex(&plain) != expected {
+                    return Err(
+                        "integrity: restored plaintext does not match the stored hash".to_string(),
+                    );
+                }
+                bytes = plain;
+                verified = true;
+            }
+        }
+        None => {
+            // No local baseline (restore by remotePath) — best effort: keep
+            // the bytes as they are unless they are a compressed artifact.
+            if let Ok((plain, _size)) = compressor.decompress_triple(&bytes) {
+                bytes = plain;
+            }
+        }
+    }
+
+    if let Some(parent) = Path::new(&dest).parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("restore could not create '{}': {}", parent.display(), e))?;
+        }
+    }
+    fs::write(&dest, &bytes).map_err(|e| format!("restore write failed: {}", e))?;
+
+    // Stamp the locator record so the next verification starts fresh.
+    if let Some(mut record) = record {
+        if verified {
+            record.last_verified_at = Some(chrono::Utc::now().to_rfc3339());
+            record.status = SyncStatus::Completed;
+        }
+        let db = db.write().map_err(|e| e.to_string())?;
+        db.upsert_sync_file(&record).map_err(|e| e.to_string())?;
+    }
+
+    Ok(RestoreOutcome {
+        path: dest,
+        bytes: bytes.len() as u64,
+        verified,
+    })
+}
+
+/// Delete a remote object through AGENT-1's backend.
+///
+/// Honest 501s: a backend that answers `unsupported: …` is surfaced as-is
+/// and mapped to HTTP 501 by the route. Any locator record pointing at the
+/// deleted path is dropped so restore can never chase a ghost.
+pub fn delete_remote(db: &RwLock<Database>, req: RemoteDeleteRequest) -> Result<bool, String> {
+    crate::security::validate_id(&req.config_id)?;
+    if req.remote_path.trim().is_empty() {
+        return Err("remotePath is required".to_string());
+    }
+
+    let config = {
+        let db = db.read().map_err(|e| e.to_string())?;
+        get_config(&db, &req.config_id)?
+    };
+    let backend = create_backend(&config)?;
+    backend.delete_file(&req.remote_path)?;
+
+    let db = db.write().map_err(|e| e.to_string())?;
+    if let Some(record) = db
+        .find_sync_file_by_remote(&req.config_id, &req.remote_path)
+        .map_err(|e| e.to_string())?
+    {
+        if let Some(config_id) = &record.config_id {
+            db.remove_sync_file(&record.id, config_id)
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(true)
+}
+
+/// Provider quota/usage for a config (wraps AGENT-1's `quota::usage`).
+pub fn usage(db: &RwLock<Database>, config_id: &str) -> Result<QuotaUsage, String> {
+    crate::security::validate_id(config_id)?;
     let config = {
         let db = db.read().map_err(|e| e.to_string())?;
         get_config(&db, config_id)?
     };
-
-    if !config.enabled {
-        return Err(format!("Sync config '{}' is not enabled", config_id));
-    }
-
-    // 2. Reset shared progress so pollers see a live run
-    sync_state.reset(file_ids.len() as u32);
-    sync_state.set_status(SyncStatus::Syncing);
-    sync_state.set_current(Some("Starting sync...".to_string()));
-    sync_state.set_started_at(Some(chrono::Utc::now().to_rfc3339()));
-
-    // 3. Create pipeline sharing the same progress/cancellation state
-    let pipeline = SyncPipeline::new(config, Arc::clone(sync_state));
-    let result = match pipeline.sync_all(file_ids, db, compression) {
-        Ok(r) => r,
-        Err(e) => {
-            // A failed run must not leave pollers stuck in `syncing`
-            sync_state.set_status(SyncStatus::Error);
-            sync_state.add_error(e.clone());
-            return Err(e);
-        }
-    };
-
-    // 4. Only report completion when the run was not cancelled
-    if !sync_state.is_cancelled() {
-        sync_state.set_status(SyncStatus::Completed);
-        sync_state.set_current(None);
-        let total = sync_state.snapshot().total_files;
-        sync_state.set_processed(total);
-    }
-
-    Ok(result)
+    quota_usage(&config)
 }

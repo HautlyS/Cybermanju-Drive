@@ -1,97 +1,458 @@
 // Cybermanju Drive — Storage Sync Backends
-// Five backend implementations: Local, GitHub, GitLab, Google Drive, Google Photos
-// All HTTP backends use reqwest::blocking (no curl subprocess).
+// Six backends: Local, GitHub, GitLab, Google Drive, Google Photos, Telegram.
+// All HTTP goes through the shared client + `send_classified`/`send_probe`
+// wrappers, so every provider call gets retries, rate-limit gating and the
+// error prefix contract (see retry.rs).
+//
+// Error contract: every `Err` starts with exactly one of `auth:`,
+// `rate_limited:`, `not_found:`, `unsupported:`, `too_large:`, `integrity:`,
+// `network:` followed by `: `. Failed downloads never leave a partial file
+// behind. Missing targets on delete are `not_found:`; listing a directory
+// that does not exist is an empty list (same as every hierarchical backend).
 
 use crate::oauth::{self, OAuthCredentials};
+use crate::rate_limit;
+use crate::retry;
+use crate::transfer;
 use cybermanju_types::sync::*;
-use log::info;
+use log::{debug, info, warn};
+use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
+
+/// Page/iteration cap for provider listings — a listing larger than this is
+/// refused with `too_large:` instead of looping forever.
+const MAX_PAGES: usize = 200;
 
 // ===========================================================================
-// Helper: safe path join (prevents path traversal)
+// Shared HTTP plumbing
 // ===========================================================================
 
-/// Safely join a base path with a remote path, ensuring the result stays
-/// within the base directory. Rejects symlinks that resolve outside base.
-fn safe_join(base: &str, remote: &str) -> Result<String, String> {
-    let base = std::path::Path::new(base)
-        .canonicalize()
-        .map_err(|e| format!("Cannot canonicalize base path '{}': {}", base, e))?;
-    let joined = base.join(remote);
-    // canonicalize will fail if the target doesn't exist yet (e.g. during upload dest).
-    // For existing files it validates the real location; for new files we validate
-    // the parent directory.
-    match joined.canonicalize() {
-        Ok(canonical) => {
-            if !canonical.starts_with(&base) {
-                return Err("Path traversal detected".to_string());
-            }
-            // Also reject if the path itself is a symlink pointing outside
-            if joined.is_symlink() {
-                let link_target = std::fs::read_link(&joined)
-                    .map_err(|e| format!("Cannot read symlink: {}", e))?;
-                if !base.join(&link_target).starts_with(&base) {
-                    return Err("Symlink target outside base path".to_string());
-                }
-            }
-            Ok(canonical.to_string_lossy().to_string())
+/// One shared `reqwest::blocking::Client` (connection pooling across calls).
+pub(crate) fn http_client() -> Result<reqwest::blocking::Client, String> {
+    static CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
+    if let Some(client) = CLIENT.get() {
+        return Ok(client.clone());
+    }
+    let built = reqwest::blocking::Client::builder()
+        .user_agent("CybermanjuDrive/0.1")
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|err| format!("{}: cannot build HTTP client: {}", retry::NETWORK, err))?;
+    Ok(CLIENT.get_or_init(|| built).clone())
+}
+
+fn body_looks_rate_limited(status: u16, body: &str) -> bool {
+    status == 403
+        && (body.contains("rateLimitExceeded")
+            || body.contains("userRateLimitExceeded")
+            || body.contains("RATE_LIMIT_EXCEEDED"))
+}
+
+fn truncate_str(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let mut out: String = text.chars().take(max_chars).collect();
+    out.push_str("...");
+    out
+}
+
+/// Build the request once per attempt, send it, classify non-success.
+///
+/// `allow` statuses bypass classification (existence probes need `404`,
+/// chunked uploads need `308`). `probe_format` renders
+/// `<provider> <op> failed (HTTP <status>)` so connection tests can report
+/// the raw status.
+fn send_once(
+    provider: &str,
+    op: &str,
+    allow: &[u16],
+    probe_format: bool,
+    build: &mut impl FnMut() -> Result<reqwest::blocking::RequestBuilder, String>,
+) -> Result<reqwest::blocking::Response, String> {
+    let request = match build() {
+        Ok(request) => request,
+        Err(err) => {
+            return Err(
+                if retry::classify(&err) == retry::ErrorClass::Unclassified {
+                    format!(
+                        "{}: {} {} could not be prepared: {}",
+                        retry::NETWORK,
+                        provider,
+                        op,
+                        err
+                    )
+                } else {
+                    err
+                },
+            );
         }
-        Err(_) => {
-            // File doesn't exist yet — validate the parent
-            if let Some(parent) = joined.parent() {
-                if parent.as_os_str().is_empty() {
-                    // parent is "/" or empty, just use base
-                    return Ok(base.to_string_lossy().to_string());
-                }
-                let parent_canonical = parent
-                    .canonicalize()
-                    .map_err(|e| format!("Cannot canonicalize parent directory: {}", e))?;
-                if !parent_canonical.starts_with(&base) {
-                    return Err("Path traversal detected in parent directory".to_string());
-                }
-            }
-            // Canonicalize the base and re-join to get a clean absolute path
-            let clean = base.join(remote);
-            let clean_str = clean.to_string_lossy().to_string();
-            // Final safety: ensure no ".." component in the resolved result
-            let resolved = std::path::Path::new(&clean_str);
-            for component in resolved.components() {
-                if let std::path::Component::ParentDir = component {
-                    return Err("Path traversal detected: parent directory component".to_string());
-                }
-            }
-            Ok(clean_str)
+    };
+    let resp = request.send().map_err(|err| {
+        // without_url(): Telegram embeds the bot token in the URL, so URLs
+        // must never surface in error strings.
+        let err = err.without_url();
+        if err.is_builder() {
+            format!(
+                "{}: {} {} request is malformed: {}",
+                retry::UNSUPPORTED,
+                provider,
+                op,
+                err
+            )
+        } else {
+            format!(
+                "{}: {} {} request failed: {}",
+                retry::NETWORK,
+                provider,
+                op,
+                err
+            )
         }
+    })?;
+    let status = resp.status().as_u16();
+    if (200..300).contains(&status) || allow.contains(&status) {
+        return Ok(resp);
+    }
+    let headers = resp.headers().clone();
+    let retry_after = retry::retry_after_from_headers(&headers);
+    let body = resp
+        .text()
+        .unwrap_or_else(|err| format!("<unreadable response body: {}>", err));
+    let prefix =
+        if retry::is_rate_limited(status, &headers) || body_looks_rate_limited(status, &body) {
+            retry::RATE_LIMITED
+        } else {
+            retry::class_for_status(status).prefix()
+        };
+    if probe_format {
+        let hint = match retry_after {
+            Some(wait) => format!(" [retry_after={}s]", wait.as_secs()),
+            None => String::new(),
+        };
+        Err(format!(
+            "{}: {} {} failed (HTTP {}){}: {}",
+            prefix,
+            provider,
+            op,
+            status,
+            hint,
+            truncate_str(&body, 400)
+        ))
+    } else {
+        Err(retry::http_error(
+            prefix,
+            provider,
+            op,
+            status,
+            retry_after,
+            &body,
+        ))
     }
 }
 
+/// Send a classified request with retry/backoff. The closure returns a
+/// `RequestBuilder` (or a pre-classified build error) and is re-invoked on
+/// every attempt, so multi-part bodies and file reads stay fresh.
+pub(crate) fn send_classified(
+    provider: &str,
+    op: &str,
+    allow: &[u16],
+    mut build: impl FnMut() -> Result<reqwest::blocking::RequestBuilder, String>,
+) -> Result<reqwest::blocking::Response, String> {
+    retry::with_retry(&retry::RetryPolicy::default(), || {
+        send_once(provider, op, allow, false, &mut build)
+    })
+}
+
+/// Connection probe: same plumbing, `(HTTP <status>)` in the message.
+pub(crate) fn send_probe(
+    provider: &str,
+    mut build: impl FnMut() -> Result<reqwest::blocking::RequestBuilder, String>,
+) -> Result<reqwest::blocking::Response, String> {
+    retry::with_retry(&retry::RetryPolicy::default(), || {
+        send_once(provider, "connection test", &[], true, &mut build)
+    })
+}
+
+/// Percent-encode everything outside the RFC 3986 unreserved set.
+/// Used for query values and single path segments (kept `pub(crate)` for
+/// quota.rs).
+pub(crate) fn urlencoding(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3);
+    for byte in s.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*byte as char);
+            }
+            b => {
+                out.push('%');
+                out.push_str(&format!("{:02X}", b));
+            }
+        }
+    }
+    out
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// Percent-decode (byte-safe: never slices the string at non-ASCII offsets).
+fn urldecode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' if i + 2 < bytes.len() => match (hex_value(bytes[i + 1]), hex_value(bytes[i + 2]))
+            {
+                (Some(hi), Some(lo)) => {
+                    out.push((hi << 4) | lo);
+                    i += 3;
+                }
+                _ => {
+                    out.push(bytes[i]);
+                    i += 1;
+                }
+            },
+            byte => {
+                out.push(byte);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Percent-encode a path but keep `/` separators.
+fn encode_path(path: &str) -> String {
+    path.split('/')
+        .map(urlencoding)
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn file_name_of(path: &str) -> String {
+    Path::new(path)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| "upload".to_string())
+}
+
+/// The remote path a backend should store: trimmed, no surrounding slashes,
+/// and a local file name when the caller gave nothing.
+fn normalize_remote(remote: &str, local_path: &str) -> String {
+    let clean = remote.trim().trim_matches('/');
+    if clean.is_empty() {
+        file_name_of(local_path)
+    } else {
+        clean.to_string()
+    }
+}
+
+fn json_u64(value: &serde_json::Value) -> Option<u64> {
+    value
+        .as_u64()
+        .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
+}
+
+fn parse_json(
+    resp: reqwest::blocking::Response,
+    provider: &str,
+    op: &str,
+) -> Result<serde_json::Value, String> {
+    let body = resp.text().map_err(|err| {
+        format!(
+            "{}: {} {} response unreadable: {}",
+            retry::NETWORK,
+            provider,
+            op,
+            err
+        )
+    })?;
+    serde_json::from_str(&body).map_err(|err| {
+        format!(
+            "{}: {} {} response unparseable: {}",
+            retry::NETWORK,
+            provider,
+            op,
+            err
+        )
+    })
+}
+
 // ===========================================================================
-// Helper: parse a GitHub repo name into (owner, repo)
+// OAuth token source (per-request refresh for GitHub/GitLab/Drive/Photos)
+// ===========================================================================
+
+struct TokenSource {
+    credentials: Mutex<Option<OAuthCredentials>>,
+    /// Raw token used when there are no OAuth credentials (PAT configs) or a
+    /// refresh fails but a raw token is still stored.
+    fallback: String,
+    token_url: String,
+}
+
+impl TokenSource {
+    fn new(credentials: Option<OAuthCredentials>, fallback: String, token_url: String) -> Self {
+        Self {
+            credentials: Mutex::new(credentials),
+            fallback,
+            token_url,
+        }
+    }
+
+    fn get(&self) -> Result<String, String> {
+        let mut guard = self
+            .credentials
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(credentials) = guard.as_mut() {
+            match oauth::get_valid_token(credentials, &self.token_url, 300) {
+                Ok(token) if !token.is_empty() => return Ok(token),
+                Ok(_) => {}
+                Err(err) => {
+                    if self.fallback.is_empty() {
+                        return Err(
+                            if retry::classify(&err) == retry::ErrorClass::Unclassified {
+                                format!("{}: token refresh failed: {}", retry::AUTH, err)
+                            } else {
+                                err
+                            },
+                        );
+                    }
+                    warn!(
+                        "OAuth refresh failed, using the stored raw token instead: {}",
+                        err
+                    );
+                }
+            }
+        }
+        if self.fallback.is_empty() {
+            return Err(format!("{}: no access token for this backend", retry::AUTH));
+        }
+        Ok(self.fallback.clone())
+    }
+
+    fn bearer(&self) -> Result<String, String> {
+        Ok(format!("Bearer {}", self.get()?))
+    }
+}
+
+fn token_url_for(slug: &str) -> String {
+    oauth::provider_endpoints(slug)
+        .map(|endpoints| endpoints.token_url.to_string())
+        .unwrap_or_default()
+}
+
+// ===========================================================================
+// Local path helpers
 // ===========================================================================
 
 fn parse_repo(repo_name: &str) -> Result<(String, String), String> {
     let parts: Vec<&str> = repo_name.trim_start_matches('/').splitn(2, '/').collect();
     if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
         return Err(format!(
-            "Invalid repo name '{}'. Expected 'owner/repo'.",
+            "{}: repo name '{}' is invalid — expected 'owner/repo'",
+            retry::UNSUPPORTED,
             repo_name
         ));
     }
     Ok((parts[0].to_string(), parts[1].to_string()))
 }
 
-// ===========================================================================
-// Helper: build a shared reqwest::blocking::Client
-// ===========================================================================
+fn canonical_base(base: &str) -> Result<std::path::PathBuf, String> {
+    std::path::Path::new(base).canonicalize().map_err(|err| {
+        format!(
+            "{}: cannot resolve base path '{}': {}",
+            retry::NETWORK,
+            base,
+            err
+        )
+    })
+}
 
-fn http_client() -> Result<reqwest::blocking::Client, String> {
-    reqwest::blocking::Client::builder()
-        .user_agent("CybermanjuDrive/0.1")
-        .connect_timeout(std::time::Duration::from_secs(15))
-        .timeout(std::time::Duration::from_secs(300))
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {}", e))
+/// Join a remote path onto a canonical base without ever escaping it.
+///
+/// Rejects `..`/absolute/NUL-style escapes lexically, then canonicalizes:
+/// an existing target must resolve inside the base (defeats symlinks), and a
+/// not-yet-existing upload target is validated through its nearest existing
+/// ancestor, so writing `notes/note.txt` into an empty base works while a
+/// symlinked directory pointing outside the base does not.
+fn safe_join(base: &str, remote: &str) -> Result<String, String> {
+    let base_path = canonical_base(base)?;
+    let clean = remote.trim().trim_matches('/');
+    if !clean.is_empty()
+        && (std::path::Path::new(clean).is_absolute()
+            || clean.split('/').any(|segment| segment == ".."))
+    {
+        return Err(format!(
+            "{}: remote path '{}' escapes the base directory",
+            retry::UNSUPPORTED,
+            remote
+        ));
+    }
+    let joined = base_path.join(clean);
+
+    if joined.exists() || joined.is_symlink() {
+        let real = joined.canonicalize().map_err(|err| {
+            format!(
+                "{}: cannot resolve '{}': {}",
+                retry::NETWORK,
+                joined.display(),
+                err
+            )
+        })?;
+        if !real.starts_with(&base_path) {
+            return Err(format!(
+                "{}: '{}' resolves outside the base directory",
+                retry::UNSUPPORTED,
+                remote
+            ));
+        }
+        return Ok(real.to_string_lossy().to_string());
+    }
+
+    let mut ancestor: Option<&Path> = joined.parent();
+    while let Some(candidate) = ancestor {
+        if candidate.exists() {
+            break;
+        }
+        ancestor = candidate.parent();
+    }
+    let ancestor = ancestor.ok_or_else(|| {
+        format!(
+            "{}: no existing parent directory for '{}'",
+            retry::NETWORK,
+            remote
+        )
+    })?;
+    let real_ancestor = ancestor.canonicalize().map_err(|err| {
+        format!(
+            "{}: cannot resolve '{}': {}",
+            retry::NETWORK,
+            ancestor.display(),
+            err
+        )
+    })?;
+    if !real_ancestor.starts_with(&base_path) {
+        return Err(format!(
+            "{}: '{}' resolves outside the base directory",
+            retry::UNSUPPORTED,
+            remote
+        ));
+    }
+    Ok(joined.to_string_lossy().to_string())
 }
 
 // ===========================================================================
@@ -108,6 +469,46 @@ impl LocalBackend {
             base_path: base_path.to_string(),
         }
     }
+
+    fn modified_rfc3339(metadata: &fs::Metadata) -> String {
+        metadata
+            .modified()
+            .ok()
+            .map(|time| {
+                chrono::DateTime::<chrono::Utc>::from(time)
+                    .format("%Y-%m-%dT%H:%M:%SZ")
+                    .to_string()
+            })
+            .unwrap_or_default()
+    }
+
+    fn copy_verified(&self, source: &str, dest: &str, remote: &str) -> Result<(), String> {
+        if let Some(parent) = Path::new(dest).parent() {
+            fs::create_dir_all(parent).map_err(|err| {
+                format!(
+                    "{}: cannot create directory '{}': {}",
+                    retry::NETWORK,
+                    parent.display(),
+                    err
+                )
+            })?;
+        }
+        fs::copy(source, dest).map_err(|err| {
+            format!(
+                "{}: cannot copy '{}' to '{}': {}",
+                retry::NETWORK,
+                source,
+                dest,
+                err
+            )
+        })?;
+        let expected = transfer::hash_file(source)?;
+        if let Err(err) = transfer::verify_file_blake3(dest, &expected) {
+            let _ = fs::remove_file(dest);
+            return Err(format!("{} (copy of '{}')", err, remote));
+        }
+        Ok(())
+    }
 }
 
 impl StorageBackend for LocalBackend {
@@ -120,108 +521,157 @@ impl StorageBackend for LocalBackend {
     }
 
     fn upload_file(&self, local_path: &str, remote_path: &str) -> Result<String, String> {
+        let _permit = rate_limit::acquire(&SyncBackendType::Local)?;
+        transfer::local_size(local_path)?;
         let dest = safe_join(&self.base_path, remote_path)?;
-        if let Some(parent) = Path::new(&dest).parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
-        }
-        fs::copy(local_path, &dest).map_err(|e| format!("Failed to copy file: {}", e))?;
+        self.copy_verified(local_path, &dest, remote_path)?;
         Ok(dest)
     }
 
     fn download_file(&self, remote_path: &str, local_path: &str) -> Result<(), String> {
-        let src = safe_join(&self.base_path, remote_path)?;
-        // Verify the source is not a symlink pointing outside
-        if Path::new(&src).is_symlink() {
-            let link_target =
-                fs::read_link(&src).map_err(|e| format!("Cannot read symlink: {}", e))?;
-            let base = std::path::Path::new(&self.base_path)
-                .canonicalize()
-                .map_err(|e| e.to_string())?;
-            if !base.join(&link_target).starts_with(&base) {
-                return Err("Symlink target outside base path".to_string());
-            }
+        let _permit = rate_limit::acquire(&SyncBackendType::Local)?;
+        let source = safe_join(&self.base_path, remote_path)?;
+        if !Path::new(&source).is_file() {
+            return Err(format!(
+                "{}: '{}' does not exist in the local base path",
+                retry::NOT_FOUND,
+                remote_path
+            ));
         }
-        if let Some(parent) = Path::new(local_path).parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
-        }
-        fs::copy(&src, local_path).map_err(|e| format!("Failed to copy file: {}", e))?;
-        Ok(())
+        self.copy_verified(&source, local_path, remote_path)
     }
 
     fn delete_file(&self, remote_path: &str) -> Result<(), String> {
+        let _permit = rate_limit::acquire(&SyncBackendType::Local)?;
         let path = safe_join(&self.base_path, remote_path)?;
-        if Path::new(&path).exists() {
-            fs::remove_file(&path).map_err(|e| format!("Failed to delete file: {}", e))?;
+        if !Path::new(&path).exists() {
+            return Err(format!(
+                "{}: '{}' does not exist in the local base path",
+                retry::NOT_FOUND,
+                remote_path
+            ));
         }
-        Ok(())
+        fs::remove_file(&path).map_err(|err| {
+            format!(
+                "{}: cannot delete '{}': {}",
+                retry::NETWORK,
+                remote_path,
+                err
+            )
+        })
     }
 
     fn list_files(&self, prefix: &str) -> Result<Vec<RemoteFile>, String> {
+        let _permit = rate_limit::acquire(&SyncBackendType::Local)?;
         let dir = safe_join(&self.base_path, prefix)?;
-        if !Path::new(&dir).exists() || !Path::new(&dir).is_dir() {
+        let target = Path::new(&dir);
+        if !target.exists() || !target.is_dir() {
             return Ok(Vec::new());
         }
-
-        let base = std::path::Path::new(&self.base_path)
-            .canonicalize()
-            .map_err(|e| e.to_string())?;
+        let base = canonical_base(&self.base_path)?;
         let mut files = Vec::new();
-        for entry in fs::read_dir(&dir).map_err(|e| format!("Failed to read directory: {}", e))? {
-            let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
+        for entry in fs::read_dir(target).map_err(|err| {
+            format!(
+                "{}: cannot read directory '{}': {}",
+                retry::NETWORK,
+                dir,
+                err
+            )
+        })? {
+            let entry = entry.map_err(|err| {
+                format!("{}: cannot read a directory entry: {}", retry::NETWORK, err)
+            })?;
             let path = entry.path();
-
-            // Skip symlinks that point outside base
             if path.is_symlink() {
-                let target = fs::read_link(&path).unwrap_or_default();
-                if !base.join(&target).starts_with(&base) {
-                    continue;
+                match path.canonicalize() {
+                    Ok(real) if real.starts_with(&base) => {}
+                    _ => continue,
                 }
             }
-
-            if path.is_file() {
-                let metadata = entry.metadata().ok();
-                let name = path
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                let relative = path
-                    .strip_prefix(&self.base_path)
-                    .map(|p| p.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                let modified = metadata
-                    .as_ref()
-                    .and_then(|m| m.modified().ok())
-                    .map(|t| {
-                        chrono::DateTime::<chrono::Utc>::from(t)
-                            .format("%Y-%m-%dT%H:%M:%SZ")
-                            .to_string()
-                    })
-                    .unwrap_or_default();
-                let size = metadata.map(|m| m.len()).unwrap_or(0);
-                files.push(RemoteFile {
-                    name,
-                    path: relative,
-                    size_bytes: size,
-                    modified_at: modified,
-                    url: path.to_string_lossy().to_string(),
-                });
+            if !path.is_file() {
+                continue;
             }
+            let metadata = entry.metadata().ok();
+            let relative = path
+                .strip_prefix(&base)
+                .map(|value| value.to_string_lossy().to_string())
+                .unwrap_or_default();
+            files.push(RemoteFile {
+                name: path
+                    .file_name()
+                    .map(|value| value.to_string_lossy().to_string())
+                    .unwrap_or_default(),
+                path: relative,
+                size_bytes: metadata.as_ref().map(|meta| meta.len()).unwrap_or(0),
+                modified_at: metadata
+                    .as_ref()
+                    .map(Self::modified_rfc3339)
+                    .unwrap_or_default(),
+                url: path.to_string_lossy().to_string(),
+            });
         }
         Ok(files)
     }
 
     fn get_file_url(&self, remote_path: &str) -> Result<String, String> {
-        let full = safe_join(&self.base_path, remote_path)?;
-        Ok(full)
+        let _permit = rate_limit::acquire(&SyncBackendType::Local)?;
+        safe_join(&self.base_path, remote_path)
     }
 
     fn test_connection(&self) -> Result<bool, String> {
-        let path = std::path::Path::new(&self.base_path);
+        let _permit = rate_limit::acquire(&SyncBackendType::Local)?;
+        let path = Path::new(&self.base_path);
         if !path.exists() {
-            fs::create_dir_all(path)
-                .map_err(|e| format!("Cannot create base path '{}': {}", self.base_path, e))?;
+            fs::create_dir_all(path).map_err(|err| {
+                format!(
+                    "{}: cannot create base path '{}': {}",
+                    retry::NETWORK,
+                    self.base_path,
+                    err
+                )
+            })?;
         }
         Ok(true)
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            max_size_bytes: transfer::max_size_bytes(&SyncBackendType::Local),
+            supports_delete: true,
+            supports_direct_download: true,
+            recursive_list: false,
+            chunked: false,
+        }
+    }
+
+    fn stat(&self, remote_path: &str) -> Result<Option<RemoteFile>, String> {
+        let _permit = rate_limit::acquire(&SyncBackendType::Local)?;
+        let path = safe_join(&self.base_path, remote_path)?;
+        let metadata = match fs::metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return Err(format!(
+                    "{}: '{}' does not exist in the local base path",
+                    retry::NOT_FOUND,
+                    remote_path
+                ));
+            }
+            Err(err) => {
+                return Err(format!(
+                    "{}: cannot stat '{}': {}",
+                    retry::NETWORK,
+                    remote_path,
+                    err
+                ));
+            }
+        };
+        Ok(Some(RemoteFile {
+            name: file_name_of(remote_path),
+            path: remote_path.trim().trim_matches('/').to_string(),
+            size_bytes: metadata.len(),
+            modified_at: Self::modified_rfc3339(&metadata),
+            url: path,
+        }))
     }
 }
 
@@ -229,97 +679,620 @@ impl StorageBackend for LocalBackend {
 // 2. GitHubBackend
 // ===========================================================================
 
+enum GitHubLocator {
+    /// Blob path in the repository tree (Contents API).
+    Content(String),
+    /// Release tag for an asset upload (deterministic per remote path).
+    Release(String),
+}
+
 pub struct GitHubBackend {
-    token: String,
+    auth: TokenSource,
     repo_name: String,
     branch: String,
 }
 
 impl GitHubBackend {
     pub fn new(token: &str, repo_name: &str, branch: &str) -> Self {
+        Self::with_credentials(token, repo_name, branch, None)
+    }
+
+    pub fn with_credentials(
+        token: &str,
+        repo_name: &str,
+        branch: &str,
+        credentials: Option<OAuthCredentials>,
+    ) -> Self {
         Self {
-            token: token.to_string(),
+            auth: TokenSource::new(credentials, token.to_string(), token_url_for("github")),
             repo_name: repo_name.to_string(),
             branch: branch.to_string(),
         }
     }
 
-    /// Upload via GitHub Releases API for files > 100 MB.
-    fn upload_via_release(&self, local_path: &str, remote_path: &str) -> Result<String, String> {
+    fn contents_url(&self, owner: &str, repo: &str, path: &str) -> String {
+        format!(
+            "https://api.github.com/repos/{}/{}/contents/{}",
+            owner,
+            repo,
+            encode_path(path)
+        )
+    }
+
+    fn raw_url(&self, owner: &str, repo: &str, path: &str) -> String {
+        format!(
+            "https://raw.githubusercontent.com/{}/{}/{}/{}",
+            owner,
+            repo,
+            self.branch,
+            encode_path(path)
+        )
+    }
+
+    fn release_tag(remote_path: &str) -> String {
+        let digest = transfer::blake3_hex(remote_path.as_bytes());
+        format!("cybermanju-sync-{}", &digest[..16])
+    }
+
+    /// Accepts plain blob paths, our own raw/content URLs (from
+    /// `upload_file`/`list_files`), release tag URLs (our own release
+    /// uploads) — i.e. anything this backend itself can return.
+    fn resolve_locator(&self, remote: &str) -> Result<GitHubLocator, String> {
+        let trimmed = remote.trim().trim_matches('/');
+        if trimmed.is_empty() {
+            return Err(format!(
+                "{}: GitHub path must not be empty",
+                retry::UNSUPPORTED
+            ));
+        }
+        let contents_prefix = format!(
+            "https://api.github.com/repos/{}/{}/contents/",
+            self.owner()?,
+            self.repo()?
+        );
+        if let Some(rest) = trimmed.strip_prefix(&contents_prefix) {
+            let clean = rest.split('?').next().unwrap_or(rest);
+            return Ok(GitHubLocator::Content(urldecode(clean)));
+        }
+        let raw_prefix = format!(
+            "https://raw.githubusercontent.com/{}/{}/",
+            self.owner()?,
+            self.repo()?
+        );
+        if let Some(rest) = trimmed.strip_prefix(&raw_prefix) {
+            let path = match rest.find('/') {
+                Some(idx) => &rest[idx + 1..],
+                None => rest,
+            };
+            return Ok(GitHubLocator::Content(urldecode(path)));
+        }
+        let tag_prefix = format!(
+            "https://github.com/{}/{}/releases/tag/",
+            self.owner()?,
+            self.repo()?
+        );
+        if let Some(tag) = trimmed.strip_prefix(&tag_prefix) {
+            if !tag.is_empty() {
+                return Ok(GitHubLocator::Release(urldecode(tag)));
+            }
+        }
+        Ok(GitHubLocator::Content(trimmed.to_string()))
+    }
+
+    fn owner(&self) -> Result<String, String> {
+        parse_repo(&self.repo_name).map(|(owner, _)| owner)
+    }
+
+    fn repo(&self) -> Result<String, String> {
+        parse_repo(&self.repo_name).map(|(_, repo)| repo)
+    }
+
+    fn get_release(
+        &self,
+        client: &reqwest::blocking::Client,
+        token: &str,
+        owner: &str,
+        repo: &str,
+        tag: &str,
+    ) -> Result<Option<serde_json::Value>, String> {
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/releases/tags/{}",
+            owner,
+            repo,
+            urlencoding(tag)
+        );
+        let resp = send_classified("GitHub", "release lookup", &[404], || {
+            Ok(client
+                .get(&url)
+                .header("Authorization", format!("token {}", token))
+                .header("Accept", "application/vnd.github+json"))
+        })?;
+        if resp.status().as_u16() == 404 {
+            return Ok(None);
+        }
+        Ok(Some(parse_json(resp, "GitHub", "release lookup")?))
+    }
+
+    fn delete_asset_named(
+        &self,
+        client: &reqwest::blocking::Client,
+        token: &str,
+        owner: &str,
+        repo: &str,
+        release_id: u64,
+        asset_name: &str,
+    ) -> Result<(), String> {
+        let list_url = format!(
+            "https://api.github.com/repos/{}/{}/releases/{}/assets",
+            owner, repo, release_id
+        );
+        let resp = send_classified("GitHub", "asset lookup", &[], || {
+            Ok(client
+                .get(&list_url)
+                .header("Authorization", format!("token {}", token))
+                .header("Accept", "application/vnd.github+json"))
+        })?;
+        let json = parse_json(resp, "GitHub", "asset lookup")?;
+        let stale: Vec<u64> = json["assets"]
+            .as_array()
+            .map(|assets| {
+                assets
+                    .iter()
+                    .filter(|asset| asset["name"].as_str() == Some(asset_name))
+                    .filter_map(|asset| json_u64(&asset["id"]))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for asset_id in stale {
+            let url = format!(
+                "https://api.github.com/repos/{}/{}/releases/assets/{}",
+                owner, repo, asset_id
+            );
+            send_classified("GitHub", "asset delete", &[404], || {
+                Ok(client
+                    .delete(&url)
+                    .header("Authorization", format!("token {}", token))
+                    .header("Accept", "application/vnd.github+json"))
+            })?;
+        }
+        Ok(())
+    }
+
+    fn delete_release(
+        &self,
+        client: &reqwest::blocking::Client,
+        token: &str,
+        owner: &str,
+        repo: &str,
+        release_id: u64,
+    ) -> Result<(), String> {
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/releases/{}",
+            owner, repo, release_id
+        );
+        send_classified("GitHub", "release delete", &[404], || {
+            Ok(client
+                .delete(&url)
+                .header("Authorization", format!("token {}", token))
+                .header("Accept", "application/vnd.github+json"))
+        })?;
+        Ok(())
+    }
+
+    fn publish_release(
+        &self,
+        client: &reqwest::blocking::Client,
+        token: &str,
+        owner: &str,
+        repo: &str,
+        release_id: u64,
+    ) -> Result<(), String> {
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/releases/{}",
+            owner, repo, release_id
+        );
+        let body = serde_json::json!({ "draft": false });
+        send_classified("GitHub", "release publish", &[], || {
+            Ok(client
+                .patch(&url)
+                .header("Authorization", format!("token {}", token))
+                .header("Accept", "application/vnd.github+json")
+                .json(&body))
+        })?;
+        Ok(())
+    }
+
+    /// Push the local file onto an existing release `upload_url`.
+    /// Files up to 8 MB go as a single POST; larger files are chunked
+    /// (CL:0 init, then `Content-Range` PATCHes) with stall detection.
+    fn push_release_asset(
+        &self,
+        client: &reqwest::blocking::Client,
+        token: &str,
+        upload_url: &str,
+        local_path: &str,
+        asset_name: &str,
+        size: u64,
+    ) -> Result<(), String> {
+        let asset_url = format!("{}?name={}", upload_url, urlencoding(asset_name));
+
+        if size <= transfer::GITHUB_RELEASE_CHUNK {
+            let resp = send_classified("GitHub", "asset upload", &[201, 200], || {
+                let data = transfer::read_local(local_path)?;
+                Ok(client
+                    .post(&asset_url)
+                    .header("Authorization", format!("token {}", token))
+                    .header("Content-Type", "application/octet-stream")
+                    .body(data))
+            })?;
+            let json = parse_json(resp, "GitHub", "asset upload")?;
+            if let Some(stored) = json_u64(&json["size"]) {
+                if stored != size {
+                    return Err(format!(
+                        "{}: GitHub stored {} bytes but '{}' has {}",
+                        retry::INTEGRITY,
+                        stored,
+                        asset_name,
+                        size
+                    ));
+                }
+            }
+            return Ok(());
+        }
+
+        // Chunked upload: establish the upload location with an empty POST.
+        let init = send_classified("GitHub", "asset upload", &[201, 200], || {
+            Ok(client
+                .post(&asset_url)
+                .header("Authorization", format!("token {}", token))
+                .header("Content-Type", "application/octet-stream")
+                .body(Vec::<u8>::new()))
+        })?;
+        let patch_url = init
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string)
+            .unwrap_or_else(|| asset_url.clone());
+        let _ = init.text();
+
+        let mut file = fs::File::open(local_path).map_err(|err| {
+            format!(
+                "{}: cannot open '{}' for chunked upload: {}",
+                retry::NETWORK,
+                local_path,
+                err
+            )
+        })?;
+        let mut start: u64 = 0;
+        let mut completed = false;
+        while start < size {
+            let mut chunk = Vec::new();
+            (&mut file)
+                .take(transfer::GITHUB_RELEASE_CHUNK)
+                .read_to_end(&mut chunk)
+                .map_err(|err| {
+                    format!(
+                        "{}: cannot read '{}' for chunked upload: {}",
+                        retry::NETWORK,
+                        local_path,
+                        err
+                    )
+                })?;
+            if chunk.is_empty() {
+                return Err(format!(
+                    "{}: '{}' shrank during upload at byte {} of {}",
+                    retry::NETWORK,
+                    local_path,
+                    start,
+                    size
+                ));
+            }
+            let end = start + chunk.len() as u64 - 1;
+            let next = start + chunk.len() as u64;
+            let resp = send_classified("GitHub", "asset chunk", &[201, 200, 308], || {
+                Ok(client
+                    .patch(&patch_url)
+                    .header("Authorization", format!("token {}", token))
+                    .header("Content-Type", "application/octet-stream")
+                    .header("Content-Range", format!("bytes {}-{}/{}", start, end, size))
+                    .body(chunk.clone()))
+            })?;
+            let status = resp.status().as_u16();
+            if (200..300).contains(&status) {
+                let json = parse_json(resp, "GitHub", "asset chunk")?;
+                if let Some(stored) = json_u64(&json["size"]) {
+                    if stored != size {
+                        return Err(format!(
+                            "{}: GitHub stored {} bytes but the upload sent {}",
+                            retry::INTEGRITY,
+                            stored,
+                            size
+                        ));
+                    }
+                }
+                if next < size {
+                    return Err(format!(
+                        "{}: GitHub finalized the asset at {} of {} bytes",
+                        retry::INTEGRITY,
+                        next,
+                        size
+                    ));
+                }
+                completed = true;
+                break;
+            }
+            if next <= start {
+                return Err(format!(
+                    "{}: GitHub chunked upload stalled at byte {}",
+                    retry::NETWORK,
+                    start
+                ));
+            }
+            start = next;
+        }
+        if !completed {
+            return Err(format!(
+                "{}: GitHub chunked upload did not complete for '{}'",
+                retry::NETWORK,
+                asset_name
+            ));
+        }
+        Ok(())
+    }
+
+    fn upload_via_release(
+        &self,
+        local_path: &str,
+        remote_path: &str,
+        size: u64,
+    ) -> Result<String, String> {
         let (owner, repo) = parse_repo(&self.repo_name)?;
-        let file_name = Path::new(remote_path)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "upload".to_string());
-
+        let token = self.auth.get()?;
         let client = http_client()?;
+        let tag = Self::release_tag(remote_path);
+        let asset_name = file_name_of(remote_path);
 
-        // 1. Create a release
-        let tag = format!("sync-{}", chrono::Utc::now().format("%Y%m%d%H%M%S"));
-        let release_body = serde_json::json!({
-            "tag_name": tag,
-            "name": format!("Sync upload: {}", file_name),
-            "body": format!("Uploaded via Cybermanju Drive sync: {}", remote_path),
-            "draft": true,
-            "prerelease": false
+        // Deterministic tag per remote path: repeated syncs reuse (and
+        // replace) one release instead of creating one per run.
+        let existing = self.get_release(&client, &token, &owner, &repo, &tag)?;
+        let (release_id, upload_url, owned) = match existing {
+            Some(json) => {
+                let id = json_u64(&json["id"]).ok_or_else(|| {
+                    format!("{}: GitHub release '{}' has no id", retry::NETWORK, tag)
+                })?;
+                let upload_url = json["upload_url"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .replace("{?name,label}", "");
+                if upload_url.is_empty() {
+                    return Err(format!(
+                        "{}: GitHub release '{}' has no upload_url",
+                        retry::NETWORK,
+                        tag
+                    ));
+                }
+                self.delete_asset_named(&client, &token, &owner, &repo, id, &asset_name)?;
+                (id, upload_url, false)
+            }
+            None => {
+                let url = format!("https://api.github.com/repos/{}/{}/releases", owner, repo);
+                let body = serde_json::json!({
+                    "tag_name": tag,
+                    "name": format!("Sync upload: {}", asset_name),
+                    "body": format!("Uploaded via Cybermanju Drive sync: {}", remote_path),
+                    "draft": true,
+                    "prerelease": false,
+                });
+                let resp = send_classified("GitHub", "release create", &[201], || {
+                    Ok(client
+                        .post(&url)
+                        .header("Authorization", format!("token {}", token))
+                        .header("Accept", "application/vnd.github+json")
+                        .json(&body))
+                })?;
+                let json = parse_json(resp, "GitHub", "release create")?;
+                let id = json_u64(&json["id"]).ok_or_else(|| {
+                    format!("{}: GitHub release create returned no id", retry::NETWORK)
+                })?;
+                let upload_url = json["upload_url"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .replace("{?name,label}", "");
+                if upload_url.is_empty() {
+                    return Err(format!(
+                        "{}: GitHub release create returned no upload_url",
+                        retry::NETWORK
+                    ));
+                }
+                (id, upload_url, true)
+            }
+        };
+
+        let result =
+            self.push_release_asset(&client, &token, &upload_url, local_path, &asset_name, size);
+        let published = match result {
+            Ok(()) if owned => self.publish_release(&client, &token, &owner, &repo, release_id),
+            other => other,
+        };
+        if let Err(err) = published {
+            if owned {
+                if let Err(cleanup_err) =
+                    self.delete_release(&client, &token, &owner, &repo, release_id)
+                {
+                    warn!(
+                        "release cleanup after a failed upload also failed: {}",
+                        cleanup_err
+                    );
+                }
+            } else if let Err(cleanup_err) =
+                self.delete_asset_named(&client, &token, &owner, &repo, release_id, &asset_name)
+            {
+                warn!(
+                    "asset cleanup after a failed upload also failed: {}",
+                    cleanup_err
+                );
+            }
+            return Err(err);
+        }
+        if owned {
+            info!("published GitHub release {} for '{}'", tag, remote_path);
+        }
+        Ok(format!(
+            "https://github.com/{}/{}/releases/tag/{}",
+            owner, repo, tag
+        ))
+    }
+
+    fn upload_inline(
+        &self,
+        local_path: &str,
+        remote_path: &str,
+        size: u64,
+    ) -> Result<String, String> {
+        let (owner, repo) = parse_repo(&self.repo_name)?;
+        let token = self.auth.get()?;
+        let client = http_client()?;
+        let url = self.contents_url(&owner, &repo, remote_path);
+
+        // The Contents API needs the current blob SHA to overwrite a file.
+        let probe = send_classified("GitHub", "sha lookup", &[404], || {
+            Ok(client
+                .get(&url)
+                .header("Authorization", format!("token {}", token))
+                .header("Accept", "application/vnd.github+json")
+                .query(&[("ref", self.branch.as_str())]))
+        })?;
+        let sha = if probe.status().as_u16() == 404 {
+            None
+        } else {
+            let json = parse_json(probe, "GitHub", "sha lookup")?;
+            Some(
+                json["sha"]
+                    .as_str()
+                    .ok_or_else(|| {
+                        format!(
+                            "{}: GitHub returned no blob sha for '{}'",
+                            retry::NETWORK,
+                            remote_path
+                        )
+                    })?
+                    .to_string(),
+            )
+        };
+
+        let data = transfer::read_local(local_path)?;
+        let mut body = serde_json::json!({
+            "message": format!("Sync upload: {}", remote_path),
+            "content": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data),
+            "branch": self.branch,
         });
-
-        let resp = client
-            .post(format!(
-                "https://api.github.com/repos/{}/{}/releases",
-                owner, repo
-            ))
-            .header("Authorization", format!("token {}", self.token))
-            .header("Accept", "application/vnd.github+json")
-            .json(&release_body)
-            .send()
-            .map_err(|e| format!("GitHub release request failed: {}", e))?;
-
-        let status = resp.status().as_u16();
-        let body = resp
-            .text()
-            .map_err(|e| format!("Failed to read release response: {}", e))?;
-
-        if !(200..300).contains(&status) {
-            return Err(format!(
-                "GitHub release creation failed ({}): {}",
-                status, body
-            ));
+        if let Some(sha) = sha {
+            body["sha"] = serde_json::json!(sha);
         }
 
-        let release: serde_json::Value = serde_json::from_str(&body)
-            .map_err(|e| format!("Failed to parse release response: {}", e))?;
-        let _release_id = release["id"].as_u64().ok_or("No release ID in response")?;
-        let upload_url = release["upload_url"]
+        let resp = send_classified("GitHub", "upload", &[], || {
+            Ok(client
+                .put(&url)
+                .header("Authorization", format!("token {}", token))
+                .header("Accept", "application/vnd.github+json")
+                .json(&body))
+        })?;
+        let json = parse_json(resp, "GitHub", "upload")?;
+        if let Some(stored) = json_u64(&json["content"]["size"]) {
+            if stored != size {
+                return Err(format!(
+                    "{}: GitHub stored {} bytes but '{}' has {}",
+                    retry::INTEGRITY,
+                    stored,
+                    remote_path,
+                    size
+                ));
+            }
+        }
+        Ok(json["content"]["download_url"]
             .as_str()
-            .unwrap_or("")
-            .replace("{?name,label}", "");
+            .map(str::to_string)
+            .unwrap_or_else(|| self.raw_url(&owner, &repo, remote_path)))
+    }
 
-        // 2. Upload the asset
-        let file_bytes = fs::read(local_path)
-            .map_err(|e| format!("Failed to read file for release upload: {}", e))?;
+    fn last_commit_date(
+        &self,
+        client: &reqwest::blocking::Client,
+        token: &str,
+        path: &str,
+    ) -> Option<String> {
+        let (owner, repo) = self.owner().ok().zip(self.repo().ok())?;
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/commits?path={}&per_page=1",
+            owner,
+            repo,
+            urlencoding(path)
+        );
+        let resp = match send_classified("GitHub", "stat date", &[], || {
+            Ok(client
+                .get(&url)
+                .header("Authorization", format!("token {}", token))
+                .header("Accept", "application/vnd.github+json"))
+        }) {
+            Ok(resp) => resp,
+            Err(err) => {
+                debug!("GitHub: no commit date for '{}': {}", path, err);
+                return None;
+            }
+        };
+        let json = parse_json(resp, "GitHub", "stat date").ok()?;
+        json[0]["commit"]["committer"]["date"]
+            .as_str()
+            .or_else(|| json[0]["commit"]["author"]["date"].as_str())
+            .map(str::to_string)
+    }
 
-        let upload_endpoint = format!("{}?name={}", upload_url, file_name);
-        let up_resp = client
-            .post(&upload_endpoint)
-            .header("Authorization", format!("token {}", self.token))
-            .header("Content-Type", "application/octet-stream")
-            .body(file_bytes)
-            .send()
-            .map_err(|e| format!("GitHub release upload request failed: {}", e))?;
-
-        let up_status = up_resp.status().as_u16();
-        let up_body = up_resp.text().unwrap_or_default();
-
-        if !(200..300).contains(&up_status) {
+    fn download_release_asset(&self, tag: &str, local_path: &str) -> Result<(), String> {
+        let (owner, repo) = parse_repo(&self.repo_name)?;
+        let token = self.auth.get()?;
+        let client = http_client()?;
+        let release = self
+            .get_release(&client, &token, &owner, &repo, tag)?
+            .ok_or_else(|| format!("{}: no GitHub release tagged '{}'", retry::NOT_FOUND, tag))?;
+        let assets = release["assets"].as_array().cloned().unwrap_or_default();
+        if assets.is_empty() {
             return Err(format!(
-                "GitHub release upload failed ({}): {}",
-                up_status, up_body
+                "{}: release '{}' has no assets",
+                retry::NOT_FOUND,
+                tag
             ));
         }
-
-        let release_url = format!("https://github.com/{}/{}/releases/tag/{}", owner, repo, tag);
-        Ok(release_url)
+        if assets.len() > 1 {
+            return Err(format!(
+                "{}: release '{}' holds {} assets — the remote path is ambiguous",
+                retry::UNSUPPORTED,
+                tag,
+                assets.len()
+            ));
+        }
+        let asset = &assets[0];
+        let asset_id = json_u64(&asset["id"])
+            .ok_or_else(|| format!("{}: release asset has no id", retry::NETWORK))?;
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/releases/assets/{}",
+            owner, repo, asset_id
+        );
+        let resp = send_classified("GitHub", "download", &[], || {
+            Ok(client
+                .get(&url)
+                .header("Authorization", format!("token {}", token))
+                .header("Accept", "application/octet-stream"))
+        })?;
+        let promised = resp.content_length();
+        let bytes = resp.bytes().map_err(|err| {
+            format!(
+                "{}: download body unreadable: {}",
+                retry::NETWORK,
+                err.without_url()
+            )
+        })?;
+        transfer::write_verified(local_path, &bytes, promised, "GitHub release asset")
     }
 }
 
@@ -333,246 +1306,292 @@ impl StorageBackend for GitHubBackend {
     }
 
     fn upload_file(&self, local_path: &str, remote_path: &str) -> Result<String, String> {
-        let file_size = fs::metadata(local_path).map(|m| m.len()).unwrap_or(0);
-        const LARGE_FILE_THRESHOLD: u64 = 100 * 1024 * 1024; // 100 MB
-
-        if file_size > LARGE_FILE_THRESHOLD {
-            info!("File > 100 MB, using GitHub Releases API");
-            return self.upload_via_release(local_path, remote_path);
+        let _permit = rate_limit::acquire(&SyncBackendType::GitHub)?;
+        let size = transfer::local_size(local_path)?;
+        transfer::preflight(&SyncBackendType::GitHub, size)?;
+        let remote = normalize_remote(remote_path, local_path);
+        if size > transfer::GITHUB_INLINE_MAX {
+            info!(
+                "file '{}' is larger than the Contents API limit, using GitHub Releases",
+                remote
+            );
+            self.upload_via_release(local_path, &remote, size)
+        } else {
+            self.upload_inline(local_path, &remote, size)
         }
+    }
 
-        let (owner, repo) = parse_repo(&self.repo_name)?;
-        let data = fs::read(local_path)
-            .map_err(|e| format!("Failed to read file '{}': {}", local_path, e))?;
-        let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data);
-
-        let put_body = serde_json::json!({
-            "message": format!("Sync upload: {}", remote_path),
-            "content": b64,
-            "branch": self.branch,
-        });
-
-        let url = format!(
-            "https://api.github.com/repos/{}/{}/contents/{}",
-            owner, repo, remote_path
-        );
-
-        let client = http_client()?;
-        let resp = client
-            .put(&url)
-            .header("Authorization", format!("token {}", self.token))
-            .header("Accept", "application/vnd.github+json")
-            .json(&put_body)
-            .send()
-            .map_err(|e| format!("GitHub upload request failed: {}", e))?;
-
-        let status = resp.status().as_u16();
-        let body = resp
-            .text()
-            .map_err(|e| format!("Failed to read upload response: {}", e))?;
-
-        if !(200..300).contains(&status) {
-            return Err(format!("GitHub upload failed ({}): {}", status, body));
-        }
-
-        let resp_json: serde_json::Value = serde_json::from_str(&body)
-            .map_err(|e| format!("Failed to parse upload response: {}", e))?;
-        let download_url = resp_json["content"]["download_url"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
-
-        Ok(download_url)
+    fn upload_file_chunked(&self, local_path: &str, remote_path: &str) -> Result<String, String> {
+        let _permit = rate_limit::acquire(&SyncBackendType::GitHub)?;
+        let size = transfer::local_size(local_path)?;
+        transfer::preflight(&SyncBackendType::GitHub, size)?;
+        let remote = normalize_remote(remote_path, local_path);
+        self.upload_via_release(local_path, &remote, size)
     }
 
     fn download_file(&self, remote_path: &str, local_path: &str) -> Result<(), String> {
-        let (owner, repo) = parse_repo(&self.repo_name)?;
-        let url = format!(
-            "https://api.github.com/repos/{}/{}/contents/{}",
-            owner, repo, remote_path
-        );
-
-        let client = http_client()?;
-        let resp = client
-            .get(&url)
-            .header("Authorization", format!("token {}", self.token))
-            .header("Accept", "application/vnd.github+json")
-            .send()
-            .map_err(|e| format!("GitHub download request failed: {}", e))?;
-
-        let status = resp.status().as_u16();
-        if !(200..300).contains(&status) {
-            let body = resp.text().unwrap_or_default();
-            return Err(format!("GitHub download failed ({}): {}", status, body));
+        let _permit = rate_limit::acquire(&SyncBackendType::GitHub)?;
+        match self.resolve_locator(remote_path)? {
+            GitHubLocator::Content(path) => {
+                let (owner, repo) = parse_repo(&self.repo_name)?;
+                let token = self.auth.get()?;
+                let client = http_client()?;
+                let url = self.contents_url(&owner, &repo, &path);
+                let resp = send_classified("GitHub", "download", &[], || {
+                    Ok(client
+                        .get(&url)
+                        .header("Authorization", format!("token {}", token))
+                        .header("Accept", "application/vnd.github.raw")
+                        .query(&[("ref", self.branch.as_str())]))
+                })?;
+                let promised = resp.content_length();
+                let bytes = resp.bytes().map_err(|err| {
+                    format!(
+                        "{}: download body unreadable: {}",
+                        retry::NETWORK,
+                        err.without_url()
+                    )
+                })?;
+                transfer::write_verified(local_path, &bytes, promised, "GitHub")
+            }
+            GitHubLocator::Release(tag) => self.download_release_asset(&tag, local_path),
         }
-
-        let body = resp
-            .text()
-            .map_err(|e| format!("Failed to read download response: {}", e))?;
-        let resp_json: serde_json::Value =
-            serde_json::from_str(&body).map_err(|e| format!("Failed to parse response: {}", e))?;
-        let content_b64 = resp_json["content"]
-            .as_str()
-            .ok_or("No 'content' field in response")?;
-
-        // GitHub API base64 may contain newlines; strip them
-        let content_b64_clean: String = content_b64.chars().filter(|c| *c != '\n').collect();
-        let data = base64::Engine::decode(
-            &base64::engine::general_purpose::STANDARD,
-            content_b64_clean,
-        )
-        .map_err(|e| format!("Failed to decode base64: {}", e))?;
-
-        if let Some(parent) = Path::new(local_path).parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
-        }
-        fs::write(local_path, &data).map_err(|e| format!("Failed to write file: {}", e))?;
-
-        Ok(())
     }
 
     fn delete_file(&self, remote_path: &str) -> Result<(), String> {
+        let _permit = rate_limit::acquire(&SyncBackendType::GitHub)?;
         let (owner, repo) = parse_repo(&self.repo_name)?;
-        let url = format!(
-            "https://api.github.com/repos/{}/{}/contents/{}",
-            owner, repo, remote_path
-        );
-
+        let token = self.auth.get()?;
         let client = http_client()?;
-
-        // First get the file's SHA
-        let get_resp = client
-            .get(&url)
-            .header("Authorization", format!("token {}", self.token))
-            .header("Accept", "application/vnd.github+json")
-            .send()
-            .map_err(|e| format!("GitHub get SHA request failed: {}", e))?;
-
-        let get_status = get_resp.status().as_u16();
-        if get_status == 404 {
-            return Ok(());
+        match self.resolve_locator(remote_path)? {
+            GitHubLocator::Content(path) => {
+                let url = self.contents_url(&owner, &repo, &path);
+                let probe = send_classified("GitHub", "delete lookup", &[404], || {
+                    Ok(client
+                        .get(&url)
+                        .header("Authorization", format!("token {}", token))
+                        .header("Accept", "application/vnd.github+json")
+                        .query(&[("ref", self.branch.as_str())]))
+                })?;
+                if probe.status().as_u16() == 404 {
+                    return Err(format!(
+                        "{}: '{}' does not exist in {}/{}",
+                        retry::NOT_FOUND,
+                        remote_path,
+                        owner,
+                        repo
+                    ));
+                }
+                let json = parse_json(probe, "GitHub", "delete lookup")?;
+                let sha = json["sha"].as_str().ok_or_else(|| {
+                    format!(
+                        "{}: GitHub returned no blob sha for '{}'",
+                        retry::NETWORK,
+                        path
+                    )
+                })?;
+                let body = serde_json::json!({
+                    "message": format!("Sync delete: {}", path),
+                    "sha": sha,
+                    "branch": self.branch,
+                });
+                send_classified("GitHub", "delete", &[], || {
+                    Ok(client
+                        .delete(&url)
+                        .header("Authorization", format!("token {}", token))
+                        .header("Accept", "application/vnd.github+json")
+                        .json(&body))
+                })?;
+                Ok(())
+            }
+            GitHubLocator::Release(tag) => {
+                let release = self
+                    .get_release(&client, &token, &owner, &repo, &tag)?
+                    .ok_or_else(|| {
+                        format!("{}: no GitHub release tagged '{}'", retry::NOT_FOUND, tag)
+                    })?;
+                let release_id = json_u64(&release["id"]).ok_or_else(|| {
+                    format!("{}: GitHub release '{}' has no id", retry::NETWORK, tag)
+                })?;
+                self.delete_release(&client, &token, &owner, &repo, release_id)
+            }
         }
-        if !(200..300).contains(&get_status) {
-            let body = get_resp.text().unwrap_or_default();
-            return Err(format!("GitHub get SHA failed ({}): {}", get_status, body));
-        }
-
-        let get_body = get_resp
-            .text()
-            .map_err(|e| format!("Failed to read get response: {}", e))?;
-        let get_json: serde_json::Value = serde_json::from_str(&get_body)
-            .map_err(|e| format!("Failed to parse get response: {}", e))?;
-        let sha = get_json["sha"]
-            .as_str()
-            .ok_or("No 'sha' field in response")?;
-
-        let delete_body = serde_json::json!({
-            "message": format!("Sync delete: {}", remote_path),
-            "sha": sha,
-            "branch": self.branch,
-        });
-
-        let del_resp = client
-            .delete(&url)
-            .header("Authorization", format!("token {}", self.token))
-            .header("Accept", "application/vnd.github+json")
-            .json(&delete_body)
-            .send()
-            .map_err(|e| format!("GitHub delete request failed: {}", e))?;
-
-        let del_status = del_resp.status().as_u16();
-        if !(200..300).contains(&del_status) {
-            let del_body = del_resp.text().unwrap_or_default();
-            return Err(format!(
-                "GitHub delete failed ({}): {}",
-                del_status, del_body
-            ));
-        }
-
-        Ok(())
     }
 
     fn list_files(&self, prefix: &str) -> Result<Vec<RemoteFile>, String> {
+        let _permit = rate_limit::acquire(&SyncBackendType::GitHub)?;
         let (owner, repo) = parse_repo(&self.repo_name)?;
-        let url = format!(
-            "https://api.github.com/repos/{}/{}/contents/{}",
-            owner, repo, prefix
-        );
-
+        let token = self.auth.get()?;
         let client = http_client()?;
-        let resp = client
-            .get(&url)
-            .header("Authorization", format!("token {}", self.token))
-            .header("Accept", "application/vnd.github+json")
-            .send()
-            .map_err(|e| format!("GitHub list request failed: {}", e))?;
-
-        let status = resp.status().as_u16();
-        let body = resp
-            .text()
-            .map_err(|e| format!("Failed to read list response: {}", e))?;
-
-        if !(200..300).contains(&status) {
-            return Err(format!("GitHub list failed ({}): {}", status, body));
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/git/trees/{}",
+            owner,
+            repo,
+            urlencoding(&self.branch)
+        );
+        let resp = send_classified("GitHub", "list", &[], || {
+            Ok(client
+                .get(&url)
+                .header("Authorization", format!("token {}", token))
+                .header("Accept", "application/vnd.github+json")
+                .query(&[("recursive", "1")]))
+        })?;
+        let json = parse_json(resp, "GitHub", "list")?;
+        if json["truncated"].as_bool().unwrap_or(false) {
+            return Err(format!(
+                "{}: the tree for {}/{} exceeds the GitHub tree API limit",
+                retry::TOO_LARGE,
+                owner,
+                repo
+            ));
         }
-
-        let items: Vec<serde_json::Value> =
-            serde_json::from_str(&body).map_err(|e| format!("Failed to parse listing: {}", e))?;
-
+        let clean = prefix.trim().trim_matches('/');
+        let wanted = if clean.is_empty() {
+            String::new()
+        } else {
+            format!("{}/", clean)
+        };
         let mut files = Vec::new();
-        for item in &items {
-            // Skip directories
-            if item["type"].as_str() == Some("dir") {
+        for entry in json["tree"]
+            .as_array()
+            .map(|tree| tree.as_slice())
+            .unwrap_or(&[])
+        {
+            if entry["type"].as_str() != Some("blob") {
                 continue;
             }
-            let name = item["name"].as_str().unwrap_or("unknown").to_string();
-            let path = item["path"].as_str().unwrap_or(&name).to_string();
-            let size = item["size"].as_u64().unwrap_or(0);
-            let modified = item
-                .get("created_at")
-                .or_else(|| item.get("updated_at"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let url_str = item["download_url"].as_str().unwrap_or("").to_string();
-
+            let path = entry["path"].as_str().unwrap_or_default();
+            if path.is_empty() || (!wanted.is_empty() && !path.starts_with(&wanted)) {
+                continue;
+            }
             files.push(RemoteFile {
-                name,
-                path,
-                size_bytes: size,
-                modified_at: modified,
-                url: url_str,
+                name: file_name_of(path),
+                path: path.to_string(),
+                size_bytes: json_u64(&entry["size"]).unwrap_or(0),
+                modified_at: String::new(),
+                url: self.raw_url(&owner, &repo, path),
             });
         }
-
         Ok(files)
     }
 
     fn get_file_url(&self, remote_path: &str) -> Result<String, String> {
         let (owner, repo) = parse_repo(&self.repo_name)?;
-        Ok(format!(
-            "https://raw.githubusercontent.com/{}/{}/{}/{}",
-            owner, repo, self.branch, remote_path
-        ))
+        match self.resolve_locator(remote_path)? {
+            GitHubLocator::Content(path) => Ok(self.raw_url(&owner, &repo, &path)),
+            GitHubLocator::Release(tag) => {
+                let name = file_name_of(remote_path);
+                Ok(format!(
+                    "https://github.com/{}/{}/releases/download/{}/{}",
+                    owner,
+                    repo,
+                    tag,
+                    encode_path(&name)
+                ))
+            }
+        }
     }
 
     fn test_connection(&self) -> Result<bool, String> {
+        let _permit = rate_limit::acquire(&SyncBackendType::GitHub)?;
+        let token = self.auth.get()?;
         let client = http_client()?;
-        let resp = client
-            .get("https://api.github.com/user")
-            .header("Authorization", format!("token {}", self.token))
-            .header("Accept", "application/vnd.github+json")
-            .send()
-            .map_err(|e| format!("GitHub connection test request failed: {}", e))?;
-
-        let status = resp.status().as_u16();
-        // Consume response body to free connection
+        let resp = send_probe("GitHub", || {
+            Ok(client
+                .get("https://api.github.com/user")
+                .header("Authorization", format!("token {}", token))
+                .header("Accept", "application/vnd.github+json"))
+        })?;
         let _ = resp.text();
+        Ok(true)
+    }
 
-        if status == 200 {
-            Ok(true)
-        } else {
-            Err(format!("GitHub connection test failed (HTTP {})", status))
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            max_size_bytes: transfer::max_size_bytes(&SyncBackendType::GitHub),
+            supports_delete: true,
+            supports_direct_download: true,
+            recursive_list: true,
+            chunked: true,
+        }
+    }
+
+    fn stat(&self, remote_path: &str) -> Result<Option<RemoteFile>, String> {
+        let _permit = rate_limit::acquire(&SyncBackendType::GitHub)?;
+        let (owner, repo) = parse_repo(&self.repo_name)?;
+        let token = self.auth.get()?;
+        let client = http_client()?;
+        match self.resolve_locator(remote_path)? {
+            GitHubLocator::Content(path) => {
+                let url = self.contents_url(&owner, &repo, &path);
+                let resp = send_classified("GitHub", "stat", &[404], || {
+                    Ok(client
+                        .get(&url)
+                        .header("Authorization", format!("token {}", token))
+                        .header("Accept", "application/vnd.github+json")
+                        .query(&[("ref", self.branch.as_str())]))
+                })?;
+                if resp.status().as_u16() == 404 {
+                    return Err(format!(
+                        "{}: '{}' does not exist in {}/{}",
+                        retry::NOT_FOUND,
+                        remote_path,
+                        owner,
+                        repo
+                    ));
+                }
+                let json = parse_json(resp, "GitHub", "stat")?;
+                if json.is_array() {
+                    return Ok(None);
+                }
+                let Some(size) = json_u64(&json["size"]) else {
+                    return Ok(None);
+                };
+                Ok(Some(RemoteFile {
+                    name: file_name_of(&path),
+                    path: path.clone(),
+                    size_bytes: size,
+                    modified_at: self
+                        .last_commit_date(&client, &token, &path)
+                        .unwrap_or_default(),
+                    url: self.raw_url(&owner, &repo, &path),
+                }))
+            }
+            GitHubLocator::Release(tag) => {
+                let release = self
+                    .get_release(&client, &token, &owner, &repo, &tag)?
+                    .ok_or_else(|| {
+                        format!("{}: no GitHub release tagged '{}'", retry::NOT_FOUND, tag)
+                    })?;
+                let wanted = file_name_of(remote_path);
+                let asset = release["assets"].as_array().and_then(|assets| {
+                    assets
+                        .iter()
+                        .find(|asset| asset["name"].as_str() == Some(wanted.as_str()))
+                });
+                let Some(asset) = asset else {
+                    return Err(format!(
+                        "{}: release '{}' has no asset named '{}'",
+                        retry::NOT_FOUND,
+                        tag,
+                        wanted
+                    ));
+                };
+                let Some(size) = json_u64(&asset["size"]) else {
+                    return Ok(None);
+                };
+                Ok(Some(RemoteFile {
+                    name: wanted.clone(),
+                    path: remote_path.trim().trim_matches('/').to_string(),
+                    size_bytes: size,
+                    modified_at: release["published_at"]
+                        .as_str()
+                        .or_else(|| release["created_at"].as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    url: format!("https://github.com/{}/{}/releases/tag/{}", owner, repo, tag),
+                }))
+            }
         }
     }
 }
@@ -582,7 +1601,7 @@ impl StorageBackend for GitHubBackend {
 // ===========================================================================
 
 pub struct GitLabBackend {
-    token: String,
+    auth: TokenSource,
     project_id: String,
     branch: String,
     base_url: String,
@@ -590,22 +1609,87 @@ pub struct GitLabBackend {
 
 impl GitLabBackend {
     pub fn new(token: &str, project_id: &str, branch: &str, base_url: Option<&str>) -> Self {
+        Self::with_credentials(token, project_id, branch, base_url, None)
+    }
+
+    pub fn with_credentials(
+        token: &str,
+        project_id: &str,
+        branch: &str,
+        base_url: Option<&str>,
+        credentials: Option<OAuthCredentials>,
+    ) -> Self {
+        let base = base_url
+            .unwrap_or("https://gitlab.com")
+            .trim_end_matches('/')
+            .to_string();
+        let token_url = format!("{}/oauth/token", base);
         Self {
-            token: token.to_string(),
+            auth: TokenSource::new(credentials, token.to_string(), token_url),
             project_id: project_id.to_string(),
             branch: branch.to_string(),
-            base_url: base_url
-                .unwrap_or("https://gitlab.com")
-                .trim_end_matches('/')
-                .to_string(),
+            base_url: base,
         }
     }
 
-    fn api_url(&self, endpoint: &str) -> String {
+    fn api_base(&self) -> String {
         format!(
-            "{}/api/v4/projects/{}/{}",
-            self.base_url, self.project_id, endpoint
+            "{}/api/v4/projects/{}",
+            self.base_url,
+            urlencoding(&self.project_id)
         )
+    }
+
+    fn file_api_url(&self, path: &str) -> Result<String, String> {
+        if path.trim().is_empty() {
+            return Err(format!(
+                "{}: GitLab file path must not be empty",
+                retry::UNSUPPORTED
+            ));
+        }
+        Ok(format!(
+            "{}/repository/files/{}",
+            self.api_base(),
+            urlencoding(path)
+        ))
+    }
+
+    fn last_commit_date(
+        &self,
+        client: &reqwest::blocking::Client,
+        token: &str,
+        path: &str,
+    ) -> Option<String> {
+        let url = format!(
+            "{}/repository/commits?path={}&ref_name={}&per_page=1",
+            self.api_base(),
+            urlencoding(path),
+            urlencoding(&self.branch)
+        );
+        let resp = match send_classified("GitLab", "stat date", &[], || {
+            Ok(client.get(&url).header("PRIVATE-TOKEN", token))
+        }) {
+            Ok(resp) => resp,
+            Err(err) => {
+                debug!("GitLab: no commit date for '{}': {}", path, err);
+                return None;
+            }
+        };
+        let json = parse_json(resp, "GitLab", "stat date").ok()?;
+        json[0]["committed_date"].as_str().map(str::to_string)
+    }
+
+    /// Size from the files API; falls back to deriving it from the base64
+    /// content. Both absent → unknown (`None`), never a fabricated 0.
+    fn size_hint(json: &serde_json::Value) -> Option<u64> {
+        json_u64(&json["size"]).or_else(|| {
+            let text = json["content"].as_str()?;
+            let stripped: String = text
+                .chars()
+                .filter(|c| !c.is_ascii_whitespace() && *c != '=')
+                .collect();
+            Some((stripped.len() as u64) * 3 / 4)
+        })
     }
 }
 
@@ -619,235 +1703,254 @@ impl StorageBackend for GitLabBackend {
     }
 
     fn upload_file(&self, local_path: &str, remote_path: &str) -> Result<String, String> {
-        let file_name = Path::new(local_path)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "upload".to_string());
-
-        let data = fs::read(local_path)
-            .map_err(|e| format!("Failed to read file '{}': {}", local_path, e))?;
-        let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data);
-
-        let encoded_path = urlencoding(remote_path);
-        let url = format!(
-            "{}/repository/files/{}",
-            self.api_url("repository"),
-            encoded_path
-        );
-
+        let _permit = rate_limit::acquire(&SyncBackendType::GitLab)?;
+        let size = transfer::local_size(local_path)?;
+        transfer::preflight(&SyncBackendType::GitLab, size)?;
+        let remote = normalize_remote(remote_path, local_path);
+        let url = self.file_api_url(&remote)?;
+        let data = transfer::read_local(local_path)?;
+        let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data);
+        let token = self.auth.get()?;
         let client = http_client()?;
 
-        // First check if file exists to decide POST (create) vs PUT (update)
-        let check_resp = client
-            .head(&url)
-            .header("PRIVATE-TOKEN", &self.token)
-            .send();
+        // HEAD needs `ref` — without it real GitLab answers 400 and the
+        // update path below would never run.
+        let probe = send_classified("GitLab", "existence check", &[404], || {
+            Ok(client
+                .head(&url)
+                .header("PRIVATE-TOKEN", &token)
+                .query(&[("ref", self.branch.as_str())]))
+        })?;
+        let exists = probe.status().as_u16() != 404;
+        let _ = probe.text();
 
-        let file_exists = match check_resp {
-            Ok(r) => r.status().as_u16() == 200,
-            Err(_) => false,
-        };
-
-        let resp = if file_exists {
-            // Update existing file
-            let put_body = serde_json::json!({
-                "branch": self.branch,
-                "content": b64,
-                "encoding": "base64",
-                "commit_message": format!("Sync update: {}", remote_path),
-            });
-            client
-                .put(&url)
-                .header("PRIVATE-TOKEN", &self.token)
-                .header("Content-Type", "application/json")
-                .json(&put_body)
-                .send()
-                .map_err(|e| format!("GitLab update request failed: {}", e))?
-        } else {
-            // Create new file
-            let post_body = serde_json::json!({
-                "branch": self.branch,
-                "content": b64,
-                "encoding": "base64",
-                "commit_message": format!("Sync upload: {}", remote_path),
-            });
-            client
-                .post(&url)
-                .header("PRIVATE-TOKEN", &self.token)
-                .header("Content-Type", "application/json")
-                .json(&post_body)
-                .send()
-                .map_err(|e| format!("GitLab upload request failed: {}", e))?
-        };
-
-        let status = resp.status().as_u16();
-        let body = resp
-            .text()
-            .map_err(|e| format!("Failed to read upload response: {}", e))?;
-
-        if !(200..300).contains(&status) {
-            return Err(format!("GitLab upload failed ({}): {}", status, body));
-        }
-
-        let resp_json: serde_json::Value = serde_json::from_str(&body)
-            .map_err(|e| format!("Failed to parse upload response: {}", e))?;
-        let file_path = resp_json["file_path"]
+        let body = serde_json::json!({
+            "branch": self.branch,
+            "content": encoded,
+            "encoding": "base64",
+            "commit_message": if exists {
+                format!("Sync update: {}", remote)
+            } else {
+                format!("Sync upload: {}", remote)
+            },
+        });
+        let updating = exists;
+        let resp = send_classified("GitLab", "upload", &[], || {
+            let builder = if updating {
+                client.put(&url)
+            } else {
+                client.post(&url)
+            };
+            Ok(builder.header("PRIVATE-TOKEN", &token).json(&body))
+        })?;
+        let json = parse_json(resp, "GitLab", "upload")?;
+        let file_path = json["file_path"]
             .as_str()
-            .unwrap_or(&file_name)
-            .to_string();
-
+            .map(str::to_string)
+            .unwrap_or_else(|| remote.clone());
         Ok(format!(
             "{}/-/blob/{}/{}",
-            self.base_url, self.branch, file_path
+            self.base_url,
+            urlencoding(&self.branch),
+            encode_path(&file_path)
         ))
     }
 
     fn download_file(&self, remote_path: &str, local_path: &str) -> Result<(), String> {
-        let encoded_path = urlencoding(remote_path);
+        let _permit = rate_limit::acquire(&SyncBackendType::GitLab)?;
+        let clean = remote_path.trim().trim_matches('/');
+        if clean.is_empty() {
+            return Err(format!(
+                "{}: GitLab download requires a remote path",
+                retry::UNSUPPORTED
+            ));
+        }
         let url = format!(
-            "{}/repository/files/{}/raw?ref={}",
-            self.api_url("repository"),
-            encoded_path,
+            "{}?ref={}",
+            self.file_api_url(clean)?,
             urlencoding(&self.branch)
         );
-
+        let token = self.auth.get()?;
         let client = http_client()?;
-        let resp = client
-            .get(&url)
-            .header("PRIVATE-TOKEN", &self.token)
-            .send()
-            .map_err(|e| format!("GitLab download request failed: {}", e))?;
-
-        let status = resp.status().as_u16();
-        if !(200..300).contains(&status) {
-            let body = resp.text().unwrap_or_default();
-            return Err(format!("GitLab download failed ({}): {}", status, body));
-        }
-
-        let bytes = resp
-            .bytes()
-            .map_err(|e| format!("Failed to read download body: {}", e))?;
-
-        if let Some(parent) = Path::new(local_path).parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
-        }
-        fs::write(local_path, &bytes).map_err(|e| format!("Failed to write file: {}", e))?;
-
-        Ok(())
+        let resp = send_classified("GitLab", "download", &[], || {
+            Ok(client.get(&url).header("PRIVATE-TOKEN", &token))
+        })?;
+        let promised = resp.content_length();
+        let bytes = resp.bytes().map_err(|err| {
+            format!(
+                "{}: download body unreadable: {}",
+                retry::NETWORK,
+                err.without_url()
+            )
+        })?;
+        transfer::write_verified(local_path, &bytes, promised, "GitLab")
     }
 
     fn delete_file(&self, remote_path: &str) -> Result<(), String> {
-        let encoded_path = urlencoding(remote_path);
-        let url = format!(
-            "{}/repository/files/{}",
-            self.api_url("repository"),
-            encoded_path
-        );
-
-        let delete_body = serde_json::json!({
-            "branch": self.branch,
-            "commit_message": format!("Sync delete: {}", remote_path),
-        });
-
+        let _permit = rate_limit::acquire(&SyncBackendType::GitLab)?;
+        let clean = remote_path.trim().trim_matches('/');
+        let url = self.file_api_url(clean)?;
+        let token = self.auth.get()?;
         let client = http_client()?;
-        let resp = client
-            .delete(&url)
-            .header("PRIVATE-TOKEN", &self.token)
-            .header("Content-Type", "application/json")
-            .json(&delete_body)
-            .send()
-            .map_err(|e| format!("GitLab delete request failed: {}", e))?;
-
-        let status = resp.status().as_u16();
-        if status == 204 || status == 200 {
-            Ok(())
-        } else {
-            let body = resp.text().unwrap_or_default();
-            Err(format!("GitLab delete failed ({}): {}", status, body))
-        }
+        let body = serde_json::json!({
+            "branch": self.branch,
+            "commit_message": format!("Sync delete: {}", clean),
+        });
+        send_classified("GitLab", "delete", &[], || {
+            Ok(client
+                .delete(&url)
+                .header("PRIVATE-TOKEN", &token)
+                .json(&body))
+        })?;
+        Ok(())
     }
 
     fn list_files(&self, prefix: &str) -> Result<Vec<RemoteFile>, String> {
-        let url = if prefix.is_empty() {
-            format!(
-                "{}/repository/tree?ref={}&per_page=100",
-                self.api_url("repository"),
-                urlencoding(&self.branch)
-            )
-        } else {
-            format!(
-                "{}/repository/tree?ref={}&path={}&per_page=100",
-                self.api_url("repository"),
-                urlencoding(&self.branch),
-                urlencoding(prefix)
-            )
-        };
-
+        let _permit = rate_limit::acquire(&SyncBackendType::GitLab)?;
+        let token = self.auth.get()?;
         let client = http_client()?;
-        let resp = client
-            .get(&url)
-            .header("PRIVATE-TOKEN", &self.token)
-            .send()
-            .map_err(|e| format!("GitLab list request failed: {}", e))?;
-
-        let status = resp.status().as_u16();
-        let body = resp
-            .text()
-            .map_err(|e| format!("Failed to read list response: {}", e))?;
-
-        if !(200..300).contains(&status) {
-            return Err(format!("GitLab list failed ({}): {}", status, body));
-        }
-
-        let items: Vec<serde_json::Value> =
-            serde_json::from_str(&body).map_err(|e| format!("Failed to parse listing: {}", e))?;
-
+        let clean = prefix.trim().trim_matches('/');
         let mut files = Vec::new();
-        for item in &items {
-            // Skip directories (trees)
-            if item["type"].as_str() == Some("tree") {
-                continue;
+        let mut page: usize = 1;
+        loop {
+            let mut url = format!(
+                "{}/repository/tree?ref={}&recursive=true&per_page=100&page={}",
+                self.api_base(),
+                urlencoding(&self.branch),
+                page
+            );
+            if !clean.is_empty() {
+                url.push_str(&format!("&path={}", urlencoding(clean)));
             }
-            let name = item["name"].as_str().unwrap_or("unknown").to_string();
-            let path = item["path"].as_str().unwrap_or(&name).to_string();
-
-            files.push(RemoteFile {
-                name,
-                path: path.clone(),
-                size_bytes: 0, // GitLab tree API doesn't return size
-                modified_at: String::new(),
-                url: format!("{}/-/raw/{}/{}", self.base_url, self.branch, path),
-            });
+            let resp = send_classified("GitLab", "list", &[], || {
+                Ok(client.get(&url).header("PRIVATE-TOKEN", &token))
+            })?;
+            let json = parse_json(resp, "GitLab", "list")?;
+            let items = json.as_array().ok_or_else(|| {
+                format!("{}: GitLab tree listing was not an array", retry::NETWORK)
+            })?;
+            let count = items.len();
+            for item in items {
+                if item["type"].as_str() != Some("blob") {
+                    continue;
+                }
+                let name = item["name"].as_str().unwrap_or("unknown").to_string();
+                let path = item["path"].as_str().unwrap_or(&name).to_string();
+                files.push(RemoteFile {
+                    name,
+                    path: path.clone(),
+                    size_bytes: 0,
+                    modified_at: String::new(),
+                    url: format!(
+                        "{}/-/raw/{}/{}",
+                        self.base_url,
+                        urlencoding(&self.branch),
+                        encode_path(&path)
+                    ),
+                });
+            }
+            if count < 100 {
+                break;
+            }
+            page += 1;
+            if page > MAX_PAGES {
+                return Err(format!(
+                    "{}: GitLab listing holds more than {} entries",
+                    retry::TOO_LARGE,
+                    MAX_PAGES * 100
+                ));
+            }
         }
-
         Ok(files)
     }
 
     fn get_file_url(&self, remote_path: &str) -> Result<String, String> {
+        let clean = remote_path.trim().trim_matches('/');
+        if clean.is_empty() {
+            return Err(format!(
+                "{}: GitLab path must not be empty",
+                retry::UNSUPPORTED
+            ));
+        }
         Ok(format!(
             "{}/-/raw/{}/{}",
-            self.base_url, self.branch, remote_path
+            self.base_url,
+            urlencoding(&self.branch),
+            encode_path(clean)
         ))
     }
 
     fn test_connection(&self) -> Result<bool, String> {
+        let _permit = rate_limit::acquire(&SyncBackendType::GitLab)?;
+        let token = self.auth.get()?;
         let client = http_client()?;
-        let url = format!("{}/api/v4/projects/{}", self.base_url, self.project_id);
-        let resp = client
-            .get(&url)
-            .header("PRIVATE-TOKEN", &self.token)
-            .send()
-            .map_err(|e| format!("GitLab connection test request failed: {}", e))?;
-
-        let status = resp.status().as_u16();
-        // Consume response body to free connection
+        let url = format!(
+            "{}/api/v4/projects/{}",
+            self.base_url,
+            urlencoding(&self.project_id)
+        );
+        let resp = send_probe("GitLab", || {
+            Ok(client.get(&url).header("PRIVATE-TOKEN", &token))
+        })?;
         let _ = resp.text();
+        Ok(true)
+    }
 
-        if status == 200 {
-            Ok(true)
-        } else {
-            Err(format!("GitLab connection test failed (HTTP {})", status))
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            max_size_bytes: transfer::max_size_bytes(&SyncBackendType::GitLab),
+            supports_delete: true,
+            supports_direct_download: true,
+            recursive_list: true,
+            chunked: false,
         }
+    }
+
+    fn stat(&self, remote_path: &str) -> Result<Option<RemoteFile>, String> {
+        let _permit = rate_limit::acquire(&SyncBackendType::GitLab)?;
+        let clean = remote_path.trim().trim_matches('/');
+        if clean.is_empty() {
+            return Err(format!(
+                "{}: GitLab stat requires a file path",
+                retry::UNSUPPORTED
+            ));
+        }
+        let url = format!(
+            "{}?ref={}",
+            self.file_api_url(clean)?,
+            urlencoding(&self.branch)
+        );
+        let token = self.auth.get()?;
+        let client = http_client()?;
+        let resp = send_classified("GitLab", "stat", &[404], || {
+            Ok(client.get(&url).header("PRIVATE-TOKEN", &token))
+        })?;
+        if resp.status().as_u16() == 404 {
+            return Err(format!(
+                "{}: '{}' does not exist in the repository",
+                retry::NOT_FOUND,
+                clean
+            ));
+        }
+        let json = parse_json(resp, "GitLab", "stat")?;
+        let Some(size) = Self::size_hint(&json) else {
+            return Ok(None);
+        };
+        let modified = self
+            .last_commit_date(&client, &token, clean)
+            .unwrap_or_default();
+        Ok(Some(RemoteFile {
+            name: file_name_of(clean),
+            path: clean.to_string(),
+            size_bytes: size,
+            modified_at: modified,
+            url: format!(
+                "{}/-/raw/{}/{}",
+                self.base_url,
+                urlencoding(&self.branch),
+                encode_path(clean)
+            ),
+        }))
     }
 }
 
@@ -855,45 +1958,375 @@ impl StorageBackend for GitLabBackend {
 // 4. GoogleDriveBackend
 // ===========================================================================
 
+const DRIVE_FILES_URL: &str = "https://www.googleapis.com/drive/v3/files";
+const DRIVE_UPLOAD_URL: &str = "https://www.googleapis.com/upload/drive/v3/files";
+const DRIVE_FOLDER_MIME: &str = "application/vnd.google-apps.folder";
+
 pub struct GoogleDriveBackend {
-    token: String,
+    auth: TokenSource,
     folder_id: Option<String>,
-    #[allow(dead_code)]
-    credentials: Option<OAuthCredentials>,
+    /// Folder-id memo keyed by `parent\x01segment`.
+    folders: Mutex<HashMap<String, String>>,
 }
 
 impl GoogleDriveBackend {
     pub fn new(token: &str, folder_id: Option<&str>) -> Self {
-        Self {
-            token: token.to_string(),
-            folder_id: folder_id.map(|s| s.to_string()),
-            credentials: None,
-        }
+        Self::with_credentials(token, folder_id, None)
     }
 
     pub fn with_credentials(
         token: &str,
         folder_id: Option<&str>,
-        credentials: OAuthCredentials,
+        credentials: Option<OAuthCredentials>,
     ) -> Self {
         Self {
-            token: token.to_string(),
-            folder_id: folder_id.map(|s| s.to_string()),
-            credentials: Some(credentials),
+            auth: TokenSource::new(credentials, token.to_string(), token_url_for("google")),
+            folder_id: folder_id.map(str::to_string),
+            folders: Mutex::new(HashMap::new()),
         }
     }
 
-    #[allow(dead_code)]
-    fn get_valid_token(&mut self) -> Result<String, String> {
-        if let Some(ref mut creds) = self.credentials {
-            // Try to refresh if expired (with 5 minute buffer)
-            if creds.is_expired(300) {
-                info!("Google Drive token expired, refreshing...");
-                oauth::refresh_google_token(creds)?;
-                self.token = creds.access_token.clone();
+    fn root_parent(&self) -> String {
+        self.folder_id.clone().unwrap_or_else(|| "root".to_string())
+    }
+
+    fn find_child(
+        &self,
+        client: &reqwest::blocking::Client,
+        parent: &str,
+        name: &str,
+        folder_only: bool,
+    ) -> Result<Option<String>, String> {
+        let escaped = name.replace('\'', "''");
+        let mut query = format!(
+            "name='{}' and '{}' in parents and trashed=false",
+            escaped, parent
+        );
+        if folder_only {
+            query = format!("mimeType='{}' and {}", DRIVE_FOLDER_MIME, query);
+        }
+        let url = format!(
+            "{}?q={}&fields=files(id,name)&pageSize=10",
+            DRIVE_FILES_URL,
+            urlencoding(&query)
+        );
+        let resp = send_classified("Google Drive", "folder lookup", &[], || {
+            Ok(client
+                .get(&url)
+                .header("Authorization", self.auth.bearer()?))
+        })?;
+        let json = parse_json(resp, "Google Drive", "folder lookup")?;
+        Ok(json["files"][0]["id"].as_str().map(str::to_string))
+    }
+
+    fn create_folder(
+        &self,
+        client: &reqwest::blocking::Client,
+        parent: &str,
+        name: &str,
+    ) -> Result<String, String> {
+        let body = serde_json::json!({
+            "name": name,
+            "mimeType": DRIVE_FOLDER_MIME,
+            "parents": [parent],
+        });
+        let url = format!("{}?fields=id", DRIVE_FILES_URL);
+        let resp = send_classified("Google Drive", "folder create", &[], || {
+            Ok(client
+                .post(&url)
+                .header("Authorization", self.auth.bearer()?)
+                .json(&body))
+        })?;
+        let json = parse_json(resp, "Google Drive", "folder create")?;
+        json["id"]
+            .as_str()
+            .map(str::to_string)
+            .ok_or_else(|| format!("{}: Drive folder create returned no id", retry::NETWORK))
+    }
+
+    /// Resolve `a/b/c` into folder ids under the configured root.
+    /// `Ok(None)` = a segment does not exist (lookup without `create`).
+    fn folder_chain(&self, dir: &str, create: bool) -> Result<Option<Vec<String>>, String> {
+        let segments: Vec<&str> = dir
+            .split('/')
+            .map(str::trim)
+            .filter(|segment| !segment.is_empty() && *segment != ".")
+            .collect();
+        let mut ids = Vec::with_capacity(segments.len());
+        let mut parent = self.root_parent();
+        if segments.is_empty() {
+            return Ok(Some(ids));
+        }
+        let client = http_client()?;
+        for segment in segments {
+            let key = format!("{}\u{1}{}", parent, segment);
+            let cached = self
+                .folders
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .get(&key)
+                .cloned();
+            let id = match cached {
+                Some(id) => id,
+                None => {
+                    let found = self.find_child(&client, &parent, segment, true)?;
+                    match found {
+                        Some(id) => id,
+                        None if create => self.create_folder(&client, &parent, segment)?,
+                        None => return Ok(None),
+                    }
+                }
+            };
+            self.folders
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .insert(key, id.clone());
+            parent = id.clone();
+            ids.push(id);
+        }
+        Ok(Some(ids))
+    }
+
+    fn resolve_id(&self, remote: &str) -> Result<String, String> {
+        let trimmed = remote.trim().trim_matches('/');
+        if trimmed.is_empty() {
+            return Err(format!(
+                "{}: Drive path must not be empty",
+                retry::UNSUPPORTED
+            ));
+        }
+        const FILE_D: &str = "/file/d/";
+        if let Some(idx) = trimmed.find(FILE_D) {
+            let after = &trimmed[idx + FILE_D.len()..];
+            let id = after.split('/').next().unwrap_or(after);
+            if !id.is_empty() {
+                return Ok(id.to_string());
             }
         }
-        Ok(self.token.clone())
+        if !trimmed.contains('/') && !trimmed.contains('.') {
+            return Ok(trimmed.to_string());
+        }
+        self.id_from_path(trimmed)
+    }
+
+    fn id_from_path(&self, path: &str) -> Result<String, String> {
+        let segments: Vec<&str> = path
+            .split('/')
+            .map(str::trim)
+            .filter(|segment| !segment.is_empty() && *segment != ".")
+            .collect();
+        if segments.is_empty() {
+            return Err(format!(
+                "{}: Drive path must not be empty",
+                retry::UNSUPPORTED
+            ));
+        }
+        let client = http_client()?;
+        let mut parent = self.root_parent();
+        for (index, segment) in segments.iter().enumerate() {
+            let last = index + 1 == segments.len();
+            let key = format!("{}\u{1}{}", parent, segment);
+            let cached = self
+                .folders
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .get(&key)
+                .cloned();
+            let id = match cached {
+                Some(id) => id,
+                None => {
+                    let found = self.find_child(&client, &parent, segment, !last)?;
+                    let Some(id) = found else {
+                        return Err(format!("{}: no Drive item at '{}'", retry::NOT_FOUND, path));
+                    };
+                    if !last {
+                        self.folders
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner())
+                            .insert(key, id.clone());
+                    }
+                    id
+                }
+            };
+            if last {
+                return Ok(id);
+            }
+            parent = id;
+        }
+        Err(format!(
+            "{}: could not resolve Drive path '{}'",
+            retry::NOT_FOUND,
+            path
+        ))
+    }
+
+    fn parent_for(&self, remote: &str, create: bool) -> Result<String, String> {
+        let clean = remote.trim().trim_matches('/');
+        let parent_dir = match clean.rfind('/') {
+            Some(idx) => &clean[..idx],
+            None => "",
+        };
+        match self.folder_chain(parent_dir, create)? {
+            Some(ids) => Ok(ids.last().cloned().unwrap_or_else(|| self.root_parent())),
+            None => Err(format!(
+                "{}: Drive folder '{}' does not exist",
+                retry::NOT_FOUND,
+                parent_dir
+            )),
+        }
+    }
+
+    fn upload_multipart(
+        &self,
+        local_path: &str,
+        remote: &str,
+        parent_id: &str,
+    ) -> Result<String, String> {
+        let file_name = file_name_of(remote);
+        let client = http_client()?;
+        let metadata = serde_json::json!({
+            "name": file_name,
+            "parents": [parent_id],
+        });
+        let metadata = serde_json::to_string(&metadata).map_err(|err| {
+            format!(
+                "{}: cannot serialize upload metadata: {}",
+                retry::NETWORK,
+                err
+            )
+        })?;
+        let url = format!("{}?uploadType=multipart", DRIVE_UPLOAD_URL);
+        let resp = send_classified("Google Drive", "upload", &[], || {
+            let form = reqwest::blocking::multipart::Form::new()
+                .part(
+                    "metadata",
+                    reqwest::blocking::multipart::Part::text(metadata.clone())
+                        .mime_str("application/json; charset=UTF-8")
+                        .map_err(|err| {
+                            format!("{}: invalid multipart metadata: {}", retry::NETWORK, err)
+                        })?,
+                )
+                .part(
+                    "file",
+                    reqwest::blocking::multipart::Part::bytes(transfer::read_local(local_path)?)
+                        .file_name(file_name.clone())
+                        .mime_str("application/octet-stream")
+                        .map_err(|err| {
+                            format!("{}: invalid multipart file part: {}", retry::NETWORK, err)
+                        })?,
+                );
+            Ok(client
+                .post(&url)
+                .header("Authorization", self.auth.bearer()?)
+                .multipart(form))
+        })?;
+        let json = parse_json(resp, "Google Drive", "upload")?;
+        let id = json["id"]
+            .as_str()
+            .ok_or_else(|| format!("{}: Drive upload returned no file id", retry::NETWORK))?;
+        Ok(format!("https://drive.google.com/file/d/{}/view", id))
+    }
+
+    fn upload_resumable(
+        &self,
+        local_path: &str,
+        remote: &str,
+        parent_id: &str,
+        size: u64,
+    ) -> Result<String, String> {
+        let metadata = serde_json::json!({
+            "name": file_name_of(remote),
+            "parents": [parent_id],
+        });
+        let client = http_client()?;
+        let start_url = format!("{}?uploadType=resumable", DRIVE_UPLOAD_URL);
+        let session = send_classified("Google Drive", "resumable start", &[], || {
+            Ok(client
+                .post(&start_url)
+                .header("Authorization", self.auth.bearer()?)
+                .header("X-Upload-Content-Type", "application/octet-stream")
+                .json(&metadata))
+        })?;
+        let location = session
+            .headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string)
+            .ok_or_else(|| {
+                format!(
+                    "{}: Drive returned no resumable session URL",
+                    retry::NETWORK
+                )
+            })?;
+        let _ = session.text();
+
+        let mut file = fs::File::open(local_path).map_err(|err| {
+            format!(
+                "{}: cannot open '{}' for resumable upload: {}",
+                retry::NETWORK,
+                local_path,
+                err
+            )
+        })?;
+        let mut start: u64 = 0;
+        while start < size {
+            let mut chunk = Vec::new();
+            (&mut file)
+                .take(transfer::DRIVE_RESUMABLE_CHUNK)
+                .read_to_end(&mut chunk)
+                .map_err(|err| {
+                    format!(
+                        "{}: cannot read '{}' for resumable upload: {}",
+                        retry::NETWORK,
+                        local_path,
+                        err
+                    )
+                })?;
+            if chunk.is_empty() {
+                return Err(format!(
+                    "{}: '{}' shrank during upload at byte {} of {}",
+                    retry::NETWORK,
+                    local_path,
+                    start,
+                    size
+                ));
+            }
+            let end = start + chunk.len() as u64 - 1;
+            let next = start + chunk.len() as u64;
+            let resp =
+                send_classified("Google Drive", "resumable chunk", &[308, 201, 200], || {
+                    Ok(client
+                        .put(&location)
+                        .header("Authorization", self.auth.bearer()?)
+                        .header("Content-Range", format!("bytes {}-{}/{}", start, end, size))
+                        .body(chunk.clone()))
+                })?;
+            let status = resp.status().as_u16();
+            if status == 308 {
+                if next <= start {
+                    return Err(format!(
+                        "{}: Drive resumable upload stalled at byte {}",
+                        retry::NETWORK,
+                        start
+                    ));
+                }
+                start = next;
+                continue;
+            }
+            let json = parse_json(resp, "Google Drive", "resumable chunk")?;
+            let id = json["id"].as_str().ok_or_else(|| {
+                format!(
+                    "{}: Drive resumable upload returned no file id",
+                    retry::NETWORK
+                )
+            })?;
+            return Ok(format!("https://drive.google.com/file/d/{}/view", id));
+        }
+        Err(format!(
+            "{}: Drive resumable upload did not complete for '{}'",
+            retry::NETWORK,
+            remote
+        ))
     }
 }
 
@@ -906,207 +2339,187 @@ impl StorageBackend for GoogleDriveBackend {
         SyncBackendType::GoogleDrive
     }
 
-    fn upload_file(&self, local_path: &str, _remote_path: &str) -> Result<String, String> {
-        let file_name = Path::new(local_path)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "upload".to_string());
-
-        let file_data = fs::read(local_path).map_err(|e| format!("Failed to read file: {}", e))?;
-
-        // Build the JSON metadata part
-        let mut metadata = serde_json::json!({
-            "name": file_name,
-        });
-        if let Some(ref folder_id) = self.folder_id {
-            metadata["parents"] = serde_json::json!([folder_id]);
+    fn upload_file(&self, local_path: &str, remote_path: &str) -> Result<String, String> {
+        let _permit = rate_limit::acquire(&SyncBackendType::GoogleDrive)?;
+        let size = transfer::local_size(local_path)?;
+        transfer::preflight(&SyncBackendType::GoogleDrive, size)?;
+        let remote = normalize_remote(remote_path, local_path);
+        let parent_id = self.parent_for(&remote, true)?;
+        if size <= transfer::DRIVE_MULTIPART_MAX {
+            self.upload_multipart(local_path, &remote, &parent_id)
+        } else {
+            self.upload_resumable(local_path, &remote, &parent_id, size)
         }
+    }
 
-        let client = http_client()?;
-
-        // Use reqwest multipart
-        let form = reqwest::blocking::multipart::Form::new()
-            .part(
-                "metadata",
-                reqwest::blocking::multipart::Part::text(
-                    serde_json::to_string(&metadata)
-                        .map_err(|e| format!("Failed to serialize metadata: {}", e))?,
-                )
-                .mime_str("application/json; charset=UTF-8")
-                .map_err(|e| format!("Invalid MIME: {}", e))?,
-            )
-            .part(
-                "file",
-                reqwest::blocking::multipart::Part::bytes(file_data)
-                    .file_name(file_name)
-                    .mime_str("application/octet-stream")
-                    .map_err(|e| format!("Invalid MIME: {}", e))?,
-            );
-
-        let resp = client
-            .post("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart")
-            .header("Authorization", format!("Bearer {}", self.token))
-            .multipart(form)
-            .send()
-            .map_err(|e| format!("Google Drive upload request failed: {}", e))?;
-
-        let status = resp.status().as_u16();
-        let body = resp
-            .text()
-            .map_err(|e| format!("Failed to read upload response: {}", e))?;
-
-        if !(200..300).contains(&status) {
-            return Err(format!("Google Drive upload failed ({}): {}", status, body));
+    fn upload_file_chunked(&self, local_path: &str, remote_path: &str) -> Result<String, String> {
+        let _permit = rate_limit::acquire(&SyncBackendType::GoogleDrive)?;
+        let size = transfer::local_size(local_path)?;
+        transfer::preflight(&SyncBackendType::GoogleDrive, size)?;
+        let remote = normalize_remote(remote_path, local_path);
+        let parent_id = self.parent_for(&remote, true)?;
+        if size == 0 {
+            return self.upload_multipart(local_path, &remote, &parent_id);
         }
-
-        let resp_json: serde_json::Value =
-            serde_json::from_str(&body).map_err(|e| format!("Failed to parse response: {}", e))?;
-        let file_id = resp_json["id"]
-            .as_str()
-            .ok_or("No 'id' in upload response")?;
-
-        Ok(format!("https://drive.google.com/file/d/{}/view", file_id))
+        self.upload_resumable(local_path, &remote, &parent_id, size)
     }
 
     fn download_file(&self, remote_path: &str, local_path: &str) -> Result<(), String> {
-        // remote_path for Google Drive should be the file ID
-        let file_id = remote_path;
-        let url = format!(
-            "https://www.googleapis.com/drive/v3/files/{}?alt=media",
-            file_id
-        );
-
+        let _permit = rate_limit::acquire(&SyncBackendType::GoogleDrive)?;
+        let id = self.resolve_id(remote_path)?;
+        let url = format!("{}/{}?alt=media", DRIVE_FILES_URL, id);
         let client = http_client()?;
-        let resp = client
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
-            .send()
-            .map_err(|e| format!("Google Drive download request failed: {}", e))?;
-
-        let status = resp.status().as_u16();
-        if !(200..300).contains(&status) {
-            let body = resp.text().unwrap_or_default();
-            return Err(format!(
-                "Google Drive download failed ({}): {}",
-                status, body
-            ));
-        }
-
-        let bytes = resp
-            .bytes()
-            .map_err(|e| format!("Failed to read download body: {}", e))?;
-
-        if let Some(parent) = Path::new(local_path).parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
-        }
-        fs::write(local_path, &bytes).map_err(|e| format!("Failed to write file: {}", e))?;
-
-        Ok(())
+        let resp = send_classified("Google Drive", "download", &[], || {
+            Ok(client
+                .get(&url)
+                .header("Authorization", self.auth.bearer()?))
+        })?;
+        let promised = resp.content_length();
+        let bytes = resp.bytes().map_err(|err| {
+            format!(
+                "{}: download body unreadable: {}",
+                retry::NETWORK,
+                err.without_url()
+            )
+        })?;
+        transfer::write_verified(local_path, &bytes, promised, "Google Drive")
     }
 
     fn delete_file(&self, remote_path: &str) -> Result<(), String> {
-        let file_id = remote_path;
-        let url = format!("https://www.googleapis.com/drive/v3/files/{}", file_id);
-
+        let _permit = rate_limit::acquire(&SyncBackendType::GoogleDrive)?;
+        let id = self.resolve_id(remote_path)?;
+        let url = format!("{}/{}", DRIVE_FILES_URL, id);
         let client = http_client()?;
-        let resp = client
-            .delete(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
-            .send()
-            .map_err(|e| format!("Google Drive delete request failed: {}", e))?;
-
-        let status = resp.status().as_u16();
-        // 204 No Content is success
-        if status == 204 || status == 200 {
-            Ok(())
-        } else {
-            let body = resp.text().unwrap_or_default();
-            Err(format!("Google Drive delete failed ({}): {}", status, body))
-        }
+        send_classified("Google Drive", "delete", &[], || {
+            Ok(client
+                .delete(&url)
+                .header("Authorization", self.auth.bearer()?))
+        })?;
+        Ok(())
     }
 
-    fn list_files(&self, _prefix: &str) -> Result<Vec<RemoteFile>, String> {
-        let query = match &self.folder_id {
-            Some(folder_id) => format!("'{}' in parents and trashed=false", folder_id),
-            None => "trashed=false".to_string(),
+    fn list_files(&self, prefix: &str) -> Result<Vec<RemoteFile>, String> {
+        let _permit = rate_limit::acquire(&SyncBackendType::GoogleDrive)?;
+        let dir = prefix.trim().trim_matches('/');
+        let Some(ids) = self.folder_chain(dir, false)? else {
+            return Ok(Vec::new());
         };
-
-        let url = format!(
-            "https://www.googleapis.com/drive/v3/files?q={}&fields=files(id,name,size,modifiedTime,webContentLink),nextPageToken",
-            urlencoding(&query)
-        );
-
+        let parent = ids.last().cloned().unwrap_or_else(|| self.root_parent());
         let client = http_client()?;
-        let resp = client
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
-            .send()
-            .map_err(|e| format!("Google Drive list request failed: {}", e))?;
-
-        let status = resp.status().as_u16();
-        let body = resp
-            .text()
-            .map_err(|e| format!("Failed to read list response: {}", e))?;
-
-        if !(200..300).contains(&status) {
-            return Err(format!("Google Drive list failed ({}): {}", status, body));
-        }
-
-        let resp_json: serde_json::Value =
-            serde_json::from_str(&body).map_err(|e| format!("Failed to parse response: {}", e))?;
-        let files_array = resp_json["files"].as_array().cloned().unwrap_or_default();
-
+        let query = format!("'{}' in parents and trashed=false", parent);
+        let mut page_token: Option<String> = None;
         let mut files = Vec::new();
-        for item in &files_array {
-            let name = item["name"].as_str().unwrap_or("unknown").to_string();
-            let file_id = item["id"].as_str().unwrap_or("").to_string();
-            // size can be a number or string depending on the API response
-            let size = item["size"]
-                .as_u64()
-                .or_else(|| item["size"].as_str().and_then(|s| s.parse().ok()))
-                .unwrap_or(0);
-            let modified = item["modifiedTime"].as_str().unwrap_or("").to_string();
-            let url_str = format!("https://drive.google.com/file/d/{}/view", file_id);
-
-            files.push(RemoteFile {
-                name,
-                path: file_id.clone(),
-                size_bytes: size,
-                modified_at: modified,
-                url: url_str,
-            });
+        let mut pages = 0;
+        loop {
+            pages += 1;
+            if pages > MAX_PAGES {
+                return Err(format!(
+                    "{}: Drive listing holds more than {} entries",
+                    retry::TOO_LARGE,
+                    MAX_PAGES * 1000
+                ));
+            }
+            let mut url = format!(
+                "{}?q={}&fields=files(id,name,size,modifiedTime,mimeType),nextPageToken&pageSize=1000",
+                DRIVE_FILES_URL,
+                urlencoding(&query)
+            );
+            if let Some(token) = &page_token {
+                url.push_str(&format!("&pageToken={}", urlencoding(token)));
+            }
+            let resp = send_classified("Google Drive", "list", &[], || {
+                Ok(client
+                    .get(&url)
+                    .header("Authorization", self.auth.bearer()?))
+            })?;
+            let json = parse_json(resp, "Google Drive", "list")?;
+            for item in json["files"]
+                .as_array()
+                .map(|entries| entries.as_slice())
+                .unwrap_or(&[])
+            {
+                if item["mimeType"].as_str() == Some(DRIVE_FOLDER_MIME) {
+                    continue;
+                }
+                let id = item["id"].as_str().unwrap_or_default();
+                if id.is_empty() {
+                    continue;
+                }
+                files.push(RemoteFile {
+                    name: item["name"].as_str().unwrap_or("unknown").to_string(),
+                    path: id.to_string(),
+                    size_bytes: json_u64(&item["size"]).unwrap_or(0),
+                    modified_at: item["modifiedTime"].as_str().unwrap_or("").to_string(),
+                    url: format!("https://drive.google.com/file/d/{}/view", id),
+                });
+            }
+            match json["nextPageToken"].as_str() {
+                Some(token) => page_token = Some(token.to_string()),
+                None => break,
+            }
         }
-
         Ok(files)
     }
 
     fn get_file_url(&self, remote_path: &str) -> Result<String, String> {
-        Ok(format!(
-            "https://drive.google.com/file/d/{}/view",
-            remote_path
-        ))
+        let _permit = rate_limit::acquire(&SyncBackendType::GoogleDrive)?;
+        let id = self.resolve_id(remote_path)?;
+        Ok(format!("https://drive.google.com/file/d/{}/view", id))
     }
 
     fn test_connection(&self) -> Result<bool, String> {
+        let _permit = rate_limit::acquire(&SyncBackendType::GoogleDrive)?;
         let client = http_client()?;
-        let resp = client
-            .get("https://www.googleapis.com/drive/v3/about?fields=user")
-            .header("Authorization", format!("Bearer {}", self.token))
-            .send()
-            .map_err(|e| format!("Google Drive connection test request failed: {}", e))?;
-
-        let status = resp.status().as_u16();
-        // Consume response body to free connection
+        let resp = send_probe("Google Drive", || {
+            Ok(client
+                .get("https://www.googleapis.com/drive/v3/about?fields=user")
+                .header("Authorization", self.auth.bearer()?))
+        })?;
         let _ = resp.text();
+        Ok(true)
+    }
 
-        if status == 200 {
-            Ok(true)
-        } else {
-            Err(format!(
-                "Google Drive connection test failed (HTTP {})",
-                status
-            ))
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            max_size_bytes: transfer::max_size_bytes(&SyncBackendType::GoogleDrive),
+            supports_delete: true,
+            supports_direct_download: false,
+            recursive_list: false,
+            chunked: true,
         }
+    }
+
+    fn stat(&self, remote_path: &str) -> Result<Option<RemoteFile>, String> {
+        let _permit = rate_limit::acquire(&SyncBackendType::GoogleDrive)?;
+        let id = self.resolve_id(remote_path)?;
+        let url = format!(
+            "{}/{}?fields=id,name,size,modifiedTime,mimeType",
+            DRIVE_FILES_URL, id
+        );
+        let client = http_client()?;
+        let resp = send_classified("Google Drive", "stat", &[404], || {
+            Ok(client
+                .get(&url)
+                .header("Authorization", self.auth.bearer()?))
+        })?;
+        if resp.status().as_u16() == 404 {
+            return Err(format!(
+                "{}: '{}' does not exist in Google Drive",
+                retry::NOT_FOUND,
+                remote_path
+            ));
+        }
+        let json = parse_json(resp, "Google Drive", "stat")?;
+        let Some(size) = json_u64(&json["size"]) else {
+            return Ok(None);
+        };
+        Ok(Some(RemoteFile {
+            name: json["name"].as_str().unwrap_or("unknown").to_string(),
+            path: id.clone(),
+            size_bytes: size,
+            modified_at: json["modifiedTime"].as_str().unwrap_or("").to_string(),
+            url: format!("https://drive.google.com/file/d/{}/view", id),
+        }))
     }
 }
 
@@ -1115,31 +2528,72 @@ impl StorageBackend for GoogleDriveBackend {
 // ===========================================================================
 
 pub struct GooglePhotosBackend {
-    token: String,
+    auth: TokenSource,
     album_id: Option<String>,
-    #[allow(dead_code)]
-    credentials: Option<OAuthCredentials>,
 }
 
 impl GooglePhotosBackend {
     pub fn new(token: &str, album_id: Option<&str>) -> Self {
-        Self {
-            token: token.to_string(),
-            album_id: album_id.map(|s| s.to_string()),
-            credentials: None,
-        }
+        Self::with_credentials(token, album_id, None)
     }
 
     pub fn with_credentials(
         token: &str,
         album_id: Option<&str>,
-        credentials: OAuthCredentials,
+        credentials: Option<OAuthCredentials>,
     ) -> Self {
         Self {
-            token: token.to_string(),
-            album_id: album_id.map(|s| s.to_string()),
-            credentials: Some(credentials),
+            auth: TokenSource::new(credentials, token.to_string(), token_url_for("google")),
+            album_id: album_id.map(str::to_string),
         }
+    }
+
+    fn clean_id(remote_path: &str) -> Result<String, String> {
+        let trimmed = remote_path.trim().trim_matches('/');
+        if trimmed.is_empty() {
+            return Err(format!(
+                "{}: Google Photos path must not be empty",
+                retry::UNSUPPORTED
+            ));
+        }
+        Ok(trimmed.to_string())
+    }
+
+    /// A signed `baseUrl` that downloads the original bytes; these expire
+    /// after roughly an hour, which is why they are refetched per call.
+    fn fresh_content_url(&self, id: &str) -> Result<String, String> {
+        let url = format!(
+            "https://photoslibrary.googleapis.com/v1/mediaItems/{}",
+            urlencoding(id)
+        );
+        let client = http_client()?;
+        let resp = send_classified("Google Photos", "media item", &[404], || {
+            Ok(client
+                .get(&url)
+                .header("Authorization", self.auth.bearer()?))
+        })?;
+        if resp.status().as_u16() == 404 {
+            return Err(format!(
+                "{}: '{}' does not exist in the Google Photos library",
+                retry::NOT_FOUND,
+                id
+            ));
+        }
+        let json = parse_json(resp, "Google Photos", "media item")?;
+        let base = json["baseUrl"].as_str().ok_or_else(|| {
+            format!(
+                "{}: Google Photos item '{}' has no baseUrl",
+                retry::NETWORK,
+                id
+            )
+        })?;
+        // Videos carry `fps` in their metadata; originals are `=dv`/`=d`.
+        let suffix = if json["mediaMetadata"]["fps"].is_number() {
+            "=dv"
+        } else {
+            "=d"
+        };
+        Ok(format!("{}{}", base, suffix))
     }
 }
 
@@ -1152,241 +2606,241 @@ impl StorageBackend for GooglePhotosBackend {
         SyncBackendType::GooglePhotos
     }
 
-    fn upload_file(&self, local_path: &str, _remote_path: &str) -> Result<String, String> {
-        let file_data = fs::read(local_path).map_err(|e| format!("Failed to read file: {}", e))?;
-
+    fn upload_file(&self, local_path: &str, remote_path: &str) -> Result<String, String> {
+        let _permit = rate_limit::acquire(&SyncBackendType::GooglePhotos)?;
+        let size = transfer::local_size(local_path)?;
+        transfer::preflight(&SyncBackendType::GooglePhotos, size)?;
+        let remote = normalize_remote(remote_path, local_path);
         let client = http_client()?;
 
-        // Step 1: Upload the raw bytes to get an upload token
-        let upload_resp = client
-            .post("https://photoslibrary.googleapis.com/v1/uploads")
-            .header("Authorization", format!("Bearer {}", self.token))
-            .header("Content-Type", "application/octet-stream")
-            .header("X-Goog-Upload-Protocol", "raw")
-            .body(file_data)
-            .send()
-            .map_err(|e| format!("Google Photos upload token request failed: {}", e))?;
-
-        let up_status = upload_resp.status().as_u16();
-        let up_body = upload_resp
-            .text()
-            .map_err(|e| format!("Failed to read upload token response: {}", e))?;
-
-        if !(200..300).contains(&up_status) {
+        let upload_resp = send_classified("Google Photos", "upload", &[], || {
+            Ok(client
+                .post("https://photoslibrary.googleapis.com/v1/uploads")
+                .header("Authorization", self.auth.bearer()?)
+                .header("Content-Type", "application/octet-stream")
+                .header("X-Goog-Upload-Protocol", "raw")
+                .body(transfer::read_local(local_path)?))
+        })?;
+        let upload_token = upload_resp.text().map_err(|err| {
+            format!(
+                "{}: upload token response unreadable: {}",
+                retry::NETWORK,
+                err
+            )
+        })?;
+        let upload_token = upload_token.trim().to_string();
+        if upload_token.is_empty() {
             return Err(format!(
-                "Google Photos upload token failed ({}): {}",
-                up_status, up_body
+                "{}: Google Photos returned an empty upload token",
+                retry::NETWORK
             ));
         }
 
-        let upload_token = up_body.trim().to_string();
-
-        // Step 2: Create a media item with the upload token
-        let mut create_body = serde_json::json!({
-            "newMediaItems": [{
-                "simpleMediaItem": {
-                    "uploadToken": upload_token
-                }
-            }]
-        });
-        if let Some(ref album_id) = self.album_id {
-            create_body["albumId"] = serde_json::json!(album_id);
+        let file_name = file_name_of(&remote);
+        let mut simple = serde_json::json!({ "uploadToken": upload_token });
+        if remote != file_name {
+            simple["description"] = serde_json::json!(remote);
         }
-
-        let create_resp = client
-            .post("https://photoslibrary.googleapis.com/v1/mediaItems:batchCreate")
-            .header("Authorization", format!("Bearer {}", self.token))
-            .header("Content-Type", "application/json")
-            .json(&create_body)
-            .send()
-            .map_err(|e| format!("Google Photos batchCreate request failed: {}", e))?;
-
-        let create_status = create_resp.status().as_u16();
-        let create_body = create_resp
-            .text()
-            .map_err(|e| format!("Failed to read batchCreate response: {}", e))?;
-
-        if !(200..300).contains(&create_status) {
+        let mut body = serde_json::json!({ "newMediaItems": [{ "simpleMediaItem": simple }] });
+        if let Some(album_id) = &self.album_id {
+            body["albumId"] = serde_json::json!(album_id);
+        }
+        let create_resp = send_classified("Google Photos", "create item", &[], || {
+            Ok(client
+                .post("https://photoslibrary.googleapis.com/v1/mediaItems:batchCreate")
+                .header("Authorization", self.auth.bearer()?)
+                .json(&body))
+        })?;
+        let json = parse_json(create_resp, "Google Photos", "create item")?;
+        let rejected = &json["newMediaItemResults"][0]["status"];
+        if let Some(message) = rejected["message"].as_str() {
             return Err(format!(
-                "Google Photos media item creation failed ({}): {}",
-                create_status, create_body
+                "{}: Google Photos rejected the upload: {}",
+                retry::UNSUPPORTED,
+                message
             ));
         }
-
-        let resp_json: serde_json::Value = serde_json::from_str(&create_body)
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
-        let media_item = &resp_json["newMediaItemResults"][0]["mediaItem"];
-        let base_url = media_item["baseUrl"].as_str().unwrap_or("").to_string();
-
-        Ok(base_url)
+        json["newMediaItemResults"][0]["mediaItem"]["id"]
+            .as_str()
+            .map(str::to_string)
+            .ok_or_else(|| {
+                format!(
+                    "{}: Google Photos create returned no media item id",
+                    retry::NETWORK
+                )
+            })
     }
 
     fn download_file(&self, remote_path: &str, local_path: &str) -> Result<(), String> {
-        let url = format!(
-            "https://photoslibrary.googleapis.com/v1/mediaItems/{}:download",
-            remote_path
-        );
-
+        let _permit = rate_limit::acquire(&SyncBackendType::GooglePhotos)?;
+        let id = Self::clean_id(remote_path)?;
+        let url = self.fresh_content_url(&id)?;
         let client = http_client()?;
-        let resp = client
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
-            .send()
-            .map_err(|e| format!("Google Photos download request failed: {}", e))?;
-
-        let status = resp.status().as_u16();
-        if !(200..300).contains(&status) {
-            let body = resp.text().unwrap_or_default();
-            return Err(format!(
-                "Google Photos download failed ({}): {}",
-                status, body
-            ));
-        }
-
-        let bytes = resp
-            .bytes()
-            .map_err(|e| format!("Failed to read download body: {}", e))?;
-
-        if let Some(parent) = Path::new(local_path).parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
-        }
-        fs::write(local_path, &bytes).map_err(|e| format!("Failed to write file: {}", e))?;
-
-        Ok(())
+        let resp = send_classified("Google Photos", "download", &[], || Ok(client.get(&url)))?;
+        let promised = resp.content_length();
+        let bytes = resp.bytes().map_err(|err| {
+            format!(
+                "{}: download body unreadable: {}",
+                retry::NETWORK,
+                err.without_url()
+            )
+        })?;
+        transfer::write_verified(local_path, &bytes, promised, "Google Photos")
     }
 
     fn delete_file(&self, remote_path: &str) -> Result<(), String> {
-        let url = format!(
-            "https://photoslibrary.googleapis.com/v1/mediaItems/{}",
-            remote_path
-        );
-
-        let client = http_client()?;
-        let resp = client
-            .delete(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
-            .send()
-            .map_err(|e| format!("Google Photos delete request failed: {}", e))?;
-
-        let status = resp.status().as_u16();
-        if status == 200 || status == 204 {
-            Ok(())
-        } else {
-            let body = resp.text().unwrap_or_default();
-            Err(format!(
-                "Google Photos delete failed ({}): {}",
-                status, body
-            ))
-        }
+        Err(format!(
+            "{}: Google Photos cannot delete '{}' — the Library API has no delete endpoint \
+             (items must be removed from the app that created them)",
+            retry::UNSUPPORTED,
+            remote_path.trim().trim_matches('/')
+        ))
     }
 
-    fn list_files(&self, _prefix: &str) -> Result<Vec<RemoteFile>, String> {
-        let url = "https://photoslibrary.googleapis.com/v1/mediaItems?pageSize=100";
-
+    fn list_files(&self, prefix: &str) -> Result<Vec<RemoteFile>, String> {
+        let _permit = rate_limit::acquire(&SyncBackendType::GooglePhotos)?;
+        let wanted = prefix.trim().trim_matches('/');
         let client = http_client()?;
-        let resp = client
-            .get(url)
-            .header("Authorization", format!("Bearer {}", self.token))
-            .send()
-            .map_err(|e| format!("Google Photos list request failed: {}", e))?;
-
-        let status = resp.status().as_u16();
-        let body = resp
-            .text()
-            .map_err(|e| format!("Failed to read list response: {}", e))?;
-
-        if !(200..300).contains(&status) {
-            return Err(format!("Google Photos list failed ({}): {}", status, body));
-        }
-
-        let resp_json: serde_json::Value =
-            serde_json::from_str(&body).map_err(|e| format!("Failed to parse response: {}", e))?;
-        let items = resp_json["mediaItems"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
-
+        let mut page_token: Option<String> = None;
         let mut files = Vec::new();
-        for item in &items {
-            let item_id = item["id"].as_str().unwrap_or("").to_string();
-            let filename = item["filename"].as_str().unwrap_or("unknown").to_string();
-            let base_url = item["baseUrl"].as_str().unwrap_or("").to_string();
-            let modified = item["mediaMetadata"]["creationTime"]
-                .as_str()
-                .or_else(|| item["creationTime"].as_str())
-                .unwrap_or("")
-                .to_string();
-
-            files.push(RemoteFile {
-                name: filename,
-                path: item_id.clone(),
-                size_bytes: 0, // Google Photos doesn't return size in list
-                modified_at: modified,
-                url: base_url,
-            });
+        let mut pages = 0;
+        loop {
+            pages += 1;
+            if pages > MAX_PAGES {
+                return Err(format!(
+                    "{}: Google Photos library holds more than {} items",
+                    retry::TOO_LARGE,
+                    MAX_PAGES * 100
+                ));
+            }
+            let mut url =
+                "https://photoslibrary.googleapis.com/v1/mediaItems?pageSize=100".to_string();
+            if let Some(token) = &page_token {
+                url.push_str(&format!("&pageToken={}", urlencoding(token)));
+            }
+            let resp = send_classified("Google Photos", "list", &[], || {
+                Ok(client
+                    .get(&url)
+                    .header("Authorization", self.auth.bearer()?))
+            })?;
+            let json = parse_json(resp, "Google Photos", "list")?;
+            for item in json["mediaItems"]
+                .as_array()
+                .map(|entries| entries.as_slice())
+                .unwrap_or(&[])
+            {
+                let name = item["filename"].as_str().unwrap_or("").to_string();
+                if !wanted.is_empty() && !name.starts_with(wanted) {
+                    continue;
+                }
+                let id = item["id"].as_str().unwrap_or_default();
+                if id.is_empty() {
+                    continue;
+                }
+                files.push(RemoteFile {
+                    name,
+                    path: id.to_string(),
+                    size_bytes: 0,
+                    modified_at: item["mediaMetadata"]["creationTime"]
+                        .as_str()
+                        .or_else(|| item["creationTime"].as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    url: item["productUrl"].as_str().unwrap_or("").to_string(),
+                });
+            }
+            match json["nextPageToken"].as_str() {
+                Some(token) => page_token = Some(token.to_string()),
+                None => break,
+            }
         }
-
         Ok(files)
     }
 
     fn get_file_url(&self, remote_path: &str) -> Result<String, String> {
-        let url = format!(
-            "https://photoslibrary.googleapis.com/v1/mediaItems/{}",
-            remote_path
-        );
-
-        let client = http_client()?;
-        let resp = client
-            .get(&url)
-            .header("Authorization", format!("Bearer {}", self.token))
-            .send()
-            .map_err(|e| format!("Google Photos get URL request failed: {}", e))?;
-
-        let status = resp.status().as_u16();
-        let body = resp
-            .text()
-            .map_err(|e| format!("Failed to read response: {}", e))?;
-
-        if !(200..300).contains(&status) {
-            return Err(format!(
-                "Google Photos get URL failed ({}): {}",
-                status, body
-            ));
-        }
-
-        let resp_json: serde_json::Value =
-            serde_json::from_str(&body).map_err(|e| format!("Failed to parse response: {}", e))?;
-        let base_url = resp_json["baseUrl"].as_str().unwrap_or("").to_string();
-
-        Ok(base_url)
+        let _permit = rate_limit::acquire(&SyncBackendType::GooglePhotos)?;
+        let id = Self::clean_id(remote_path)?;
+        self.fresh_content_url(&id)
     }
 
     fn test_connection(&self) -> Result<bool, String> {
+        let _permit = rate_limit::acquire(&SyncBackendType::GooglePhotos)?;
         let client = http_client()?;
-        let resp = client
-            .get("https://photoslibrary.googleapis.com/v1/albums?pageSize=1")
-            .header("Authorization", format!("Bearer {}", self.token))
-            .send()
-            .map_err(|e| format!("Google Photos connection test request failed: {}", e))?;
-
-        let status = resp.status().as_u16();
-        // Consume response body to free connection
+        let resp = send_probe("Google Photos", || {
+            Ok(client
+                .get("https://photoslibrary.googleapis.com/v1/albums?pageSize=1")
+                .header("Authorization", self.auth.bearer()?))
+        })?;
         let _ = resp.text();
+        Ok(true)
+    }
 
-        if status == 200 {
-            Ok(true)
-        } else {
-            Err(format!(
-                "Google Photos connection test failed (HTTP {})",
-                status
-            ))
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            max_size_bytes: transfer::max_size_bytes(&SyncBackendType::GooglePhotos),
+            supports_delete: false,
+            supports_direct_download: true,
+            recursive_list: true,
+            chunked: false,
         }
+    }
+
+    fn stat(&self, remote_path: &str) -> Result<Option<RemoteFile>, String> {
+        let _permit = rate_limit::acquire(&SyncBackendType::GooglePhotos)?;
+        let id = Self::clean_id(remote_path)?;
+        let url = format!(
+            "https://photoslibrary.googleapis.com/v1/mediaItems/{}",
+            urlencoding(&id)
+        );
+        let client = http_client()?;
+        let resp = send_classified("Google Photos", "stat", &[404], || {
+            Ok(client
+                .get(&url)
+                .header("Authorization", self.auth.bearer()?))
+        })?;
+        if resp.status().as_u16() == 404 {
+            return Err(format!(
+                "{}: '{}' does not exist in the Google Photos library",
+                retry::NOT_FOUND,
+                id
+            ));
+        }
+        // A 2xx proves the item exists; Photos publishes no byte size, so
+        // metadata stays unknown rather than a fabricated zero.
+        let _ = resp.text();
+        Ok(None)
     }
 }
 
 // ===========================================================================
 // 6. TelegramBackend
 // ===========================================================================
+
+/// Telegram answers HTTP 200 with `ok:false`; fold the body into the same
+/// prefix contract (and keep `retry_after` visible to the retry layer).
+fn telegram_ok(body: &str, op: &str) -> Result<serde_json::Value, String> {
+    let json: serde_json::Value = serde_json::from_str(body).map_err(|err| {
+        format!(
+            "{}: Telegram {} response unparseable: {}",
+            retry::NETWORK,
+            op,
+            err
+        )
+    })?;
+    if json["ok"].as_bool().unwrap_or(false) {
+        return Ok(json);
+    }
+    let code = json["error_code"].as_u64().unwrap_or(500) as u16;
+    let description = json["description"]
+        .as_str()
+        .unwrap_or("unknown Telegram error");
+    let prefix = if description.to_ascii_lowercase().contains("not found") {
+        retry::NOT_FOUND
+    } else {
+        retry::class_for_status(code).prefix()
+    };
+    Err(retry::http_error(prefix, "Telegram", op, code, None, body))
+}
 
 pub struct TelegramBackend {
     bot_token: String,
@@ -1404,6 +2858,23 @@ impl TelegramBackend {
     fn api_url(&self, method: &str) -> String {
         format!("https://api.telegram.org/bot{}/{}", self.bot_token, method)
     }
+
+    fn file_id_from(json: &serde_json::Value) -> Option<String> {
+        let result = &json["result"];
+        for key in ["document", "video", "audio", "voice", "photo"] {
+            let file_id = result[key]["file_id"].as_str();
+            if let Some(file_id) = file_id {
+                return Some(file_id.to_string());
+            }
+        }
+        // `photo` is an array of sizes; take the largest.
+        if let Some(sizes) = result["photo"].as_array() {
+            if let Some(file_id) = sizes.last().and_then(|size| size["file_id"].as_str()) {
+                return Some(file_id.to_string());
+            }
+        }
+        None
+    }
 }
 
 impl StorageBackend for TelegramBackend {
@@ -1415,244 +2886,190 @@ impl StorageBackend for TelegramBackend {
         SyncBackendType::Telegram
     }
 
-    fn upload_file(&self, local_path: &str, _remote_path: &str) -> Result<String, String> {
-        let file_name = Path::new(local_path)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "upload".to_string());
-
-        let file_data = fs::read(local_path)
-            .map_err(|e| format!("Failed to read file '{}': {}", local_path, e))?;
-
+    fn upload_file(&self, local_path: &str, remote_path: &str) -> Result<String, String> {
+        let _permit = rate_limit::acquire(&SyncBackendType::Telegram)?;
+        let size = transfer::local_size(local_path)?;
+        transfer::preflight(&SyncBackendType::Telegram, size)?;
+        let caption = truncate_str(&format!("Sync upload: {}", remote_path.trim()), 900);
+        let file_name = file_name_of(local_path);
         let client = http_client()?;
-
-        // Telegram Bot API: sendDocument for files up to 50 MB
-        // For larger files, use sendPhoto/sendVideo which support up to 2 GB via local path
-        // but since we have bytes, we use multipart form with sendDocument
-        let form = reqwest::blocking::multipart::Form::new()
-            .text("chat_id", self.chat_id.clone())
-            .text("caption", format!("Sync upload: {}", file_name))
-            .part(
-                "document",
-                reqwest::blocking::multipart::Part::bytes(file_data)
-                    .file_name(file_name)
-                    .mime_str("application/octet-stream")
-                    .map_err(|e| format!("Invalid MIME: {}", e))?,
-            );
-
-        let resp = client
-            .post(self.api_url("sendDocument"))
-            .multipart(form)
-            .send()
-            .map_err(|e| format!("Telegram upload request failed: {}", e))?;
-
-        let status = resp.status().as_u16();
+        let resp = send_classified("Telegram", "upload", &[], || {
+            let form = reqwest::blocking::multipart::Form::new()
+                .text("chat_id", self.chat_id.clone())
+                .text("caption", caption.clone())
+                .part(
+                    "document",
+                    reqwest::blocking::multipart::Part::bytes(transfer::read_local(local_path)?)
+                        .file_name(file_name.clone())
+                        .mime_str("application/octet-stream")
+                        .map_err(|err| {
+                            format!("{}: invalid document part: {}", retry::NETWORK, err)
+                        })?,
+                );
+            Ok(client.post(self.api_url("sendDocument")).multipart(form))
+        })?;
         let body = resp
             .text()
-            .map_err(|e| format!("Failed to read upload response: {}", e))?;
-
-        if !(200..300).contains(&status) {
-            return Err(format!("Telegram upload failed ({}): {}", status, body));
-        }
-
-        let resp_json: serde_json::Value =
-            serde_json::from_str(&body).map_err(|e| format!("Failed to parse response: {}", e))?;
-
-        if !resp_json["ok"].as_bool().unwrap_or(false) {
-            let desc = resp_json["description"].as_str().unwrap_or("Unknown error");
-            return Err(format!("Telegram API error: {}", desc));
-        }
-
-        // Return the message link or a reference
-        let message_id = resp_json["result"]["message_id"].as_i64().unwrap_or(0);
-        let chat_id = resp_json["result"]["chat"]["id"]
-            .as_i64()
-            .map(|id| id.to_string())
-            .unwrap_or_else(|| self.chat_id.clone());
-
-        Ok(format!(
-            "https://t.me/c/{}/{}",
-            chat_id.trim_start_matches('-'),
-            message_id
-        ))
+            .map_err(|err| format!("{}: upload response unreadable: {}", retry::NETWORK, err))?;
+        let json = telegram_ok(&body, "upload")?;
+        Self::file_id_from(&json).ok_or_else(|| {
+            format!(
+                "{}: Telegram returned no file reference for '{}'",
+                retry::NETWORK,
+                remote_path
+            )
+        })
     }
 
     fn download_file(&self, remote_path: &str, local_path: &str) -> Result<(), String> {
-        // remote_path should be a file_id from a previous upload
-        let url = format!(
-            "https://api.telegram.org/bot{}/getFile?file_id={}",
-            self.bot_token, remote_path
-        );
-
-        let client = http_client()?;
-        let resp = client
-            .get(&url)
-            .send()
-            .map_err(|e| format!("Telegram getFile request failed: {}", e))?;
-
-        let status = resp.status().as_u16();
-        let body = resp
-            .text()
-            .map_err(|e| format!("Failed to read response: {}", e))?;
-
-        if !(200..300).contains(&status) {
-            return Err(format!("Telegram getFile failed ({}): {}", status, body));
-        }
-
-        let resp_json: serde_json::Value =
-            serde_json::from_str(&body).map_err(|e| format!("Failed to parse response: {}", e))?;
-
-        if !resp_json["ok"].as_bool().unwrap_or(false) {
-            let desc = resp_json["description"].as_str().unwrap_or("Unknown error");
-            return Err(format!("Telegram API error: {}", desc));
-        }
-
-        let file_path = resp_json["result"]["file_path"]
-            .as_str()
-            .ok_or("No file_path in getFile response")?;
-
-        // Download the file
-        let download_url = format!(
-            "https://api.telegram.org/file/bot{}/{}",
-            self.bot_token, file_path
-        );
-
-        let dl_resp = client
-            .get(&download_url)
-            .send()
-            .map_err(|e| format!("Telegram file download request failed: {}", e))?;
-
-        let dl_status = dl_resp.status().as_u16();
-        if !(200..300).contains(&dl_status) {
-            let dl_body = dl_resp.text().unwrap_or_default();
+        let _permit = rate_limit::acquire(&SyncBackendType::Telegram)?;
+        if remote_path.contains("t.me/") {
             return Err(format!(
-                "Telegram file download failed ({}): {}",
-                dl_status, dl_body
+                "{}: '{}' is a t.me message link, not a Telegram file id — \
+                 re-upload to obtain a file id",
+                retry::UNSUPPORTED,
+                remote_path
             ));
         }
-
-        let bytes = dl_resp
-            .bytes()
-            .map_err(|e| format!("Failed to read download body: {}", e))?;
-
-        if let Some(parent) = Path::new(local_path).parent() {
-            fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
+        let file_id = remote_path.trim();
+        if file_id.is_empty() {
+            return Err(format!(
+                "{}: Telegram download requires a file id",
+                retry::UNSUPPORTED
+            ));
         }
-        fs::write(local_path, &bytes).map_err(|e| format!("Failed to write file: {}", e))?;
-
-        Ok(())
+        let client = http_client()?;
+        let lookup_url = format!(
+            "https://api.telegram.org/bot{}/getFile?file_id={}",
+            self.bot_token,
+            urlencoding(file_id)
+        );
+        let resp = send_classified("Telegram", "file lookup", &[], || {
+            Ok(client.get(&lookup_url))
+        })?;
+        let body = resp.text().map_err(|err| {
+            format!(
+                "{}: file lookup response unreadable: {}",
+                retry::NETWORK,
+                err
+            )
+        })?;
+        let json = telegram_ok(&body, "file lookup")?;
+        let file_path = json["result"]["file_path"]
+            .as_str()
+            .ok_or_else(|| format!("{}: Telegram getFile returned no file_path", retry::NETWORK))?;
+        let download_url = format!(
+            "https://api.telegram.org/file/bot{}/{}",
+            self.bot_token,
+            encode_path(file_path)
+        );
+        let resp = send_classified(
+            "Telegram",
+            "download",
+            &[],
+            || Ok(client.get(&download_url)),
+        )?;
+        let promised = resp.content_length();
+        let bytes = resp.bytes().map_err(|err| {
+            format!(
+                "{}: download body unreadable: {}",
+                retry::NETWORK,
+                err.without_url()
+            )
+        })?;
+        transfer::write_verified(local_path, &bytes, promised, "Telegram")
     }
 
     fn delete_file(&self, remote_path: &str) -> Result<(), String> {
-        // Telegram Bot API doesn't support deleting messages sent by bots in channels
-        // We can only delete messages in groups if the bot has admin rights
-        // For now, we return Ok as a no-op since Telegram is append-only for most use cases
-        let _ = remote_path;
-        info!("Telegram: delete_file is a no-op (Telegram is append-only for bot messages)");
-        Ok(())
+        Err(format!(
+            "{}: Telegram cannot delete '{}' — the Bot API offers no reliable \
+             message-delete for bot uploads",
+            retry::UNSUPPORTED,
+            remote_path.trim().trim_matches('/')
+        ))
     }
 
-    fn list_files(&self, _prefix: &str) -> Result<Vec<RemoteFile>, String> {
-        // Telegram doesn't have a native file listing API for bot-sent messages
-        // We use getUpdates or getChatHistory to retrieve recent messages
-        // For simplicity, we return an empty list - Telegram is primarily for upload
-        // Users can view sent files in the Telegram chat directly
-        Ok(Vec::new())
+    fn list_files(&self, prefix: &str) -> Result<Vec<RemoteFile>, String> {
+        Err(format!(
+            "{}: Telegram cannot list files (prefix '{}') — the Bot API has no \
+             message/file index",
+            retry::UNSUPPORTED,
+            prefix
+        ))
     }
 
     fn get_file_url(&self, remote_path: &str) -> Result<String, String> {
-        // remote_path should be a file_id
-        let url = format!(
-            "https://api.telegram.org/bot{}/getFile?file_id={}",
-            self.bot_token, remote_path
-        );
-
-        let client = http_client()?;
-        let resp = client
-            .get(&url)
-            .send()
-            .map_err(|e| format!("Telegram getFile request failed: {}", e))?;
-
-        let status = resp.status().as_u16();
-        let body = resp
-            .text()
-            .map_err(|e| format!("Failed to read response: {}", e))?;
-
-        if !(200..300).contains(&status) {
-            return Err(format!("Telegram getFile failed ({}): {}", status, body));
-        }
-
-        let resp_json: serde_json::Value =
-            serde_json::from_str(&body).map_err(|e| format!("Failed to parse response: {}", e))?;
-
-        if !resp_json["ok"].as_bool().unwrap_or(false) {
-            let desc = resp_json["description"].as_str().unwrap_or("Unknown error");
-            return Err(format!("Telegram API error: {}", desc));
-        }
-
-        let file_path = resp_json["result"]["file_path"]
-            .as_str()
-            .ok_or("No file_path in getFile response")?;
-
-        Ok(format!(
-            "https://api.telegram.org/file/bot{}/{}",
-            self.bot_token, file_path
+        Err(format!(
+            "{}: Telegram cannot produce a direct URL for '{}' — download URLs \
+             embed the bot token and expire with the file path",
+            retry::UNSUPPORTED,
+            remote_path.trim().trim_matches('/')
         ))
     }
 
     fn test_connection(&self) -> Result<bool, String> {
+        let _permit = rate_limit::acquire(&SyncBackendType::Telegram)?;
         let client = http_client()?;
-        let resp = client
-            .get(self.api_url("getMe"))
-            .send()
-            .map_err(|e| format!("Telegram connection test request failed: {}", e))?;
+        let resp = send_probe("Telegram", || Ok(client.get(self.api_url("getMe"))))?;
+        let body = resp.text().map_err(|err| {
+            format!(
+                "{}: connection test response unreadable: {}",
+                retry::NETWORK,
+                err
+            )
+        })?;
+        let json = telegram_ok(&body, "connection test")?;
+        if let Some(username) = json["result"]["username"].as_str() {
+            info!("Telegram bot connected: @{}", username);
+        }
+        Ok(true)
+    }
 
-        let status = resp.status().as_u16();
-        let body = resp
-            .text()
-            .map_err(|e| format!("Failed to read response: {}", e))?;
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            max_size_bytes: transfer::max_size_bytes(&SyncBackendType::Telegram),
+            supports_delete: false,
+            supports_direct_download: false,
+            recursive_list: false,
+            chunked: false,
+        }
+    }
 
-        if status != 200 {
+    fn stat(&self, remote_path: &str) -> Result<Option<RemoteFile>, String> {
+        let _permit = rate_limit::acquire(&SyncBackendType::Telegram)?;
+        let file_id = remote_path.trim();
+        if file_id.is_empty() || file_id.contains("t.me/") {
             return Err(format!(
-                "Telegram connection test failed (HTTP {}): {}",
-                status, body
+                "{}: Telegram stat requires a file id",
+                retry::UNSUPPORTED
             ));
         }
-
-        let resp_json: serde_json::Value =
-            serde_json::from_str(&body).map_err(|e| format!("Failed to parse response: {}", e))?;
-
-        if resp_json["ok"].as_bool().unwrap_or(false) {
-            let bot_name = resp_json["result"]["username"]
+        let client = http_client()?;
+        let url = format!(
+            "https://api.telegram.org/bot{}/getFile?file_id={}",
+            self.bot_token,
+            urlencoding(file_id)
+        );
+        let resp = send_classified("Telegram", "stat", &[], || Ok(client.get(&url)))?;
+        let body = resp
+            .text()
+            .map_err(|err| format!("{}: stat response unreadable: {}", retry::NETWORK, err))?;
+        let json = telegram_ok(&body, "stat")?;
+        let result = &json["result"];
+        let Some(size) = json_u64(&result["file_size"]) else {
+            return Ok(None);
+        };
+        Ok(Some(RemoteFile {
+            name: result["file_path"]
                 .as_str()
-                .unwrap_or("unknown");
-            info!("Telegram bot connected: @{}", bot_name);
-            Ok(true)
-        } else {
-            let desc = resp_json["description"].as_str().unwrap_or("Unknown error");
-            Err(format!("Telegram API error: {}", desc))
-        }
+                .map(file_name_of)
+                .unwrap_or_else(|| file_id.to_string()),
+            path: file_id.to_string(),
+            size_bytes: size,
+            modified_at: String::new(),
+            url: String::new(),
+        }))
     }
-}
-
-// ===========================================================================
-// URL-encoding helper (simple, no external dependency)
-// ===========================================================================
-
-fn urlencoding(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() * 3);
-    for byte in s.as_bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(*byte as char);
-            }
-            b => {
-                out.push('%');
-                out.push_str(&format!("{:02X}", b));
-            }
-        }
-    }
-    out
 }
 
 // ===========================================================================
@@ -1663,69 +3080,84 @@ fn urlencoding(s: &str) -> String {
 pub fn create_backend(config: &SyncConfig) -> Result<Box<dyn StorageBackend>, String> {
     match config.backend_type {
         SyncBackendType::Local => {
-            let base = config
-                .base_path
-                .as_deref()
-                .ok_or("Local backend requires base_path")?;
+            let base = config.base_path.as_deref().ok_or_else(|| {
+                format!("{}: Local backend requires base_path", retry::UNSUPPORTED)
+            })?;
             Ok(Box::new(LocalBackend::new(base)))
         }
         SyncBackendType::GitHub => {
-            let token = config
-                .token
-                .as_deref()
-                .ok_or("GitHub backend requires token")?;
-            let repo = config
-                .repo_name
-                .as_deref()
-                .ok_or("GitHub backend requires repo_name")?;
-            let branch = config.branch.as_deref().unwrap_or("main");
-            Ok(Box::new(GitHubBackend::new(token, repo, branch)))
+            let repo = config.repo_name.as_deref().ok_or_else(|| {
+                format!("{}: GitHub backend requires repo_name", retry::UNSUPPORTED)
+            })?;
+            let branch = config.branch.as_deref().unwrap_or("main").to_string();
+            let token = oauth::resolve_token(config)?;
+            let credentials = oauth::load_credentials(&config.id);
+            Ok(Box::new(GitHubBackend::with_credentials(
+                &token,
+                repo,
+                &branch,
+                credentials,
+            )))
         }
         SyncBackendType::GitLab => {
-            let token = config
-                .token
-                .as_deref()
-                .ok_or("GitLab backend requires token")?;
-            let project_id = config
-                .repo_name
-                .as_deref()
-                .ok_or("GitLab backend requires project_id (use repo_name field)")?;
-            let branch = config.branch.as_deref().unwrap_or("main");
-            let base_url = config.base_path.as_deref();
-            Ok(Box::new(GitLabBackend::new(
-                token, project_id, branch, base_url,
+            let project_id = config.repo_name.as_deref().ok_or_else(|| {
+                format!(
+                    "{}: GitLab backend requires project_id (use repo_name field)",
+                    retry::UNSUPPORTED
+                )
+            })?;
+            let branch = config.branch.as_deref().unwrap_or("main").to_string();
+            let base_url = gitlab_instance_base(config);
+            let token = oauth::resolve_token(config)?;
+            let credentials = oauth::load_credentials(&config.id);
+            Ok(Box::new(GitLabBackend::with_credentials(
+                &token,
+                project_id,
+                &branch,
+                Some(base_url.as_str()),
+                credentials,
             )))
         }
         SyncBackendType::GoogleDrive => {
-            let token = config
-                .token
-                .as_deref()
-                .ok_or("Google Drive backend requires token")?;
-            Ok(Box::new(GoogleDriveBackend::new(
-                token,
+            let token = oauth::resolve_token(config)?;
+            let credentials = oauth::load_credentials(&config.id);
+            Ok(Box::new(GoogleDriveBackend::with_credentials(
+                &token,
                 config.folder_id.as_deref(),
+                credentials,
             )))
         }
         SyncBackendType::GooglePhotos => {
-            let token = config
-                .token
-                .as_deref()
-                .ok_or("Google Photos backend requires token")?;
-            Ok(Box::new(GooglePhotosBackend::new(
-                token,
+            let token = oauth::resolve_token(config)?;
+            let credentials = oauth::load_credentials(&config.id);
+            Ok(Box::new(GooglePhotosBackend::with_credentials(
+                &token,
                 config.album_id.as_deref(),
+                credentials,
             )))
         }
         SyncBackendType::Telegram => {
-            let token = config
-                .token
-                .as_deref()
-                .ok_or("Telegram backend requires bot_token (use token field)")?;
-            let chat_id = config
-                .chat_id
-                .as_deref()
-                .ok_or("Telegram backend requires chat_id")?;
-            Ok(Box::new(TelegramBackend::new(token, chat_id)))
+            let chat_id = config.chat_id.as_deref().ok_or_else(|| {
+                format!("{}: Telegram backend requires chat_id", retry::UNSUPPORTED)
+            })?;
+            let token = oauth::resolve_token(config)?;
+            Ok(Box::new(TelegramBackend::new(&token, chat_id)))
         }
+    }
+}
+
+/// GitLab instance base URL: env override → `base_path` → gitlab.com.
+pub(crate) fn gitlab_instance_base(config: &SyncConfig) -> String {
+    let from_env = std::env::var("CYBERMANJU_GITLAB_INSTANCE_URL").unwrap_or_default();
+    let candidate = if from_env.trim().is_empty() {
+        config.base_path.clone().unwrap_or_default()
+    } else {
+        from_env
+    };
+    let candidate = candidate.trim().trim_end_matches('/').to_string();
+    if candidate.starts_with("https://") || candidate.starts_with("http://") {
+        candidate
+    } else {
+        "https://gitlab.com".to_string()
     }
 }

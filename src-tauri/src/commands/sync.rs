@@ -56,8 +56,16 @@ pub fn start_sync(
 }
 
 /// Get the current sync progress.
+///
+/// Also arms the auto-sync scheduler (item 11) — the desktop polls this
+/// command, so the first poll starts the background scan exactly like the
+/// REST routes do.
 #[tauri::command]
-pub fn get_sync_progress(sync_state: State<'_, Arc<SyncState>>) -> Result<SyncProgress, String> {
+pub fn get_sync_progress(
+    sync_state: State<'_, Arc<SyncState>>,
+    state: State<'_, AppState>,
+) -> Result<SyncProgress, String> {
+    cybermanju_sync::scheduler::ensure_started(Arc::clone(&state.db));
     Ok(cybermanju_web::api::sync_api::progress(&sync_state))
 }
 
@@ -77,4 +85,60 @@ pub fn cancel_sync(sync_state: State<'_, Arc<SyncState>>) -> Result<bool, String
 #[tauri::command]
 pub fn list_remote_files(config: SyncConfig, prefix: String) -> Result<Vec<RemoteFile>, String> {
     cybermanju_web::api::sync_api::list_remote_files(&config, &prefix)
+}
+
+// ---------------------------------------------------------------------------
+// <<< AGENT-2 RESTORE / JOBS: the desktop half of the item-7 contract. >>>
+// ---------------------------------------------------------------------------
+
+/// Restore a synced copy: download → verify → decrypt/decompress → write.
+#[tauri::command]
+pub fn restore_sync_file(
+    config_id: String,
+    file_id: Option<String>,
+    remote_path: Option<String>,
+    dest_path: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<cybermanju_web::api::sync_api::RestoreOutcome, String> {
+    cybermanju_web::api::sync_api::restore(
+        &state.db,
+        cybermanju_web::api::sync_api::RestoreRequest {
+            config_id,
+            file_id,
+            remote_path,
+            dest_path,
+        },
+    )
+}
+
+/// Delete a remote object (`unsupported:` providers surface as an error,
+/// never a fake success).
+#[tauri::command]
+pub fn delete_remote_file(
+    config_id: String,
+    remote_path: String,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    cybermanju_web::api::sync_api::delete_remote(
+        &state.db,
+        cybermanju_web::api::sync_api::RemoteDeleteRequest {
+            config_id,
+            remote_path,
+        },
+    )
+}
+
+/// Status/progress/result of one run by id (memory, then `sync_runs`).
+#[tauri::command]
+pub fn get_sync_job(
+    job_id: String,
+    state: State<'_, AppState>,
+) -> Result<cybermanju_web::api::sync_api::SyncJob, String> {
+    cybermanju_web::api::sync_api::job(&state.db, &job_id)
+}
+
+/// Run history (newest first) for the sync history UI.
+#[tauri::command]
+pub fn list_sync_runs(state: State<'_, AppState>) -> Result<Vec<SyncRunRecord>, String> {
+    cybermanju_web::api::sync_api::runs(&state.db, 20)
 }

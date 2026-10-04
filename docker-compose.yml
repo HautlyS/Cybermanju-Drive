@@ -6,18 +6,38 @@ services:
       dockerfile: Dockerfile
     container_name: cybermanju-drive
     restart: unless-stopped
+    # ── Hardening ─────────────────────────────────────────────────────
+    # Root filesystem immutable; only /data (volume) and /tmp (tmpfs) are
+    # writable. Every capability dropped, no privilege escalation, memory
+    # capped so a runaway index rebuild cannot take the NAS down.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
     ports:
-      - "3456:3456"
+      # LAN only: the published port is bound to a private address, never
+      # 0.0.0.0. The default keeps the dashboard reachable from this machine
+      # alone — to serve other devices, set CYBERMANJU_HOST_IP to your NAS LAN
+      # address (e.g. 192.168.1.50) in a .env next to this file, or replace the
+      # default below. See docs/OPERATIONS.md.
+      - "${CYBERMANJU_HOST_IP:-127.0.0.1}:3456:3456"
     volumes:
       - /DATA/AppData/cybermanju-drive/config:/data
     environment:
       - RUST_LOG=info
       - PORT=3456
       - DB_PATH=/data/cybermanju.db
+      - SEARCH_INDEX_PATH=/data/tantivy_index
       - STATIC_DIR=/app/static
       - TZ=UTC
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3456/api/health"]
+      # /api/readyz answers 200 only when redb, the Tantivy index and the data
+      # volume are all usable; /api/health is liveness and always 200.
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3456/api/readyz"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -33,21 +53,24 @@ x-casaos:
     - Utilities
   description:
     en_us: >-
-      Cybermanju Drive is a quantum-resistant encrypted file manager with a web
-      dashboard for browser-based access from any device. Features include
-      post-quantum cryptography (Kyber/Dilithium), triple-layer compression
-      (LZ4 + Zstd + Brotli), full-text search, face detection clustering,
-      GPS map view, multi-user permissions, and cloud sync.
+      Cybermanju Drive is an encrypted file manager with a web dashboard for
+      browser-based access from any device. The server ships full-text search
+      (Tantivy), post-quantum cryptography (ML-KEM/ML-DSA with
+      ChaCha20Poly1305), triple-layer compression (LZ4 + Zstd + Brotli),
+      multi-user permissions, audit logging and cloud sync. Face detection
+      and clustering, GPS map view and the desktop tray are part of the
+      desktop app only.
     zh_cn: >-
-      Cybermanju Drive 是一款具有后量子加密保护能力的文件管理器，配备网页仪表板，
-      可从任何设备通过浏览器访问。支持后量子密码学（Kyber/Dilithium）、
-      三层压缩（LZ4 + Zstd + Brotli）、全文搜索、人脸检测聚类、
-      GPS 地图视图、多用户权限和云端同步。
+      Cybermanju Drive 是一款带网页仪表板的加密文件管理器，可从任何设备通过浏览器访问。
+      服务端内置全文搜索（Tantivy）、后量子密码学（ML-KEM/ML-DSA 与
+      ChaCha20Poly1305）、三层压缩（LZ4 + Zstd + Brotli）、多用户权限、
+      审计日志和云端同步。人脸检测与聚类、GPS 地图视图以及桌面托盘
+      仅属于桌面版应用。
   developer: Cybermanju Team
   icon: https://raw.githubusercontent.com/cybermanju/cybermanju-drive/main/src-tauri/icons/icon.svg
   tagline:
-    en_us: Quantum-resistant encrypted file manager
-    zh_cn: 后量子加密文件管理器
+    en_us: Encrypted file manager with post-quantum cryptography
+    zh_cn: 具备后量子加密能力的文件管理器
   thumbnail: ""
   title:
     en_us: Cybermanju Drive

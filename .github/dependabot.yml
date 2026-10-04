@@ -1,0 +1,23 @@
+# Keeps dependencies and the pinned Actions up to date (AGENT-4 item 18).
+# Actions are pinned to commit SHAs, so the github-actions ecosystem is what
+# keeps them current — each update PR rewrites the pin and keeps the version
+# comment next to it.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 10

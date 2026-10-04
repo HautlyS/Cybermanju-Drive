@@ -5,44 +5,99 @@
 // 2. Routes /api/* to the shared cybermanju-web REST API
 //
 // Environment variables:
-//   PORT          — listening port (default: 3456)
-//   DB_PATH       — path to redb database (default: /data/cybermanju.db)
-//   STATIC_DIR    — path to frontend dist files (default: ./static)
-//   RUST_LOG      — log level (default: info)
+//   PORT               — listening port (default: 3456)
+//   DB_PATH            — path to redb database (default: /data/cybermanju.db)
+//   SEARCH_INDEX_PATH  — Tantivy index directory (default: <dir of DB_PATH>/tantivy_index)
+//   STATIC_DIR         — path to frontend dist files (default: ./static)
+//   RUST_LOG           — log level (default: info)
 
 use cybermanju_db::Database;
+use cybermanju_search::SearchIndex;
 use cybermanju_web::{handle_request, http_response, serve_static_file, WebDashboard};
 use log::{error, info, warn};
+use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, Instant};
+
+/// Set by the SIGTERM/SIGINT handler; the accept loop polls it.
+static SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
 /// Shared application state passed to each connection handler
 struct AppState {
     static_dir: PathBuf,
     db_path: String,
     dashboard: WebDashboard,
+    // <<< AGENT-4 OPS: per-IP rate limits — same primitive the desktop server uses >>>
+    rate_limits: Mutex<HashMap<String, (u32, Instant)>>,
+    // <<< AGENT-4 OPS: connections currently being served, drained on shutdown >>>
+    in_flight: AtomicUsize,
+}
+
+/// Signal handler: only flips an AtomicBool, so it is async-signal-safe.
+extern "C" fn on_termination_signal(_sig: libc::c_int) {
+    SHUTDOWN.store(true, Ordering::SeqCst);
+}
+
+// <<< AGENT-4 OPS: graceful shutdown (item 13) >>>
+//
+// SIGTERM (docker stop) or SIGINT stops the accept loop, drains in-flight
+// requests and then closes the database. Without a handler the default action
+// would kill the process immediately mid-request.
+fn install_signal_handlers() {
+    // SAFETY: `on_termination_signal` touches no more than an AtomicBool.
+    unsafe {
+        libc::signal(
+            libc::SIGTERM,
+            on_termination_signal as *const () as libc::sighandler_t,
+        );
+        libc::signal(
+            libc::SIGINT,
+            on_termination_signal as *const () as libc::sighandler_t,
+        );
+    }
 }
 
 fn handle_connection(state: &AppState, mut stream: TcpStream) {
-    stream
-        .set_read_timeout(Some(std::time::Duration::from_secs(10)))
-        .ok();
-    stream
-        .set_write_timeout(Some(std::time::Duration::from_secs(30)))
-        .ok();
+    stream.set_read_timeout(Some(Duration::from_secs(10))).ok();
+    stream.set_write_timeout(Some(Duration::from_secs(30))).ok();
+
+    let client_ip = stream
+        .peer_addr()
+        .map(|a| a.ip().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+
+    // <<< AGENT-4 OPS: rate limit (item 7) — `security::enforce_rate_limit`
+    // through the shared wrapper, so Docker and the desktop transport use the
+    // same fixed window, the same fail-closed poisoning rule and the same
+    // per-IP accounting. >>>
+    if !cybermanju_web::check_rate_limit(&state.rate_limits, &client_ip) {
+        let resp = http_response(
+            429,
+            "application/json",
+            r#"{"error":true,"status":429,"message":"Rate limit exceeded"}"#,
+            None,
+        );
+        let _ = stream.write_all(resp.as_bytes());
+        return;
+    }
 
     let mut reader = BufReader::new(&stream);
 
     // Read request line
     let mut request_line = String::new();
     if reader.read_line(&mut request_line).is_err() {
-        let _ = write!(
-            stream,
-            "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n"
+        let resp = http_response(
+            400,
+            "application/json",
+            r#"{"error":true,"status":400,"message":"Malformed request line"}"#,
+            None,
         );
+        let _ = stream.write_all(resp.as_bytes());
         return;
     }
     let request_line = request_line.trim();
@@ -50,10 +105,13 @@ fn handle_connection(state: &AppState, mut stream: TcpStream) {
     // Parse method and path from "GET /path HTTP/1.1"
     let parts: Vec<&str> = request_line.splitn(3, ' ').collect();
     if parts.len() < 2 {
-        let _ = write!(
-            stream,
-            "HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n"
+        let resp = http_response(
+            400,
+            "application/json",
+            r#"{"error":true,"status":400,"message":"Malformed request line"}"#,
+            None,
         );
+        let _ = stream.write_all(resp.as_bytes());
         return;
     }
     let method = parts[0];
@@ -91,6 +149,18 @@ fn handle_connection(state: &AppState, mut stream: TcpStream) {
         }
     }
 
+    // <<< AGENT-4 OPS: body size cap (item 7) — `security::enforce_body_limit`
+    // rejects before a single body byte is allocated. >>>
+    if let Err((status, message)) = cybermanju_web::security::enforce_body_limit(content_length) {
+        let body = format!(
+            r#"{{"error":true,"status":{},"message":"{}"}}"#,
+            status, message
+        );
+        let resp = http_response(status, "application/json", &body, None);
+        let _ = stream.write_all(resp.as_bytes());
+        return;
+    }
+
     // Read body if present
     let mut body = String::new();
     if content_length > 0 {
@@ -102,7 +172,12 @@ fn handle_connection(state: &AppState, mut stream: TcpStream) {
         }
     }
 
-    let origin = origin_header.as_deref();
+    // <<< AGENT-4 OPS: CORS allowlist (item 7). The UI is served from this
+    // same origin, so it needs no CORS header at all; only allowlisted
+    // localhost origins get one. The origin is *filtered*, never reflected —
+    // and `http_response` re-checks it, so a forwarded header cannot smuggle
+    // a permissive Access-Control-Allow-Origin. >>>
+    let origin = cybermanju_web::security::cors_origin_allowed(origin_header.as_deref());
 
     // Route: /api/* → shared REST handlers, everything else → static files
     if path.starts_with("/api/") || path == "/api" {
@@ -113,12 +188,12 @@ fn handle_connection(state: &AppState, mut stream: TcpStream) {
             path,
             &body,
             auth_header.as_deref(),
-            origin,
+            origin.as_deref(),
         );
         let _ = stream.write_all(response.as_bytes());
     } else if method == "OPTIONS" {
         // CORS preflight for static assets
-        let resp = http_response(204, "text/plain", "", origin);
+        let resp = http_response(204, "text/plain", "", origin.as_deref());
         let _ = stream.write_all(resp.as_bytes());
     } else if method == "GET" || method == "HEAD" {
         // Serve static files (binary-safe, writes directly to stream)
@@ -136,6 +211,7 @@ fn handle_connection(state: &AppState, mut stream: TcpStream) {
 
 fn main() {
     env_logger::Builder::from_env("RUST_LOG").init();
+    install_signal_handlers();
 
     let port: u16 = std::env::var("PORT")
         .unwrap_or_else(|_| "3456".to_string())
@@ -147,6 +223,17 @@ fn main() {
     let static_dir: PathBuf = std::env::var("STATIC_DIR")
         .unwrap_or_else(|_| "./static".to_string())
         .into();
+
+    // The Tantivy index lives on the same volume as the database so both
+    // survive a container recreate and a backup covers them together.
+    let index_path: String = std::env::var("SEARCH_INDEX_PATH").unwrap_or_else(|_| {
+        Path::new(&db_path)
+            .parent()
+            .unwrap_or_else(|| Path::new("/data"))
+            .join("tantivy_index")
+            .to_string_lossy()
+            .into_owned()
+    });
 
     // Ensure database directory exists
     if let Some(parent) = Path::new(&db_path).parent() {
@@ -171,12 +258,35 @@ fn main() {
         }
     };
 
-    let dashboard = WebDashboard::new_shared_with_bind_addr(port, Arc::clone(&db), "0.0.0.0");
+    // <<< AGENT-4 OPS: real search index (item 4) — without this
+    // WebDashboard::search_index stays None and /api/search silently degrades
+    // to a substring scan of the files table.
+    if let Err(e) = fs::create_dir_all(&index_path) {
+        error!(
+            "Failed to create search index directory {}: {}",
+            index_path, e
+        );
+        std::process::exit(1);
+    }
+    let search_index = match SearchIndex::new(&index_path) {
+        Ok(index) => index,
+        Err(e) => {
+            error!("Failed to open search index {}: {}", index_path, e);
+            std::process::exit(1);
+        }
+    };
+
+    let mut dashboard = WebDashboard::new_shared_with_bind_addr(port, Arc::clone(&db), "0.0.0.0");
+    dashboard.set_search_index(Arc::new(RwLock::new(search_index)));
+    // The dashboard now owns the only remaining database handle.
+    drop(db);
 
     let state = Arc::new(AppState {
         static_dir,
         db_path: db_path.clone(),
         dashboard,
+        rate_limits: Mutex::new(HashMap::new()),
+        in_flight: AtomicUsize::new(0),
     });
 
     let addr = format!("0.0.0.0:{}", port);
@@ -187,27 +297,58 @@ fn main() {
             std::process::exit(1);
         }
     };
+    // Non-blocking accept so the loop can notice SIGTERM within ~50ms.
+    listener.set_nonblocking(true).ok();
 
     info!("═══════════════════════════════════════════════════════");
     info!("  Cybermanju Drive — Web Server");
     info!("  Listening on http://{}", addr);
     info!("  API:        http://localhost:{}/api/health", port);
     info!("  Database:   {}", state.db_path);
+    info!("  Search:     {}", index_path);
     info!("  Static:     {}", state.static_dir.display());
     info!("═══════════════════════════════════════════════════════");
 
     // Serve requests in a thread-per-connection model (same as cybermanju-web)
-    for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => {
+    while !SHUTDOWN.load(Ordering::SeqCst) {
+        match listener.accept() {
+            Ok((stream, _)) => {
                 let state = Arc::clone(&state);
+                state.in_flight.fetch_add(1, Ordering::SeqCst);
                 std::thread::spawn(move || {
                     handle_connection(&state, stream);
+                    state.in_flight.fetch_sub(1, Ordering::SeqCst);
                 });
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(50));
             }
             Err(e) => {
                 warn!("Accept error: {}", e);
+                std::thread::sleep(Duration::from_millis(50));
             }
         }
     }
+
+    // <<< AGENT-4 OPS: drain → flush → exit (item 13) >>>
+    info!(
+        "Shutdown requested — draining {} in-flight request(s)",
+        state.in_flight.load(Ordering::SeqCst)
+    );
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while state.in_flight.load(Ordering::SeqCst) > 0 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let stuck = state.in_flight.load(Ordering::SeqCst);
+    if stuck > 0 {
+        warn!(
+            "Shutdown deadline reached with {} request(s) in flight",
+            stuck
+        );
+    }
+
+    // redb commits durably at transaction time; dropping the last handle
+    // closes the file cleanly (the dashboard owns that handle now).
+    drop(state);
+    info!("Database closed — shutdown complete");
 }

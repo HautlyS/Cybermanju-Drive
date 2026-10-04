@@ -141,11 +141,8 @@ fn reconstruct_keypair(stored: &crate::db::schema::EncryptionKey) -> Result<KeyP
     )
     .map_err(|e| format!("Failed to decode public key: {}", e))?;
 
-    let private_key = base64::Engine::decode(
-        &base64::engine::general_purpose::STANDARD,
-        &stored.private_key,
-    )
-    .map_err(|e| format!("Failed to decode private key: {}", e))?;
+    // <<< AGENT-3 KEYS AT REST: private keys are sealed, never raw base64 >>>
+    let private_key = open_private_key(&stored.private_key)?;
 
     Ok(KeyPair {
         id: stored.id.clone(),
@@ -154,6 +151,97 @@ fn reconstruct_keypair(stored: &crate::db::schema::EncryptionKey) -> Result<KeyP
         private_key,
         created_at: stored.created_at.clone(),
     })
+}
+
+// <<< AGENT-3 KEYS AT REST >>>
+
+/// Marker prefix for a private key sealed with the master passphrase.
+const SEALED_PREFIX: &str = "sealed:v1:";
+
+/// Wrap private key bytes with an Argon2id-derived key (ChaCha20Poly1305).
+///
+/// Fails when no master passphrase can be resolved — the contract is to
+/// **refuse to persist a raw private key**, not to fall back to plaintext.
+fn seal_private_key(raw: &[u8]) -> Result<String, String> {
+    let passphrase = cybermanju_crypto::keystore::master_passphrase().ok_or_else(|| {
+        "No master passphrase available — refusing to store a raw private key".to_string()
+    })?;
+    let sealed = cybermanju_crypto::keystore::seal(&passphrase, raw)?;
+    Ok(format!(
+        "{}{}",
+        SEALED_PREFIX,
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, sealed)
+    ))
+}
+
+/// Decode a stored private key, opening the sealed form when present.
+///
+/// Rows written before keys-at-rest landed are still raw base64; they stay
+/// readable and are migrated to the sealed form by [`seal_legacy_keys`].
+fn open_private_key(stored: &str) -> Result<Vec<u8>, String> {
+    if let Some(payload) = stored.strip_prefix(SEALED_PREFIX) {
+        let blob = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, payload)
+            .map_err(|e| format!("Failed to decode sealed private key: {}", e))?;
+        let passphrase = cybermanju_crypto::keystore::master_passphrase().ok_or_else(|| {
+            "Master passphrase unavailable — cannot open sealed private key".to_string()
+        })?;
+        return cybermanju_crypto::keystore::open_sealed(&passphrase, &blob);
+    }
+    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, stored)
+        .map_err(|e| format!("Failed to decode private key: {}", e))
+}
+
+/// Wrap every legacy plaintext private key at rest.
+///
+/// Best effort: a failure is logged rather than propagated so an unreadable
+/// passphrase file never blocks file encryption. The caller must hold the
+/// database write lock.
+fn seal_legacy_keys(db: &crate::db::Database) {
+    let run = || -> Result<u32, String> {
+        let tx = db.begin_write().map_err(|e| e.to_string())?;
+        let mut updates: Vec<(String, String)> = Vec::new();
+        {
+            let mut table = tx
+                .open_table(crate::db::Database::get_encryption_keys_table())
+                .map_err(|e| e.to_string())?;
+            for entry in table.iter().map_err(|e| e.to_string())? {
+                let (id, value) = entry.map_err(|e| e.to_string())?;
+                let mut key: crate::db::schema::EncryptionKey =
+                    match serde_json::from_str(value.value()) {
+                        Ok(k) => k,
+                        Err(_) => continue,
+                    };
+                if key.private_key.starts_with(SEALED_PREFIX) {
+                    continue;
+                }
+                let raw = base64::Engine::decode(
+                    &base64::engine::general_purpose::STANDARD,
+                    &key.private_key,
+                )
+                .map_err(|e| format!("Failed to decode private key {}: {}", id.value(), e))?;
+                key.private_key = seal_private_key(&raw)?;
+                updates.push((
+                    key.id.clone(),
+                    serde_json::to_string(&key).map_err(|e| e.to_string())?,
+                ));
+            }
+            for (id, json) in &updates {
+                table
+                    .insert(id.as_str(), json.as_str())
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(updates.len() as u32)
+    };
+
+    match run() {
+        Ok(count) if count > 0 => {
+            log::info!("Sealed {} legacy private key(s) at rest", count)
+        }
+        Ok(_) => {}
+        Err(e) => log::warn!("Could not seal legacy private keys: {}", e),
+    }
 }
 
 /// Encrypt a file using real ML-KEM key encapsulation.
@@ -208,6 +296,10 @@ pub fn encrypt_file(
     let mut file_node: crate::db::schema::FileNode =
         serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
     drop(tx_read);
+
+    // <<< AGENT-3 KEYS AT REST: migrate plaintext keys while we hold the
+    // write lock >>>
+    seal_legacy_keys(&db);
 
     // Find the latest key matching this algorithm
     let stored_key = find_latest_key(&db, &algorithm)?.ok_or_else(|| {
@@ -335,6 +427,10 @@ pub fn decrypt_file(
     let mut file_node: crate::db::schema::FileNode =
         serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
     drop(tx_read);
+
+    // <<< AGENT-3 KEYS AT REST: migrate plaintext keys while we hold the
+    // write lock >>>
+    seal_legacy_keys(&db);
 
     // Attempt actual file decryption if a path is available
     if let Some(ref ctx) = file_node.context_data {
@@ -494,10 +590,8 @@ pub fn generate_keypair(
         &base64::engine::general_purpose::STANDARD,
         &keypair.public_key,
     );
-    let private_key_b64 = base64::Engine::encode(
-        &base64::engine::general_purpose::STANDARD,
-        &keypair.private_key,
-    );
+    // <<< AGENT-3 KEYS AT REST: seal before it ever touches the database >>>
+    let private_key_b64 = seal_private_key(&keypair.private_key)?;
 
     let key = crate::db::schema::EncryptionKey {
         id: keypair.id.clone(),
@@ -510,6 +604,9 @@ pub fn generate_keypair(
 
     // Store in the database
     let db = state.db.write().map_err(|e| e.to_string())?;
+    // Opportunistically migrate any older plaintext keys while we hold the
+    // write lock.
+    seal_legacy_keys(&db);
     let serialized = serde_json::to_string(&key).map_err(|e| e.to_string())?;
     let tx = db.begin_write().map_err(|e| e.to_string())?;
     {

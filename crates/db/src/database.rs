@@ -1,5 +1,6 @@
 use anyhow::Result;
 use cybermanju_types::schema::{AuditEntry, FileNode, FileVersion, ShareLink, TrashItem};
+use cybermanju_types::sync::{SyncFile, SyncRunRecord};
 use redb::{
     Database as RedbDatabase, ReadTransaction, ReadableTable, TableDefinition, WriteTransaction,
 };
@@ -36,6 +37,20 @@ const FILE_VERSIONS_TABLE: TableDefinition<'static, &'static str, &'static str> 
     TableDefinition::new("file_versions");
 const SHARE_LINKS_TABLE: TableDefinition<'static, &'static str, &'static str> =
     TableDefinition::new("share_links");
+// <<< AGENT-2 SYNC PERSISTENCE: remote locators, run history, config
+// secrets and the schema marker. See AGENT-2.md items 2, 14. >>>
+const SYNC_FILES_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("sync_files");
+const SYNC_RUNS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("sync_runs");
+const SYNC_SECRETS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("sync_secrets");
+const SCHEMA_VERSION_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("schema_version");
+
+/// Rows kept in `sync_runs` — enough for a UI history page, few enough that
+/// the prune scan stays trivial.
+pub const SYNC_RUN_HISTORY_LIMIT: usize = 20;
 
 pub struct Database {
     db: RedbDatabase,
@@ -62,6 +77,16 @@ impl Database {
             write_txn.open_table(AUDIT_LOG_TABLE)?;
             write_txn.open_table(FILE_VERSIONS_TABLE)?;
             write_txn.open_table(SHARE_LINKS_TABLE)?;
+            // <<< AGENT-2 SYNC PERSISTENCE >>>
+            write_txn.open_table(SYNC_FILES_TABLE)?;
+            write_txn.open_table(SYNC_RUNS_TABLE)?;
+            write_txn.open_table(SYNC_SECRETS_TABLE)?;
+            {
+                let mut schema = write_txn.open_table(SCHEMA_VERSION_TABLE)?;
+                if schema.get("schema")?.is_none() {
+                    schema.insert("schema", "1")?;
+                }
+            }
         }
         write_txn.commit()?;
         Ok(Self { db })
@@ -122,6 +147,219 @@ impl Database {
     }
     pub fn get_share_links_table() -> TableDefinition<'static, &'static str, &'static str> {
         SHARE_LINKS_TABLE
+    }
+    // <<< AGENT-2 SYNC PERSISTENCE >>>
+    pub fn get_sync_files_table() -> TableDefinition<'static, &'static str, &'static str> {
+        SYNC_FILES_TABLE
+    }
+    pub fn get_sync_runs_table() -> TableDefinition<'static, &'static str, &'static str> {
+        SYNC_RUNS_TABLE
+    }
+    pub fn get_sync_secrets_table() -> TableDefinition<'static, &'static str, &'static str> {
+        SYNC_SECRETS_TABLE
+    }
+
+    /// Row key for a synced copy: one local file × one config.
+    fn sync_file_key(file_id: &str, config_id: &str) -> String {
+        format!("{}/{}", file_id, config_id)
+    }
+
+    /// Insert or replace the locator record for one synced copy.
+    pub fn upsert_sync_file(&self, record: &SyncFile) -> Result<()> {
+        let key = Self::sync_file_key(&record.id, record.config_id.as_deref().unwrap_or(""));
+        let serialized = serde_json::to_string(record)?;
+        let tx = self.db.begin_write()?;
+        {
+            let mut table = tx.open_table(SYNC_FILES_TABLE)?;
+            table.insert(key.as_str(), serialized.as_str())?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Locator record for one (file, config) pair.
+    pub fn get_sync_file(&self, file_id: &str, config_id: &str) -> Result<Option<SyncFile>> {
+        let tx = self.db.begin_read()?;
+        let table = tx.open_table(SYNC_FILES_TABLE)?;
+        let key = Self::sync_file_key(file_id, config_id);
+        match table.get(key.as_str())? {
+            Some(v) => Ok(Some(serde_json::from_str(v.value())?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Newest record uploaded to `remote_path` by `config_id` (linear scan —
+    /// the table holds one row per synced file, never more than a library).
+    pub fn find_sync_file_by_remote(
+        &self,
+        config_id: &str,
+        remote_path: &str,
+    ) -> Result<Option<SyncFile>> {
+        let tx = self.db.begin_read()?;
+        let table = tx.open_table(SYNC_FILES_TABLE)?;
+        let mut found: Option<SyncFile> = None;
+        for entry in table.iter()? {
+            let (_, value) = entry?;
+            let record: SyncFile = serde_json::from_str(value.value())?;
+            if record.config_id.as_deref() == Some(config_id)
+                && record.remote_path.as_deref() == Some(remote_path)
+            {
+                found = Some(record);
+            }
+        }
+        Ok(found)
+    }
+
+    /// All locator records, optionally narrowed to one config.
+    pub fn list_sync_files(&self, config_id: Option<&str>) -> Result<Vec<SyncFile>> {
+        let tx = self.db.begin_read()?;
+        let table = tx.open_table(SYNC_FILES_TABLE)?;
+        let mut records = Vec::new();
+        for entry in table.iter()? {
+            let (_, value) = entry?;
+            let record: SyncFile = serde_json::from_str(value.value())?;
+            if config_id.is_none() || record.config_id.as_deref() == config_id {
+                records.push(record);
+            }
+        }
+        Ok(records)
+    }
+
+    /// Drop one locator record (used when the remote copy is deleted).
+    pub fn remove_sync_file(&self, file_id: &str, config_id: &str) -> Result<bool> {
+        let key = Self::sync_file_key(file_id, config_id);
+        let tx = self.db.begin_write()?;
+        let removed = {
+            let mut table = tx.open_table(SYNC_FILES_TABLE)?;
+            let removed = table.remove(key.as_str())?.is_some();
+            removed
+        };
+        tx.commit()?;
+        Ok(removed)
+    }
+
+    /// Persist a finished run and prune the history to
+    /// [`SYNC_RUN_HISTORY_LIMIT`] rows (oldest `finished_at` first).
+    pub fn save_sync_run(&self, record: &SyncRunRecord) -> Result<()> {
+        let serialized = serde_json::to_string(record)?;
+        let tx = self.db.begin_write()?;
+        {
+            let mut table = tx.open_table(SYNC_RUNS_TABLE)?;
+            table.insert(record.run_id.as_str(), serialized.as_str())?;
+
+            let mut rows: Vec<(String, String)> = Vec::new();
+            for entry in table.iter()? {
+                let (key, value) = entry?;
+                let stored: SyncRunRecord = serde_json::from_str(value.value())?;
+                rows.push((key.value().to_string(), stored.finished_at));
+            }
+            if rows.len() > SYNC_RUN_HISTORY_LIMIT {
+                rows.sort_by(|a, b| a.1.cmp(&b.1));
+                for (stale, _) in rows.iter().take(rows.len() - SYNC_RUN_HISTORY_LIMIT) {
+                    table.remove(stale.as_str())?;
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// One finished run by id (survives restarts).
+    pub fn get_sync_run(&self, run_id: &str) -> Result<Option<SyncRunRecord>> {
+        let tx = self.db.begin_read()?;
+        let table = tx.open_table(SYNC_RUNS_TABLE)?;
+        match table.get(run_id)? {
+            Some(v) => Ok(Some(serde_json::from_str(v.value())?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Run history, newest `finished_at` first, capped at `limit`.
+    pub fn list_sync_runs(&self, limit: usize) -> Result<Vec<SyncRunRecord>> {
+        let tx = self.db.begin_read()?;
+        let table = tx.open_table(SYNC_RUNS_TABLE)?;
+        let mut rows = Vec::new();
+        for entry in table.iter()? {
+            let (_, value) = entry?;
+            rows.push(serde_json::from_str::<SyncRunRecord>(value.value())?);
+        }
+        rows.sort_by(|a, b| b.finished_at.cmp(&a.finished_at));
+        rows.truncate(limit);
+        Ok(rows)
+    }
+
+    // ─── Config secrets (AGENT-3 request: token lives beside the row) ──
+    // `SyncConfig.token` is `skip_serializing`, so the JSON row never holds
+    // it. The side table does — written by `save_config`, merged back by
+    // `get_config`/`list_configs`, removed by `delete_config`.
+
+    pub fn put_sync_secret(&self, config_id: &str, secret: &str) -> Result<()> {
+        let tx = self.db.begin_write()?;
+        {
+            let mut table = tx.open_table(SYNC_SECRETS_TABLE)?;
+            table.insert(config_id, secret)?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn get_sync_secret(&self, config_id: &str) -> Result<Option<String>> {
+        let tx = self.db.begin_read()?;
+        let table = tx.open_table(SYNC_SECRETS_TABLE)?;
+        Ok(table.get(config_id)?.map(|v| v.value().to_string()))
+    }
+
+    pub fn remove_sync_secret(&self, config_id: &str) -> Result<bool> {
+        let tx = self.db.begin_write()?;
+        let removed = {
+            let mut table = tx.open_table(SYNC_SECRETS_TABLE)?;
+            let removed = table.remove(config_id)?.is_some();
+            removed
+        };
+        tx.commit()?;
+        Ok(removed)
+    }
+
+    /// Every saved sync config with its secret merged back in (the row JSON
+    /// never carries `token`). Used by the pipeline's striped placement,
+    /// which must reach several providers in one run.
+    pub fn list_sync_configs(&self) -> Result<Vec<cybermanju_types::sync::SyncConfig>> {
+        let tx = self.db.begin_read()?;
+        let table = tx.open_table(SYNC_CONFIGS_TABLE)?;
+        let mut configs = Vec::new();
+        for entry in table.iter()? {
+            let (_, value) = entry?;
+            let mut config: cybermanju_types::sync::SyncConfig =
+                serde_json::from_str(value.value())?;
+            if config.token.is_none() {
+                config.token = self.get_sync_secret(&config.id)?;
+            }
+            configs.push(config);
+        }
+        Ok(configs)
+    }
+
+    /// Ids of every live file. Trashed files live in their own table, so
+    /// this is exactly the set an auto-sync scan should walk (item 11).
+    pub fn list_file_ids(&self) -> Result<Vec<String>> {
+        let tx = self.db.begin_read()?;
+        let table = tx.open_table(FILES_TABLE)?;
+        let mut ids = Vec::new();
+        for entry in table.iter()? {
+            let (key, _) = entry?;
+            ids.push(key.value().to_string());
+        }
+        Ok(ids)
+    }
+
+    /// Persisted schema marker (1 = first sync-persistence schema).
+    pub fn schema_version(&self) -> Result<u64> {
+        let tx = self.db.begin_read()?;
+        let table = tx.open_table(SCHEMA_VERSION_TABLE)?;
+        match table.get("schema")? {
+            Some(v) => Ok(v.value().parse::<u64>().unwrap_or(0)),
+            None => Ok(0),
+        }
     }
 
     pub fn log_audit(

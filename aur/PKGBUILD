@@ -1,4 +1,4 @@
-# Maintainer: Cybermanju <your-email@example.com>
+# Maintainer: Cybermanju <cybermanju@users.noreply.github.com>
 pkgname=cybermanju-drive
 pkgver=0.1.0
 pkgrel=1
@@ -21,21 +21,23 @@ makedepends=(
   'pkg-config'
   'base-devel'
 )
-source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+# VCS source: a tagged clone, for which 'SKIP' is the correct checksum
+# (an unpinned tarball must carry a real sha256 instead).
+source=("$pkgname::git+$url.git#tag=v$pkgver")
 sha256sums=('SKIP')
 
 prepare() {
-  cd "$pkgname-$pkgver"
+  cd "$pkgname"
   npm ci
 }
 
 build() {
-  cd "$pkgname-$pkgver"
+  cd "$pkgname"
   npm run tauri build
 }
 
 package() {
-  cd "$pkgname-$pkgver"
+  cd "$pkgname"
 
   # Install the binary
   install -Dm755 "target/release/cybermanju-drive" \
@@ -59,5 +61,5 @@ package() {
   done
 
   # Install license
-  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE" 2>/dev/null || true
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

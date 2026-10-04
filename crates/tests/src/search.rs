@@ -31,6 +31,7 @@ fn test_search_index_add_and_search() {
     let req = SearchRequest {
         query: "main".into(),
         limit: Some(10),
+        offset: None,
     };
     let results = idx.search(&req).unwrap();
     assert!(!results.is_empty());
@@ -71,6 +72,7 @@ fn test_search_empty_query() {
     let req = SearchRequest {
         query: "".into(),
         limit: Some(10),
+        offset: None,
     };
     let results = idx.search(&req).unwrap();
     assert!(results.is_empty());
@@ -98,6 +100,7 @@ fn test_search_no_results() {
     let req = SearchRequest {
         query: "xyznonexistent".into(),
         limit: Some(10),
+        offset: None,
     };
     let results = idx.search(&req).unwrap();
     assert!(results.is_empty());
@@ -152,6 +155,7 @@ fn test_multiple_documents() {
     let req = SearchRequest {
         query: "alphaomega".into(),
         limit: Some(10),
+        offset: None,
     };
     let results = idx.search(&req).unwrap();
     assert_eq!(results.len(), 5);

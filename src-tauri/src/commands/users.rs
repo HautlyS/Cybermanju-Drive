@@ -33,35 +33,6 @@ pub struct AuthResult {
     pub token: String,
 }
 
-/// Argon2 password hashing using the same argon2 crate as web_dashboard.
-fn argon2_hash_password(password: &str) -> Result<String, String> {
-    use argon2::{
-        password_hash::{PasswordHasher, SaltString},
-        Argon2,
-    };
-    use rand_core::OsRng;
-
-    let salt = SaltString::generate(&mut OsRng);
-    Argon2::default()
-        .hash_password(password.as_bytes(), &salt)
-        .map(|h| h.to_string())
-        .map_err(|e| format!("Argon2 hash error: {}", e))
-}
-
-/// Argon2 password verification.
-fn argon2_verify_password(password: &str, hash: &str) -> Result<bool, String> {
-    use argon2::{
-        password_hash::{PasswordHash, PasswordVerifier},
-        Argon2,
-    };
-
-    let parsed = PasswordHash::new(hash).map_err(|e| format!("Invalid hash format: {}", e))?;
-    match Argon2::default().verify_password(password.as_bytes(), &parsed) {
-        Ok(()) => Ok(true),
-        Err(_) => Ok(false),
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Session token: HMAC-SHA256 with expiry
 // ---------------------------------------------------------------------------
@@ -206,7 +177,16 @@ pub fn register_user(
     state: State<'_, AppState>,
 ) -> Result<User, String> {
     let db = state.db.write().map_err(|e| e.to_string())?;
-    cybermanju_web::api::users::register(&db, username, password, display_name, role)
+    // <<< AGENT-3 IDENTITY: desktop IPC is a trusted local transport, so it
+    // keeps full role freedom; the HTTP path is Bootstrap/AdminCreated. >>>
+    cybermanju_web::api::users::register(
+        &db,
+        username,
+        password,
+        display_name,
+        role,
+        cybermanju_web::api::users::RegistrationMode::LocalIpc,
+    )
 }
 
 #[tauri::command]
@@ -215,73 +195,31 @@ pub fn authenticate_user(
     password: String,
     state: State<'_, AppState>,
 ) -> Result<AuthResult, String> {
-    let db = state.db.read().map_err(|e| e.to_string())?;
-    let tx = db.begin_read().map_err(|e| e.to_string())?;
-    let table = tx
-        .open_table(crate::db::Database::get_users_table())
-        .map_err(|e| e.to_string())?;
-
-    for entry in table.iter().map_err(|e| e.to_string())? {
-        let (_, value) = entry.map_err(|e| e.to_string())?;
-        let user: User = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
-        if user.username == username {
-            if !user.is_active {
-                return Err("User account is disabled".to_string());
-            }
-
-            // Verify password using argon2
-            // Support both old BLAKE3 hashes and new argon2 hashes during migration
-            let blake3_hash = blake3::hash(password.as_bytes()).to_hex().to_string();
-            let valid = if user.password_hash.starts_with("$argon2") {
-                argon2_verify_password(&password, &user.password_hash)?
-            } else {
-                // Legacy BLAKE3 hash — verify but immediately upgrade
-                if user.password_hash == blake3_hash {
-                    // Upgrade the stored hash to argon2id right now
-                    let new_hash = argon2_hash_password(&password)?;
-                    // Write the upgraded hash back to the database
-                    let mut upgraded_user = user.clone();
-                    upgraded_user.password_hash = new_hash;
-                    let serialized =
-                        serde_json::to_string(&upgraded_user).map_err(|e| e.to_string())?;
-                    let db_write = state.db.write().map_err(|e| e.to_string())?;
-                    let tx_write = db_write.begin_write().map_err(|e| e.to_string())?;
-                    {
-                        let mut table = tx_write
-                            .open_table(crate::db::Database::get_users_table())
-                            .map_err(|e| e.to_string())?;
-                        table
-                            .insert(user.id.as_str(), serialized.as_str())
-                            .map_err(|e| e.to_string())?;
-                    }
-                    tx_write.commit().map_err(|e| e.to_string())?;
-                    log::info!(
-                        "Upgraded legacy BLAKE3 password hash to argon2id for user '{}'",
-                        username
-                    );
-                    true
-                } else {
-                    false
-                }
-            };
-
-            if valid {
-                // Generate HMAC-signed, non-forgeable session token
-                let token = generate_session_token(&username, &state.hmac_secret);
-                return Ok(AuthResult {
-                    user_id: user.id,
-                    username: user.username,
-                    role: user.role,
-                    display_name: user.display_name,
-                    token,
-                });
-            } else {
-                return Err("Invalid username or password".to_string());
-            }
-        }
+    // <<< AGENT-3 IDENTITY: one shared verification path for both transports
+    // — argon2id with pinned parameters plus the legacy BLAKE3 migration,
+    // living in `cybermanju_web::api::users` so HTTP and Tauri behave
+    // identically. The write lock is taken up front because a legacy hash is
+    // upgraded in place; taking read-then-write on the same thread deadlocks
+    // on `std::sync::RwLock`. >>>
+    let db = state.db.write().map_err(|e| e.to_string())?;
+    let outcome = cybermanju_web::api::users::authenticate(&db, &username, &password)?;
+    if outcome.upgraded {
+        log::info!(
+            "Upgraded legacy BLAKE3 password hash to argon2id for user '{}'",
+            username
+        );
     }
 
-    Err("Invalid username or password".to_string())
+    // Generate HMAC-signed, non-forgeable session token
+    let user = outcome.user;
+    let token = generate_session_token(&user.username, &state.hmac_secret);
+    Ok(AuthResult {
+        user_id: user.id,
+        username: user.username,
+        role: user.role,
+        display_name: user.display_name,
+        token,
+    })
 }
 
 /// Verify a session token — returns the username and timestamp if valid.

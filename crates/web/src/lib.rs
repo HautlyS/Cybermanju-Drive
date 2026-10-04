@@ -15,9 +15,10 @@
 //   8. Rate limiting: 100 requests per minute per IP address
 
 pub mod api;
+pub mod security;
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc;
@@ -31,7 +32,6 @@ use cybermanju_search::SearchIndex;
 use cybermanju_sync::SyncState;
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use log::{error, info, warn};
-use rand_core::{OsRng, RngCore};
 use redb::{ReadableTable, TableDefinition};
 use serde::{Deserialize, Serialize};
 
@@ -59,6 +59,16 @@ pub const RATE_LIMIT_WINDOW_SECS: u64 = 60;
 /// JWT token expiry: 24 hours
 const JWT_EXPIRY_SECS: u64 = 86_400;
 
+// <<< AGENT-4 OPS: process-wide counters behind GET /api/metrics >>>
+/// Total HTTP requests routed (every response, including 4xx/5xx).
+static REQUESTS_TOTAL: AtomicU64 = AtomicU64::new(0);
+/// Responses with a 4xx status.
+static RESPONSES_4XX: AtomicU64 = AtomicU64::new(0);
+/// Responses with a 5xx status.
+static RESPONSES_5XX: AtomicU64 = AtomicU64::new(0);
+/// Monotonic id used to build the per-request log correlation id.
+static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
+
 /// Allowed CORS origins (localhost only)
 #[allow(dead_code)]
 pub const ALLOWED_ORIGINS: &[&str] = &[
@@ -70,19 +80,9 @@ pub const ALLOWED_ORIGINS: &[&str] = &[
 
 // ─── JWT Claims ──────────────────────────────────────────────────────
 
-#[derive(Debug, Serialize, Deserialize)]
-struct JwtClaims {
-    /// Subject — username
-    sub: String,
-    /// User role (admin, user, etc.)
-    role: String,
-    /// User ID (UUID)
-    user_id: String,
-    /// Issued-at timestamp (seconds since epoch)
-    iat: u64,
-    /// Expiration timestamp (seconds since epoch)
-    exp: u64,
-}
+/// Verified JWT payload. Defined in `security` so both transports and the
+/// AGENT-4 test matrix share one type.
+pub use security::Claims as JwtClaims;
 
 // ─── WebDashboard struct ────────────────────────────────────────────
 
@@ -108,6 +108,10 @@ pub struct WebDashboard {
     pub active_connections: AtomicU64,
     /// Per-IP rate limit counters: IP → (count, window_start)
     pub rate_limits: Mutex<HashMap<String, (u32, Instant)>>,
+    // <<< AGENT-3 AUTH STATE >>>
+    /// Revoked JWT ids, in-flight OAuth handshakes and login backoff.
+    pub auth: security::AuthState,
+    // <<< /AGENT-3 AUTH STATE >>>
     pub server_thread: Mutex<Option<thread::JoinHandle<()>>>,
     pub shutdown_tx: Mutex<Option<mpsc::Sender<()>>>,
 }
@@ -117,13 +121,27 @@ impl WebDashboard {
     /// Prefer `new_shared` when the application already owns a database handle.
     pub fn new(port: u16, db_path: &str) -> Self {
         let db = Database::new(db_path).expect("Failed to open web dashboard database");
-        Self::new_shared(port, Arc::new(RwLock::new(db)))
+        Self::build(
+            port,
+            Arc::new(RwLock::new(db)),
+            "127.0.0.1",
+            std::path::Path::new(db_path)
+                .parent()
+                .map(|p| p.to_path_buf()),
+        )
     }
 
     /// Constructor that allows specifying a bind address (for Docker use case).
     pub fn new_with_bind_addr(port: u16, db_path: &str, bind_addr: &str) -> Self {
         let db = Database::new(db_path).expect("Failed to open web dashboard database");
-        Self::new_shared_with_bind_addr(port, Arc::new(RwLock::new(db)), bind_addr)
+        Self::build(
+            port,
+            Arc::new(RwLock::new(db)),
+            bind_addr,
+            std::path::Path::new(db_path)
+                .parent()
+                .map(|p| p.to_path_buf()),
+        )
     }
 
     /// Build a dashboard around an already-open database handle so the same
@@ -138,9 +156,44 @@ impl WebDashboard {
         db: Arc<RwLock<Database>>,
         bind_addr: &str,
     ) -> Self {
-        // Generate a cryptographically random 256-bit JWT secret
-        let mut jwt_secret = [0u8; 32];
-        OsRng.fill_bytes(&mut jwt_secret);
+        Self::build(port, db, bind_addr, None)
+    }
+
+    // <<< AGENT-3 JWT SECRET >>>
+    /// Shared constructor. The JWT secret is **not** regenerated on every
+    /// start: it is sourced from `CYBERMANJU_JWT_SECRET` or persisted at
+    /// `<data dir>/jwt_secret` (0600) so restarts keep sessions alive.
+    /// See `security::load_or_create_jwt_secret_in` for the full order and
+    /// `docs/SECURITY.md` for rotation.
+    fn build(
+        port: u16,
+        db: Arc<RwLock<Database>>,
+        bind_addr: &str,
+        secret_dir: Option<std::path::PathBuf>,
+    ) -> Self {
+        let jwt_secret = security::load_or_create_jwt_secret_in(secret_dir.as_deref());
+
+        // <<< AGENT-3 BOOTSTRAP ADMIN: registration never grants `admin`, so
+        // headless deployments (Docker) need an out-of-band way to create the
+        // first administrator. See docs/SECURITY.md. >>>
+        if let (Ok(username), Ok(password)) = (
+            std::env::var("CYBERMANJU_ADMIN_USERNAME"),
+            std::env::var("CYBERMANJU_ADMIN_PASSWORD"),
+        ) {
+            if !username.trim().is_empty() && !password.is_empty() {
+                let handle = Arc::clone(&db);
+                match handle.write() {
+                    Ok(guard) => {
+                        if let Err(e) =
+                            api::users::ensure_admin_provisioned(&guard, &username, &password)
+                        {
+                            warn!("Could not provision admin account: {}", e);
+                        }
+                    }
+                    Err(_) => warn!("Could not provision admin account: database lock poisoned"),
+                };
+            }
+        }
 
         Self {
             port,
@@ -153,10 +206,12 @@ impl WebDashboard {
             running: AtomicBool::new(false),
             active_connections: AtomicU64::new(0),
             rate_limits: Mutex::new(HashMap::new()),
+            auth: security::AuthState::new(),
             server_thread: Mutex::new(None),
             shutdown_tx: Mutex::new(None),
         }
     }
+    // <<< /AGENT-3 JWT SECRET >>>
 
     /// Accessor for the shared database handle.
     pub fn db(&self) -> &Arc<RwLock<Database>> {
@@ -312,6 +367,19 @@ impl Drop for ActiveConnectionGuard<'_> {
 }
 
 fn handle_connection(dashboard: &WebDashboard, mut stream: TcpStream) {
+    // <<< AGENT-3 MAX CONNECTIONS >>>
+    // Refuse new work once the cap is reached instead of spawning an
+    // unbounded number of threads (thread-per-connection had no ceiling).
+    if dashboard.active_connections.load(Ordering::SeqCst) >= security::MAX_CONCURRENT_CONNECTIONS {
+        write_http_json(
+            &mut stream,
+            503,
+            r#"{"error":true,"status":503,"message":"Too many connections"}"#,
+        );
+        return;
+    }
+    // <<< /AGENT-3 MAX CONNECTIONS >>>
+
     dashboard.active_connections.fetch_add(1, Ordering::SeqCst);
     let _active = ActiveConnectionGuard(&dashboard.active_connections);
 
@@ -377,17 +445,31 @@ struct ParsedRequest {
 }
 
 /// Parse an HTTP request from a TcpStream without writing to it.
+///
+/// Hardened: the request line, every header line and the header count are
+/// capped, and `Content-Length` is validated with
+/// `security::enforce_body_limit` before a single body byte is read.
 fn parse_http_request(stream: &TcpStream) -> Result<ParsedRequest, (u16, String)> {
     let mut reader = BufReader::new(stream);
 
-    // Read request line
+    // Read request line (capped — an unbounded line is a memory DoS)
     let mut request_line = String::new();
-    reader.read_line(&mut request_line).map_err(|_| {
-        (
+    let read = reader
+        .by_ref()
+        .take(security::MAX_REQUEST_LINE_BYTES as u64 + 2)
+        .read_line(&mut request_line)
+        .map_err(|_| {
+            (
+                400,
+                r#"{"error":true,"status":400,"message":"Bad Request"}"#.to_string(),
+            )
+        })?;
+    if read == 0 || request_line.len() > security::MAX_REQUEST_LINE_BYTES {
+        return Err((
             400,
-            r#"{"error":true,"status":400,"message":"Bad Request"}"#.to_string(),
-        )
-    })?;
+            r#"{"error":true,"status":400,"message":"Request line too long"}"#.to_string(),
+        ));
+    }
     let request_line = request_line.trim();
 
     // Parse method and path from "GET /path HTTP/1.1"
@@ -405,18 +487,50 @@ fn parse_http_request(stream: &TcpStream) -> Result<ParsedRequest, (u16, String)
     let mut content_length: usize = 0;
     let mut auth_header: Option<String> = None;
     let mut origin_header: Option<String> = None;
+    let mut header_lines: usize = 0;
 
     loop {
+        if header_lines >= security::MAX_HEADER_LINES {
+            return Err((
+                400,
+                r#"{"error":true,"status":400,"message":"Too many headers"}"#.to_string(),
+            ));
+        }
         let mut line = String::new();
-        if reader.read_line(&mut line).is_err() || line == "\r\n" || line.is_empty() {
+        let read = reader
+            .by_ref()
+            .take(security::MAX_HEADER_LINE_BYTES as u64 + 2)
+            .read_line(&mut line)
+            .unwrap_or(0);
+        if read == 0 {
             break;
         }
+        if line.len() > security::MAX_HEADER_LINE_BYTES {
+            return Err((
+                400,
+                r#"{"error":true,"status":400,"message":"Header line too long"}"#.to_string(),
+            ));
+        }
+        if line == "\r\n" || line == "\n" {
+            break;
+        }
+        header_lines += 1;
         let trimmed = line.trim();
+        if trimmed.is_empty() {
+            break;
+        }
         let lower = trimmed.to_lowercase();
 
         if lower.starts_with("content-length:") {
             content_length = trimmed[15..].trim().parse().unwrap_or(0);
         } else if lower.starts_with("authorization:") {
+            if trimmed.len() > 14 + security::MAX_AUTH_HEADER_BYTES {
+                return Err((
+                    401,
+                    r#"{"error":true,"status":401,"message":"Authorization header too long"}"#
+                        .to_string(),
+                ));
+            }
             auth_header = Some(trimmed[14..].trim().to_string());
         } else if lower.starts_with("origin:") {
             origin_header = Some(trimmed[7..].trim().to_string());
@@ -424,12 +538,13 @@ fn parse_http_request(stream: &TcpStream) -> Result<ParsedRequest, (u16, String)
     }
 
     // ── Body size limit enforcement ──
-    if content_length > MAX_BODY_SIZE {
-        return Err((
-            413,
-            r#"{"error":true,"status":413,"message":"Request body too large"}"#.to_string(),
-        ));
-    }
+    let content_length =
+        security::enforce_body_limit(content_length).map_err(|(status, msg)| {
+            (
+                status,
+                serde_json::json!({"error":true,"status":status,"message":msg}).to_string(),
+            )
+        })?;
 
     // Read body if present (capped to MAX_BODY_SIZE for safety)
     let body = if content_length > 0 {
@@ -445,10 +560,7 @@ fn parse_http_request(stream: &TcpStream) -> Result<ParsedRequest, (u16, String)
     };
 
     // Determine effective CORS origin for response headers
-    let effective_origin = origin_header
-        .as_deref()
-        .filter(|o| ALLOWED_ORIGINS.contains(o))
-        .map(|o| o.to_string());
+    let effective_origin = security::cors_origin_allowed(origin_header.as_deref());
 
     Ok(ParsedRequest {
         method,
@@ -459,27 +571,18 @@ fn parse_http_request(stream: &TcpStream) -> Result<ParsedRequest, (u16, String)
     })
 }
 
-/// Write a JSON HTTP response.
+/// Write a JSON HTTP response (transport-level errors: 400/413/429/503).
 fn write_http_json(stream: &mut TcpStream, status: u16, body: &str) {
-    let reason = match status {
-        200 => "OK",
-        201 => "Created",
-        204 => "No Content",
-        400 => "Bad Request",
-        404 => "Not Found",
-        413 => "Payload Too Large",
-        429 => "Too Many Requests",
-        500 => "Internal Server Error",
-        _ => "Error",
-    };
     let resp = format!(
         "HTTP/1.1 {} {}\r\n\
          Content-Type: application/json\r\n\
+         {}\
          Content-Length: {}\r\n\
          \r\n\
          {}",
         status,
-        reason,
+        status_text(status),
+        security::security_headers(),
         body.len(),
         body
     );
@@ -539,7 +642,80 @@ fn api_response<T: Serialize>(result: Result<T, String>, origin: Option<&str>) -
     }
 }
 
+// <<< AGENT-4 OPS: access log + metrics wrapper >>>
+// Every request that enters `handle_request` leaves exactly one structured
+// line (target `access`) with request id, method, path, status, latency and
+// auth outcome, and bumps the counters exposed at `GET /api/metrics`.
+// The routing itself lives in `route_request`.
 pub fn handle_request(
+    dashboard: &WebDashboard,
+    db: &Arc<RwLock<Database>>,
+    method: &str,
+    path: &str,
+    body: &str,
+    auth_header: Option<&str>,
+    origin: Option<&str>,
+) -> String {
+    let started = Instant::now();
+    let request_id = format!(
+        "{}-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0),
+        NEXT_REQUEST_ID.fetch_add(1, Ordering::Relaxed)
+    );
+
+    let response = route_request(dashboard, db, method, path, body, auth_header, origin);
+    let status = response_status(&response);
+
+    REQUESTS_TOTAL.fetch_add(1, Ordering::SeqCst);
+    match status {
+        400..=499 => {
+            RESPONSES_4XX.fetch_add(1, Ordering::SeqCst);
+        }
+        500..=599 => {
+            RESPONSES_5XX.fetch_add(1, Ordering::SeqCst);
+        }
+        _ => {}
+    }
+
+    // `401` means the credential check ran and failed; without a header the
+    // route was served anonymously (public endpoint); with a header and no
+    // 401 the credentials were accepted.
+    let auth = if status == 401 {
+        "rejected"
+    } else if auth_header.is_none() {
+        "anonymous"
+    } else {
+        "accepted"
+    };
+    info!(
+        target: "access",
+        "rid={} method={} path={} status={} latency_ms={} auth={}",
+        request_id,
+        method,
+        path,
+        status,
+        started.elapsed().as_millis(),
+        auth
+    );
+
+    response
+}
+
+/// HTTP status code from the first line of a raw HTTP response.
+fn response_status(response: &str) -> u16 {
+    response
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .unwrap_or(0)
+}
+
+/// Route a request to its handler. Called only by `handle_request`, which
+/// wraps it with access logging and metrics.
+fn route_request(
     dashboard: &WebDashboard,
     db: &Arc<RwLock<Database>>,
     method: &str,
@@ -565,35 +741,45 @@ pub fn handle_request(
         .filter(|s| !s.is_empty())
         .collect();
 
-    // Determine if this endpoint requires authentication
-    let requires_auth = !matches!(
-        path_segments.as_slice(),
-        ["api"] | ["api", "health"]           // health checks
-            | ["api", "auth", "login"]         // JWT login
-            | ["api", "users", "login"]        // legacy login (backward compat)
-            | ["api", "users", "register"] // user registration (first-time setup)
-            | ["api", "shared", _] // public share links (token-gated)
-    );
-
-    // Verify JWT for authenticated endpoints
-    if requires_auth {
-        if let Err(resp) = verify_jwt_auth(&dashboard.jwt_secret, auth_header, origin) {
-            return resp;
+    // <<< AGENT-3 AUTH GATE >>>
+    // Route → required role, then verify the JWT and authorize its claims.
+    // Default is `Authenticated`; `Public` covers health/login/register/
+    // share-link/OAuth-callback/AGENT-4 probes, `Admin` is the narrow table
+    // in `security::required_role`.
+    let required = security::required_role(method, &path_segments);
+    let claims: Option<security::Claims> = match required {
+        security::RequiredRole::Public => None,
+        _ => match verify_jwt_auth(dashboard, auth_header, origin) {
+            Ok(claims) => Some(claims),
+            Err(resp) => return resp,
+        },
+    };
+    if let Some(claims) = &claims {
+        if let Err(reason) = security::authorize(claims, required) {
+            return json_error(403, &format!("Forbidden: {}", reason), origin);
         }
     }
+    // <<< /AGENT-3 AUTH GATE >>>
 
-    // ─── Sync run lifecycle (lockless) ───────────────────────────────
+    // <<< AGENT-2 ROUTES: sync run lifecycle (lockless) >>>
     // The sync pipeline acquires its own per-file locks, so a run must not
     // hold the request lock (it would deadlock). These arms therefore return
-    // before the database lock is taken.
+    // before the database lock is taken; where a handler needs the database
+    // it takes (and releases) its own short-lived lock internally.
     match path_segments.as_slice() {
         ["api", "sync", "status"] if method == "GET" => {
-            let progress = api::sync_api::progress(dashboard.sync_state());
+            // Lazily start the auto-sync scheduler (item 11): the first
+            // contact with the sync API arms the background scan.
+            cybermanju_sync::scheduler::ensure_started(Arc::clone(db));
+            let progress = api::sync_api::latest_progress(dashboard.sync_state());
+            let provider = cybermanju_sync::state::RunRegistry::global()
+                .latest()
+                .map(|run| run.config_id.clone());
             let status = serde_json::json!({
                 "syncEnabled": true,
                 "status": progress.status,
                 "lastSync": progress.started_at,
-                "provider": null,
+                "provider": provider,
             });
             return http_response(
                 200,
@@ -603,23 +789,57 @@ pub fn handle_request(
             );
         }
         ["api", "sync", "progress"] if method == "GET" => {
-            return json_ok(&api::sync_api::progress(dashboard.sync_state()), origin);
-        }
-        ["api", "sync", "cancel"] if method == "POST" => {
-            return json_ok(&api::sync_api::cancel(dashboard.sync_state()), origin);
-        }
-        ["api", "sync", "start"] if method == "POST" => {
-            let req: api::sync_api::StartRequest = json_body!(body, origin);
-            return api_response(
-                api::sync_api::start(
-                    db,
-                    &dashboard.compression,
-                    dashboard.sync_state(),
-                    &req.config_id,
-                    req.file_ids,
-                ),
+            cybermanju_sync::scheduler::ensure_started(Arc::clone(db));
+            return json_ok(
+                &api::sync_api::latest_progress(dashboard.sync_state()),
                 origin,
             );
+        }
+        ["api", "sync", "cancel"] if method == "POST" => {
+            // Empty body (and the legacy `{}`) means "cancel the latest run".
+            let req: api::sync_api::CancelRequest = if body.trim().is_empty() {
+                Default::default()
+            } else {
+                json_body!(body, origin)
+            };
+            return json_ok(&api::sync_api::cancel_job(req.job_id.as_deref()), origin);
+        }
+        ["api", "sync", "start"] if method == "POST" => {
+            // 202 + job id — the pipeline runs on a worker thread; the
+            // request thread must never wait on a provider.
+            let req: api::sync_api::StartRequest = json_body!(body, origin);
+            return match api::sync_api::start_job(db, &req.config_id, req.file_ids) {
+                Ok(job) => http_response(
+                    202,
+                    "application/json",
+                    &serde_json::to_string(&job).unwrap_or_else(|_| "{}".to_string()),
+                    origin,
+                ),
+                Err(e) => api_response::<()>(Err(e), origin),
+            };
+        }
+        ["api", "sync", "jobs", job_id] if method == "GET" => {
+            return api_response(api::sync_api::job(db, job_id), origin);
+        }
+        ["api", "sync", "runs"] if method == "GET" => {
+            return api_response(api::sync_api::runs(db, 20), origin);
+        }
+        ["api", "sync", "restore"] if method == "POST" => {
+            let req: api::sync_api::RestoreRequest = json_body!(body, origin);
+            return api_response(api::sync_api::restore(db, req), origin);
+        }
+        ["api", "sync", "remote"] if method == "DELETE" => {
+            let req: api::sync_api::RemoteDeleteRequest = json_body!(body, origin);
+            return match api::sync_api::delete_remote(db, req) {
+                Ok(value) => json_ok(&value, origin),
+                // Honest 501: a backend that cannot delete says
+                // `unsupported: …` and must not be dressed up as a 400.
+                Err(e) if e.starts_with("unsupported:") => json_error(501, &e, origin),
+                Err(e) => api_response::<bool>(Err(e), origin),
+            };
+        }
+        ["api", "sync", "usage", config_id] if method == "GET" => {
+            return api_response(api::sync_api::usage(db, config_id), origin);
         }
         ["api", "sync", "test"] if method == "POST" => {
             let req: api::sync_api::ConfigRequest = json_body!(body, origin);
@@ -634,6 +854,7 @@ pub fn handle_request(
         }
         _ => {}
     }
+    // <<< /AGENT-2 ROUTES >>>
 
     // Take the database lock for the duration of the request. Readers share
     // the lock; writers (POST/PUT/DELETE) take it exclusively. A poisoned lock
@@ -656,11 +877,19 @@ pub fn handle_request(
     match path_segments.as_slice() {
         // ─── Auth endpoint (JWT login) ────────────────────────────
         ["api", "auth", "login"] | ["api", "users", "login"] if method == "POST" => {
-            login_user(db, body, &dashboard.jwt_secret, origin)
+            login_user(db, body, dashboard, origin)
         }
 
         // ─── User registration ────────────────────────────────────
-        ["api", "users", "register"] if method == "POST" => register_user_web(db, body, origin),
+        // Public, but bootstrap-only inside the handler and the granted
+        // role can never be `admin` (see P0-1).
+        ["api", "users", "register"] if method == "POST" => register_user_web(
+            db,
+            body,
+            None,
+            api::users::RegistrationMode::Bootstrap,
+            origin,
+        ),
 
         // ─── File endpoints ───────────────────────────────────────
         ["api", "files"] if method == "GET" => {
@@ -724,7 +953,21 @@ pub fn handle_request(
 
         // ─── Trash endpoints ─────────────────────────────────────
         ["api", "trash"] if method == "GET" => api_response(api::trash::list(db), origin),
-        ["api", "trash"] if method == "DELETE" => api_response(api::trash::empty(db), origin),
+        // <<< AGENT-3 AUDIT: empty-trash is admin-only (RBAC table) and
+        // now records who did it >>>
+        ["api", "trash"] if method == "DELETE" => {
+            let actor = claims.as_ref().map(|c| c.user_id.clone());
+            let result = api::trash::empty(db).inspect(|count| {
+                let _ = db.log_audit(
+                    "trash_empty",
+                    "trash",
+                    "*",
+                    actor.as_deref(),
+                    Some(serde_json::json!({ "count": count })),
+                );
+            });
+            api_response(result, origin)
+        }
         ["api", "trash", id] if method == "DELETE" => {
             api_response(api::trash::delete(db, id), origin)
         }
@@ -739,13 +982,20 @@ pub fn handle_request(
 
         // ─── Audit log ───────────────────────────────────────────
         ["api", "audit"] if method == "GET" => {
-            let limit = parse_query_param(query, "limit").and_then(|v| v.parse::<u32>().ok());
+            // <<< AGENT-3 VALIDATION: cap the page size >>>
+            let limit = parse_query_param(query, "limit")
+                .and_then(|v| v.parse::<u32>().ok())
+                .map(|v| v.min(1_000));
             let entity_type = parse_query_param(query, "entityType");
             api_response(api::audit::list(db, limit, entity_type.as_deref()), origin)
         }
 
         // ─── Share links ─────────────────────────────────────────
-        ["api", "share-links"] if method == "GET" => api_response(api::share::list(db), origin),
+        // <<< AGENT-3 SHARE: listing is admin-only, URLs are built from the
+        // request origin instead of a hardcoded localhost >>>
+        ["api", "share-links"] if method == "GET" => {
+            api_response(api::share::list_with_base(db, origin), origin)
+        }
         ["api", "share-links"] if method == "POST" => {
             #[derive(Deserialize)]
             #[serde(rename_all = "camelCase")]
@@ -754,16 +1004,67 @@ pub fn handle_request(
                 expires_in_hours: Option<u64>,
             }
             let req: ShareBody = json_body!(body, origin);
-            api_response(
-                api::share::generate(db, &req.file_id, req.expires_in_hours),
-                origin,
-            )
+            if let Err(e) = security::validate_id(&req.file_id) {
+                return json_error(400, &e, origin);
+            }
+            let actor = claims.as_ref().map(|c| c.user_id.clone());
+            let result =
+                api::share::generate(db, &req.file_id, req.expires_in_hours).inspect(|link| {
+                    let _ = db.log_audit(
+                        "share_grant",
+                        "file",
+                        &req.file_id,
+                        actor.as_deref(),
+                        Some(
+                            serde_json::json!({ "shareId": link.id, "expiresAt": link.expires_at }),
+                        ),
+                    );
+                });
+            api_response(result, origin)
         }
-        ["api", "shared", token] if method == "GET" => match api::share::resolve(db, token) {
-            Ok(Some(node)) => json_ok(&node, origin),
-            Ok(None) => json_error(404, "Share link not found", origin),
-            Err(e) => api_response::<serde_json::Value>(Err(e), origin),
-        },
+        // <<< AGENT-3 SHARE: revoke (admin-only) >>>
+        ["api", "share-links", id] if method == "DELETE" => {
+            if let Err(e) = security::validate_id(id) {
+                return json_error(400, &e, origin);
+            }
+            let actor = claims.as_ref().map(|c| c.user_id.clone());
+            let result = api::share::revoke(db, id).inspect(|removed| {
+                let _ = db.log_audit(
+                    "share_revoke",
+                    "share_link",
+                    id,
+                    actor.as_deref(),
+                    Some(serde_json::json!({ "revoked": removed })),
+                );
+            });
+            api_response(result, origin)
+        }
+        // <<< AGENT-3 SHARE: metadata (token-gated, public) >>>
+        ["api", "shared", token] if method == "GET" => {
+            if let Err(e) = security::validate_share_token(token) {
+                return json_error(400, &e, origin);
+            }
+            match api::share::resolve(db, token) {
+                Ok(Some(node)) => json_ok(&node, origin),
+                Ok(None) => json_error(404, "Share link not found", origin),
+                Err(e) if e.contains("expired") => json_error(410, &e, origin),
+                Err(e) => json_error(400, &e, origin),
+            }
+        }
+        // <<< AGENT-3 SHARE: the link actually serves bytes now >>>
+        ["api", "shared", token, "content"] if method == "GET" => {
+            if let Err(e) = security::validate_share_token(token) {
+                return json_error(400, &e, origin);
+            }
+            match api::share::content(db, token) {
+                Ok(Some(payload)) => {
+                    http_response_bytes(200, &payload.mime_type, &payload.bytes, origin)
+                }
+                Ok(None) => json_error(404, "Share link not found", origin),
+                Err(e) if e.contains("expired") => json_error(410, &e, origin),
+                Err(e) => json_error(400, &e, origin),
+            }
+        }
 
         // ─── Batch operations ────────────────────────────────────
         ["api", "batch", "delete"] if method == "POST" => {
@@ -881,19 +1182,7 @@ pub fn handle_request(
         }
 
         // ─── Encryption endpoints ─────────────────────────────────
-        ["api", "encryption", "status"] if method == "GET" => {
-            let status = serde_json::json!({
-                "available": true,
-                "supported_algorithms": ["kyber512", "kyber768", "kyber1024", "hybrid", "ml_dsa44", "ml_dsa65", "ml_dsa87", "classical_sign"],
-                "engine": "pqcrypto-mlkem (ML-KEM FIPS 203) + ml-dsa (ML-DSA FIPS 204) post-quantum cryptography"
-            });
-            http_response(
-                200,
-                "application/json",
-                &serde_json::to_string(&status).unwrap_or_default(),
-                origin,
-            )
-        }
+        ["api", "encryption", "status"] if method == "GET" => encryption_status(origin),
         ["api", "encryption", "keys"] if method == "GET" => {
             // SECURITY: Never expose private keys
             list_encryption_keys_safe(db, origin)
@@ -903,11 +1192,15 @@ pub fn handle_request(
         ["api", "geo-files"] if method == "GET" => list_geo_files(db, origin),
 
         // ─── Search ───────────────────────────────────────────────
+        // <<< AGENT-3 VALIDATION: limit/offset are clamped — a caller can
+        // no longer ask for an unbounded scan >>>
         ["api", "search", "suggest"] if method == "GET" => {
             let prefix = parse_query_param(query, "q").unwrap_or_default();
-            let limit = parse_query_param(query, "limit")
-                .and_then(|v| v.parse::<usize>().ok())
-                .unwrap_or(10);
+            let limit = security::clamp_limit(
+                parse_query_param(query, "limit").and_then(|v| v.parse::<usize>().ok()),
+                10,
+                security::MAX_SEARCH_LIMIT,
+            );
             api_response(
                 api::search_api::suggest(&dashboard.search_index, db, &prefix, limit),
                 origin,
@@ -915,11 +1208,14 @@ pub fn handle_request(
         }
         ["api", "search", "paginated"] if method == "GET" => {
             let q = parse_query_param(query, "q").unwrap_or_default();
-            let limit = parse_query_param(query, "limit")
-                .and_then(|v| v.parse::<usize>().ok())
-                .unwrap_or(20);
+            let limit = security::clamp_limit(
+                parse_query_param(query, "limit").and_then(|v| v.parse::<usize>().ok()),
+                20,
+                security::MAX_SEARCH_LIMIT,
+            );
             let offset = parse_query_param(query, "offset")
                 .and_then(|v| v.parse::<usize>().ok())
+                .map(|v| security::clamp_offset(Some(v)))
                 .unwrap_or(0);
             api_response(
                 api::search_api::search_paginated(&dashboard.search_index, db, &q, limit, offset),
@@ -928,8 +1224,12 @@ pub fn handle_request(
         }
         ["api", "search"] if method == "GET" => {
             let q = parse_query_param(query, "q").unwrap_or_default();
-            let limit = parse_query_param(query, "limit").and_then(|v| v.parse::<usize>().ok());
-            let offset = parse_query_param(query, "offset").and_then(|v| v.parse::<usize>().ok());
+            let limit = parse_query_param(query, "limit")
+                .and_then(|v| v.parse::<usize>().ok())
+                .map(|v| security::clamp_limit(Some(v), 20, security::MAX_SEARCH_LIMIT));
+            let offset = parse_query_param(query, "offset")
+                .and_then(|v| v.parse::<usize>().ok())
+                .map(|v| security::clamp_offset(Some(v)));
             api_response(
                 api::search_api::search(&dashboard.search_index, db, &q, limit, offset),
                 origin,
@@ -942,10 +1242,26 @@ pub fn handle_request(
         }
 
         // ─── User endpoints ──────────────────────────────────────
+        // Listing is any authenticated session; *management* (create /
+        // delete / role change) is admin-only via the RBAC table.
         ["api", "users"] if method == "GET" => list_users_safe(db, origin),
-        ["api", "users"] if method == "POST" => register_user_web(db, body, origin),
+        // <<< AGENT-3 RBAC: admin-created user, role recorded in the audit log >>>
+        ["api", "users"] if method == "POST" => register_user_web(
+            db,
+            body,
+            claims.as_ref(),
+            api::users::RegistrationMode::AdminCreated,
+            origin,
+        ),
         ["api", "users", id] if method == "DELETE" => {
-            api_response(api::users::delete(db, id), origin)
+            if let Err(e) = security::validate_id(id) {
+                return json_error(400, &e, origin);
+            }
+            let actor = claims.as_ref().map(|c| c.user_id.clone());
+            let result = api::users::delete(db, id).inspect(|_| {
+                let _ = db.log_audit("user_delete", "user", id, actor.as_deref(), None);
+            });
+            api_response(result, origin)
         }
         ["api", "users", id, "role"] if method == "POST" => {
             #[derive(Deserialize)]
@@ -953,8 +1269,19 @@ pub fn handle_request(
                 role: String,
             }
             let req: RoleBody = json_body!(body, origin);
-            match api::users::update_role(db, id, req.role) {
+            if let Err(e) = security::validate_role(&req.role) {
+                return json_error(400, &e, origin);
+            }
+            let actor = claims.as_ref().map(|c| c.user_id.clone());
+            match api::users::update_role(db, id, req.role.clone()) {
                 Ok(mut user) => {
+                    let _ = db.log_audit(
+                        "user_role_change",
+                        "user",
+                        id,
+                        actor.as_deref(),
+                        Some(serde_json::json!({ "role": req.role })),
+                    );
                     user.password_hash.clear();
                     json_ok(&user, origin)
                 }
@@ -975,10 +1302,38 @@ pub fn handle_request(
         }
         ["api", "sync", "configs"] if method == "POST" => {
             let req: api::sync_api::ConfigRequest = json_body!(body, origin);
-            api_response(api::sync_api::save_config(db, req.config), origin)
+            // <<< AGENT-3 SECRETS: `SyncConfig.token` is `skip_serializing`
+            // so it can never reach a client (P0-3) — which also means
+            // `save_config`'s JSON write would drop it. Deserialization still
+            // accepts the raw token from the body; put it back into the
+            // stored row after the save. >>>
+            let incoming_token = req.config.token.clone();
+            match api::sync_api::save_config(db, req.config) {
+                Ok(saved) => {
+                    if let Some(token) = incoming_token {
+                        if let Err(e) = restore_config_token(db, &saved.id, &token) {
+                            return json_error(500, &e, origin);
+                        }
+                    }
+                    json_ok(&saved, origin)
+                }
+                Err(e) => api_response::<cybermanju_types::sync::SyncConfig>(Err(e), origin),
+            }
         }
         ["api", "sync", "configs", id] if method == "DELETE" => {
-            api_response(api::sync_api::delete_config(db, id), origin)
+            // Admin-only (RBAC table) and audited — deleting a config
+            // removes the provider binding for good.
+            let actor = claims.as_ref().map(|c| c.user_id.clone());
+            let result = api::sync_api::delete_config(db, id).inspect(|_| {
+                let _ = db.log_audit(
+                    "sync_config_delete",
+                    "sync_config",
+                    id,
+                    actor.as_deref(),
+                    None,
+                );
+            });
+            api_response(result, origin)
         }
 
         // ─── Dashboard status ────────────────────────────────────
@@ -997,7 +1352,8 @@ pub fn handle_request(
                 "activeConnections": dashboard.active_connections.load(Ordering::SeqCst),
                 "bindAddress": dashboard.bind_addr,
                 "timestamp": now,
-                "version": "1.0.0",
+                // Single-sourced from the crate manifest — see AGENT-4 item 15.
+                "version": env!("CARGO_PKG_VERSION"),
             });
             http_response(
                 200,
@@ -1007,11 +1363,42 @@ pub fn handle_request(
             )
         }
 
+        // <<< AGENT-4 OPS: metrics (text exposition format, no extra deps) >>>
+        ["api", "metrics"] if method == "GET" => http_response(
+            200,
+            "text/plain; version=0.0.4; charset=utf-8",
+            &metrics_exposition(dashboard),
+            origin,
+        ),
+
+        // <<< AGENT-4 OPS: readiness — 200 only when db + index + disk are good >>>
+        ["api", "readyz"] if method == "GET" => {
+            let checks = readiness_checks(dashboard, db);
+            let ready = is_ready(&checks);
+            http_response(
+                if ready { 200 } else { 503 },
+                "application/json",
+                &serde_json::to_string(&serde_json::json!({
+                    "ready": ready,
+                    "checks": checks,
+                }))
+                .unwrap_or_default(),
+                origin,
+            )
+        }
+
         // ─── Root / health check ─────────────────────────────────
+        // Liveness: always 200 while the process is serving, with the same
+        // `service`/`status`/`timestamp` fields as before plus the real
+        // readiness checks. Readiness lives on GET /readyz (503 when red).
         ["api"] | ["api", "health"] if method == "GET" => {
+            let checks = readiness_checks(dashboard, db);
+            let ready = is_ready(&checks);
             let health = serde_json::json!({
                 "service": "Cybermanju Drive Web Dashboard",
-                "status": "ok",
+                "status": if ready { "ok" } else { "degraded" },
+                "ready": ready,
+                "checks": checks,
                 "timestamp": SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .map(|d| d.as_millis())
@@ -1025,20 +1412,218 @@ pub fn handle_request(
             )
         }
 
+        // ═══ AGENT-3 ROUTES ═════════════════════════════════════════
+        // Session revocation.
+        //
+        // `POST /api/auth/logout` is Authenticated by default, so `claims`
+        // is always present; the `None` arm is defensive only.
+        ["api", "auth", "logout"] if method == "POST" => match claims {
+            Some(claims) => {
+                dashboard.auth.revoke(&claims.jti, claims.exp);
+                let _ = db.log_audit(
+                    "logout",
+                    "user",
+                    &claims.user_id,
+                    Some(&claims.user_id),
+                    None,
+                );
+                json_ok(&serde_json::json!({ "ok": true }), origin)
+            }
+            None => json_error(401, "Not authenticated", origin),
+        },
+
+        // OAuth authorization-code + PKCE — begin the flow.
+        ["api", "sync", "oauth", provider, "start"] if method == "GET" => {
+            let config_id = parse_query_param(query, "configId").unwrap_or_default();
+            if let Err(e) = security::validate_id(&config_id) {
+                return json_error(400, &e, origin);
+            }
+            if !api::oauth::is_supported_provider(provider) {
+                return json_error(404, "Unknown OAuth provider", origin);
+            }
+            match api::oauth::start(&dashboard.auth, dashboard.port, provider, &config_id) {
+                Ok(start) => json_ok(&start, origin),
+                Err(e) => json_error(400, &e, origin),
+            }
+        }
+
+        // OAuth authorization-code + PKCE — redeem the redirect.
+        ["api", "sync", "oauth", provider, "callback"] if method == "GET" => {
+            let code = parse_query_param(query, "code").unwrap_or_default();
+            let state = parse_query_param(query, "state").unwrap_or_default();
+            if !api::oauth::is_supported_provider(provider) {
+                return http_response(
+                    400,
+                    "text/html; charset=utf-8",
+                    &api::oauth::error_page("Unknown OAuth provider"),
+                    origin,
+                );
+            }
+            match api::oauth::callback(db, &dashboard.auth, provider, &code, &state) {
+                Ok(html) => http_response(200, "text/html; charset=utf-8", &html, origin),
+                Err(e) => http_response(
+                    400,
+                    "text/html; charset=utf-8",
+                    &api::oauth::error_page(&e),
+                    origin,
+                ),
+            }
+        }
+        // ═══ /AGENT-3 ROUTES ═══════════════════════════════════════
+
         // ─── 404 ─────────────────────────────────────────────────
         _ => json_error(404, &format!("Not found: {} {}", method, path), origin),
     }
 }
 
+// ─── <<< AGENT-4 OPS: readiness, metrics, encryption capabilities ────
+
+/// Real readiness checks for `GET /readyz` and `GET /api/health`:
+/// `database` (redb opens a read transaction), `searchIndex` (the Tantivy
+/// index is attached and readable) and `diskWritable` (a probe file can be
+/// created in the data directory). Every value is `"ok"`, `"error"` or
+/// `"not-configured"`; only an all-`"ok"` map is ready.
+fn readiness_checks(dashboard: &WebDashboard, db: &Database) -> serde_json::Value {
+    let database = if db.begin_read().is_ok() {
+        "ok"
+    } else {
+        "error"
+    };
+
+    let search_index = match &dashboard.search_index {
+        Some(index) => {
+            let open = index
+                .read()
+                .map(|guard| guard.doc_count().is_ok())
+                .unwrap_or(false);
+            if open {
+                "ok"
+            } else {
+                "error"
+            }
+        }
+        None => "not-configured",
+    };
+
+    let disk_writable = if data_dir_writable() { "ok" } else { "error" };
+
+    serde_json::json!({
+        "database": database,
+        "searchIndex": search_index,
+        "diskWritable": disk_writable,
+    })
+}
+
+/// True when every readiness check reports `"ok"`.
+fn is_ready(checks: &serde_json::Value) -> bool {
+    checks
+        .as_object()
+        .map(|map| map.values().all(|v| v == "ok"))
+        .unwrap_or(false)
+}
+
+/// Write and delete a probe file in the data directory to prove it is
+/// writable at runtime. The directory is the parent of `DB_PATH` (set by the
+/// container image) and falls back to the process temp dir on desktop.
+fn data_dir_writable() -> bool {
+    let dir = std::env::var("DB_PATH")
+        .ok()
+        .map(std::path::PathBuf::from)
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_else(std::env::temp_dir);
+
+    let probe = dir.join(format!(".readyz-{}", std::process::id()));
+    match std::fs::write(&probe, b"ok") {
+        Ok(()) => std::fs::remove_file(&probe).is_ok(),
+        Err(_) => false,
+    }
+}
+
+/// Prometheus text exposition of the process-wide counters. Deliberately
+/// dependency-free: plain `log`/`std` counters, no metrics crate.
+fn metrics_exposition(dashboard: &WebDashboard) -> String {
+    format!(
+        "# HELP cybermanju_http_requests_total Requests routed by the REST API.\n\
+         # TYPE cybermanju_http_requests_total counter\n\
+         cybermanju_http_requests_total {requests}\n\
+         # HELP cybermanju_http_responses_4xx_total Responses with a 4xx status.\n\
+         # TYPE cybermanju_http_responses_4xx_total counter\n\
+         cybermanju_http_responses_4xx_total {r4xx}\n\
+         # HELP cybermanju_http_responses_5xx_total Responses with a 5xx status.\n\
+         # TYPE cybermanju_http_responses_5xx_total counter\n\
+         cybermanju_http_responses_5xx_total {r5xx}\n\
+         # HELP cybermanju_active_connections In-flight HTTP connections.\n\
+         # TYPE cybermanju_active_connections gauge\n\
+         cybermanju_active_connections {active}\n",
+        requests = REQUESTS_TOTAL.load(Ordering::SeqCst),
+        r4xx = RESPONSES_4XX.load(Ordering::SeqCst),
+        r5xx = RESPONSES_5XX.load(Ordering::SeqCst),
+        active = dashboard.active_connections.load(Ordering::SeqCst),
+    )
+}
+
+/// `GET /api/encryption/status` — capabilities of the crypto engine that is
+/// **linked into this binary**. The list is derived from
+/// `cybermanju_crypto::EncryptionAlgo`, so it can only describe algorithms
+/// that are really compiled in: dropping the `cybermanju-crypto` dependency
+/// makes this function stop compiling instead of quietly lying.
+fn encryption_status(origin: Option<&str>) -> String {
+    use cybermanju_crypto::EncryptionAlgo;
+
+    let algorithms = [
+        EncryptionAlgo::Kyber1024,
+        EncryptionAlgo::Hybrid,
+        EncryptionAlgo::MlDsa44,
+        EncryptionAlgo::MlDsa65,
+        EncryptionAlgo::MlDsa87,
+        EncryptionAlgo::ClassicalSign,
+        EncryptionAlgo::Aes256,
+    ];
+
+    let status = serde_json::json!({
+        "available": true,
+        "supported_algorithms": algorithms.iter().map(algorithm_id).collect::<Vec<_>>(),
+        "engine": "cybermanju-crypto — ML-KEM (FIPS 203), ML-DSA (FIPS 204), ChaCha20Poly1305",
+        "post_quantum": algorithms
+            .iter()
+            .filter(|a| !matches!(**a, EncryptionAlgo::ClassicalSign | EncryptionAlgo::Aes256))
+            .map(algorithm_id)
+            .collect::<Vec<_>>(),
+    });
+
+    http_response(
+        200,
+        "application/json",
+        &serde_json::to_string(&status).unwrap_or_default(),
+        origin,
+    )
+}
+
+/// Stable identifier for each algorithm the linked crypto crate implements.
+fn algorithm_id(algo: &cybermanju_crypto::EncryptionAlgo) -> &'static str {
+    use cybermanju_crypto::EncryptionAlgo as Algo;
+    match algo {
+        Algo::Kyber1024 => "ml_kem_1024",
+        Algo::Hybrid => "hybrid_ml_kem_768_x25519",
+        Algo::MlDsa44 => "ml_dsa_44",
+        Algo::MlDsa65 => "ml_dsa_65",
+        Algo::MlDsa87 => "ml_dsa_87",
+        Algo::ClassicalSign => "hmac_sha512",
+        Algo::Aes256 => "chacha20poly1305",
+    }
+}
+
 // ─── JWT Authentication ─────────────────────────────────────────────
 
-/// Verify the JWT token from the Authorization header.
-/// Returns Ok(()) on success, Err(http_response_string) on failure.
+// <<< AGENT-3 RBAC >>>
+/// Verify the JWT from the Authorization header and return its [`Claims`].
+/// Returns `Err(http_response_string)` on any failure — missing/malformed
+/// header, bad signature, expiry, or a token already revoked by logout.
 fn verify_jwt_auth(
-    jwt_secret: &[u8; 32],
+    dashboard: &WebDashboard,
     auth_header: Option<&str>,
     origin: Option<&str>,
-) -> Result<(), String> {
+) -> Result<security::Claims, String> {
     let token = match auth_header {
         Some(h) => {
             // Expected format: "Bearer <token>"
@@ -1046,7 +1631,11 @@ fn verify_jwt_auth(
                 .strip_prefix("Bearer ")
                 .or_else(|| h.strip_prefix("bearer "))
             {
-                t.trim()
+                let t = t.trim();
+                if t.len() > security::MAX_AUTH_HEADER_BYTES {
+                    return Err(json_error(401, "Authorization header too long", origin));
+                }
+                t
             } else {
                 return Err(json_error(
                     401,
@@ -1060,9 +1649,20 @@ fn verify_jwt_auth(
         }
     };
 
-    let decoding_key = DecodingKey::from_secret(jwt_secret);
-    match decode::<JwtClaims>(token, &decoding_key, &Validation::default()) {
-        Ok(_token_data) => Ok(()),
+    let decoding_key = DecodingKey::from_secret(&dashboard.jwt_secret);
+    let mut validation = Validation::default();
+    validation.set_required_spec_claims(&["exp", "sub"]);
+    match decode::<security::Claims>(token, &decoding_key, &validation) {
+        Ok(token_data) => {
+            let claims = token_data.claims;
+            if claims.is_expired() {
+                return Err(json_error(401, "Token expired", origin));
+            }
+            if dashboard.auth.is_revoked(&claims.jti) {
+                return Err(json_error(401, "Token has been revoked", origin));
+            }
+            Ok(claims)
+        }
         Err(e) => Err(json_error(
             401,
             &format!("Invalid or expired token: {}", e),
@@ -1071,7 +1671,8 @@ fn verify_jwt_auth(
     }
 }
 
-/// Create a JWT token for an authenticated user.
+/// Create a JWT token for an authenticated user. Every token carries a
+/// unique `jti` so `POST /api/auth/logout` can revoke it individually.
 fn create_jwt(
     jwt_secret: &[u8; 32],
     user_id: &str,
@@ -1083,62 +1684,52 @@ fn create_jwt(
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
-    let claims = JwtClaims {
+    let claims = security::Claims {
         sub: username.to_string(),
         role: role.to_string(),
         user_id: user_id.to_string(),
         iat: now_secs,
         exp: now_secs + JWT_EXPIRY_SECS,
+        jti: uuid::Uuid::new_v4().to_string(),
     };
 
     let encoding_key = EncodingKey::from_secret(jwt_secret);
     encode(&Header::default(), &claims, &encoding_key)
         .map_err(|e| format!("JWT encoding error: {}", e))
 }
+// <<< /AGENT-3 RBAC >>>
 
 // ─── Rate Limiting ──────────────────────────────────────────────────
 
 /// Check and update the rate limit for a client IP.
 /// Returns true if the request is allowed, false if rate limited.
+///
+/// Thin wrapper over `security::enforce_rate_limit` (the single
+/// implementation shared with the Docker transport).
 pub fn check_rate_limit(
     rate_limits: &Mutex<HashMap<String, (u32, Instant)>>,
     client_ip: &str,
 ) -> bool {
-    let mut limits = match rate_limits.lock() {
-        Ok(g) => g,
-        Err(_) => return false, // If lock is poisoned, allow the request (fail open)
-    };
-    let now = Instant::now();
-
-    // Clean up stale entries (older than 2x the window)
-    limits.retain(|_, (_, ts)| now.duration_since(*ts).as_secs() < RATE_LIMIT_WINDOW_SECS * 2);
-
-    let entry = limits.entry(client_ip.to_string()).or_insert((0, now));
-
-    // Reset window if expired
-    if now.duration_since(entry.1).as_secs() >= RATE_LIMIT_WINDOW_SECS {
-        *entry = (0, now);
-    }
-
-    entry.0 += 1;
-    entry.0 <= RATE_LIMIT_MAX
+    security::enforce_rate_limit(rate_limits, client_ip)
 }
 
 // ─── CORS ───────────────────────────────────────────────────────────
 
 /// Build the CORS preflight response (OPTIONS).
+///
+/// The origin is re-checked against `ALLOWED_ORIGINS` here rather than
+/// trusted from the caller, so a transport that forwards a raw `Origin`
+/// header (the Docker server) can never get a reflected preflight.
 fn cors_preflight_response(origin: Option<&str>) -> String {
-    let cors_headers = match origin {
-        Some(o) if !o.is_empty() => {
-            format!(
-                "Access-Control-Allow-Origin: {}\r\n\
-                 Access-Control-Allow-Headers: Content-Type, Authorization\r\n\
-                 Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n\
-                 Access-Control-Max-Age: 86400\r\n",
-                o
-            )
-        }
-        _ => String::new(),
+    let cors_headers = match security::cors_origin_allowed(origin) {
+        Some(o) => format!(
+            "Access-Control-Allow-Origin: {}\r\n\
+             Access-Control-Allow-Headers: Content-Type, Authorization\r\n\
+             Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n\
+             Access-Control-Max-Age: 86400\r\n",
+            o
+        ),
+        None => String::new(),
     };
 
     format!(
@@ -1336,8 +1927,11 @@ fn list_users_safe(db: &Database, origin: Option<&str>) -> String {
 }
 
 /// Login endpoint — expects JSON body: { "username": "...", "password": "..." }
-/// Verifies argon2 password hash and returns a JWT token.
-fn login_user(db: &Database, body: &str, jwt_secret: &[u8; 32], origin: Option<&str>) -> String {
+///
+/// <<< AGENT-3 LOGIN: per-account backoff, the shared argon2id verification
+/// path (including legacy BLAKE3 migration) and audit events for both
+/// success and failure. >>>
+fn login_user(db: &Database, body: &str, dashboard: &WebDashboard, origin: Option<&str>) -> String {
     let req: serde_json::Value = match serde_json::from_str(body) {
         Ok(v) => v,
         Err(e) => return json_error(400, &format!("Invalid JSON: {}", e), origin),
@@ -1350,76 +1944,46 @@ fn login_user(db: &Database, body: &str, jwt_secret: &[u8; 32], origin: Option<&
         return json_error(400, "username and password are required", origin);
     }
 
-    // Find user by username
-    let tx = match db.begin_read() {
-        Ok(tx) => tx,
-        Err(e) => return json_error(500, &format!("Read error: {}", e), origin),
-    };
-    let table = match tx.open_table(Database::get_users_table()) {
-        Ok(t) => t,
-        Err(e) => return json_error(500, &format!("Table open error: {}", e), origin),
-    };
+    let backoff_key = username.to_ascii_lowercase();
+    let locked_for = dashboard.auth.login_locked_secs(&backoff_key);
+    if locked_for > 0 {
+        return json_error(
+            429,
+            &format!("Too many failed attempts; retry in {} seconds", locked_for),
+            origin,
+        );
+    }
 
-    let mut found_user: Option<serde_json::Value> = None;
-    let iter = match table.iter() {
-        Ok(i) => i,
-        Err(e) => return json_error(500, &format!("Iteration error: {}", e), origin),
-    };
-    for (_, value) in iter.flatten() {
-        if let Ok(user) = serde_json::from_str::<serde_json::Value>(value.value()) {
-            if user.get("username").and_then(|v| v.as_str()) == Some(username) {
-                found_user = Some(user);
-                break;
+    match api::users::authenticate(db, username, password) {
+        Ok(outcome) => {
+            dashboard.auth.clear_login_failures(&backoff_key);
+            if outcome.upgraded {
+                info!(
+                    "Upgraded legacy BLAKE3 password hash to argon2id for user '{}'",
+                    username
+                );
             }
-        }
-    }
-    drop(tx);
 
-    let user = match found_user {
-        Some(u) => u,
-        None => return json_error(401, "Invalid credentials", origin),
-    };
+            let user = outcome.user;
+            let token =
+                match create_jwt(&dashboard.jwt_secret, &user.id, &user.username, &user.role) {
+                    Ok(t) => t,
+                    Err(e) => return json_error(500, &e, origin),
+                };
 
-    // Check active status
-    if user.get("isActive").and_then(|v| v.as_bool()) == Some(false) {
-        return json_error(403, "User account is deactivated", origin);
-    }
-
-    // Verify password using argon2
-    let password_hash = match user.get("passwordHash").and_then(|v| v.as_str()) {
-        Some(h) => h,
-        None => return json_error(500, "User record has no password hash", origin),
-    };
-
-    match argon2_verify(password, password_hash) {
-        Ok(true) => {
-            // Issue JWT token instead of insecure blake3 hash
-            let user_id = user
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let role = user
-                .get("role")
-                .and_then(|v| v.as_str())
-                .unwrap_or("user")
-                .to_string();
-            let display_name = user
-                .get("displayName")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-
-            let token = match create_jwt(jwt_secret, &user_id, username, &role) {
-                Ok(t) => t,
-                Err(e) => return json_error(500, &e, origin),
-            };
+            let _ = db.log_audit(
+                "login",
+                "user",
+                &user.id,
+                Some(&user.id),
+                Some(serde_json::json!({ "username": user.username })),
+            );
 
             let response = serde_json::json!({
-                "userId": user_id,
-                "username": username,
-                "role": role,
-                "displayName": display_name,
+                "userId": user.id,
+                "username": user.username,
+                "role": user.role,
+                "displayName": user.display_name,
                 "token": token,
                 "tokenType": "Bearer",
                 "expiresIn": JWT_EXPIRY_SECS,
@@ -1431,15 +1995,39 @@ fn login_user(db: &Database, body: &str, jwt_secret: &[u8; 32], origin: Option<&
                 origin,
             )
         }
-        Ok(false) => json_error(401, "Invalid credentials", origin),
-        Err(e) => json_error(500, &format!("Password verification error: {}", e), origin),
+        Err(e) => {
+            dashboard.auth.record_login_failure(&backoff_key);
+            let _ = db.log_audit(
+                "login_failed",
+                "user",
+                username,
+                None,
+                Some(serde_json::json!({ "username": username })),
+            );
+            if e == "Invalid credentials" {
+                // Identical message for unknown user and wrong password.
+                json_error(401, "Invalid credentials", origin)
+            } else if e.contains("deactivated") {
+                json_error(403, &e, origin)
+            } else {
+                json_error(400, &e, origin)
+            }
+        }
     }
 }
 
-/// Register endpoint — expects JSON body:
 /// Register a user from a JSON body — shared by `/api/users/register`
 /// (first-run setup) and `POST /api/users` (admin creation).
-fn register_user_web(db: &Database, body: &str, origin: Option<&str>) -> String {
+///
+/// `mode` decides whether registration is open at all and whether the role
+/// may be `admin`; `claims` is the acting admin for the audit trail.
+fn register_user_web(
+    db: &Database,
+    body: &str,
+    claims: Option<&security::Claims>,
+    mode: api::users::RegistrationMode,
+    origin: Option<&str>,
+) -> String {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct RegisterBody {
@@ -1454,10 +2042,35 @@ fn register_user_web(db: &Database, body: &str, origin: Option<&str>) -> String 
         Err(e) => return json_error(400, &format!("Invalid JSON: {}", e), origin),
     };
 
-    match api::users::register(db, req.username, req.password, req.display_name, req.role) {
+    let requested_role = req.role.clone();
+    match api::users::register(
+        db,
+        req.username,
+        req.password,
+        req.display_name,
+        req.role,
+        mode,
+    ) {
         Ok(mut user) => {
             // SECURITY: never return the password hash to a client
             user.password_hash.clear();
+            let actor = claims.map(|c| c.user_id.clone());
+            let _ = db.log_audit(
+                "user_register",
+                "user",
+                &user.id,
+                actor.as_deref(),
+                Some(serde_json::json!({
+                    "username": user.username,
+                    "role": user.role,
+                    "requestedRole": requested_role,
+                    "mode": match mode {
+                        api::users::RegistrationMode::Bootstrap => "bootstrap",
+                        api::users::RegistrationMode::AdminCreated => "adminCreated",
+                        api::users::RegistrationMode::LocalIpc => "localIpc",
+                    },
+                })),
+            );
             http_response(
                 201,
                 "application/json",
@@ -1468,12 +2081,49 @@ fn register_user_web(db: &Database, body: &str, origin: Option<&str>) -> String 
         Err(e) => {
             let status = if e.contains("already exists") {
                 409
+            } else if e.contains("Registration is closed")
+                || e.contains("cannot grant the admin role")
+            {
+                403
             } else {
                 400
             };
             json_error(status, &e, origin)
         }
     }
+}
+
+// <<< AGENT-3 SECRETS >>>
+/// Write the provider token back into a stored sync configuration.
+///
+/// `SyncConfig.token` carries `#[serde(skip_serializing)]` (P0-3), so
+/// `save_config`'s row write omits it. This re-reads the row, merges the raw
+/// token and writes it back — the token is still only ever *read* from the
+/// database, never serialized to a client.
+///
+/// Temporary: AGENT-2 is moving provider secrets to a side table, after
+/// which this shim (and the call site above) can be deleted.
+fn restore_config_token(db: &Database, config_id: &str, token: &str) -> Result<(), String> {
+    let tx = db.begin_write().map_err(|e| e.to_string())?;
+    {
+        let mut table = tx
+            .open_table(Database::get_sync_configs_table())
+            .map_err(|e| e.to_string())?;
+        let raw = match table.get(config_id).map_err(|e| e.to_string())? {
+            Some(guard) => guard.value().to_string(),
+            None => return Err(format!("Sync config not found: {}", config_id)),
+        };
+        let mut value: serde_json::Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+        if !value.is_object() {
+            return Err("Stored sync configuration is malformed".to_string());
+        }
+        value["token"] = serde_json::Value::String(token.to_string());
+        let patched = serde_json::to_string(&value).map_err(|e| e.to_string())?;
+        table
+            .insert(config_id, patched.as_str())
+            .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())
 }
 
 fn set_permission_web(db: &Database, body: &str, origin: Option<&str>) -> String {
@@ -1660,21 +2310,6 @@ fn get_permissions_for_file(db: &Database, file_id: &str, origin: Option<&str>) 
     http_response(200, "application/json", &body, origin)
 }
 
-// ─── Argon2 helpers ──────────────────────────────────────────────────
-
-fn argon2_verify(password: &str, hash: &str) -> Result<bool, String> {
-    use argon2::{
-        password_hash::{PasswordHash, PasswordVerifier},
-        Argon2,
-    };
-
-    let parsed = PasswordHash::new(hash).map_err(|e| format!("Invalid hash: {}", e))?;
-    match Argon2::default().verify_password(password.as_bytes(), &parsed) {
-        Ok(()) => Ok(true),
-        Err(_) => Ok(false),
-    }
-}
-
 // ─── Access level helper ──────────────────────────────────────────────
 
 fn access_level_sufficient(granted: &str, required: &str) -> bool {
@@ -1686,46 +2321,79 @@ fn access_level_sufficient(granted: &str, required: &str) -> bool {
 
 // ─── HTTP response builder ────────────────────────────────────────────
 
-/// Build an HTTP response with restricted CORS headers.
-/// CORS headers are only included if the origin matches ALLOWED_ORIGINS.
-pub fn http_response(status: u16, content_type: &str, body: &str, origin: Option<&str>) -> String {
-    let status_text = match status {
+/// Reason phrase for a status code.
+fn status_text(status: u16) -> &'static str {
+    match status {
         200 => "OK",
         201 => "Created",
+        202 => "Accepted",
         204 => "No Content",
         400 => "Bad Request",
         401 => "Unauthorized",
         403 => "Forbidden",
         404 => "Not Found",
+        405 => "Method Not Allowed",
         409 => "Conflict",
+        410 => "Gone",
         413 => "Payload Too Large",
         429 => "Too Many Requests",
         500 => "Internal Server Error",
-        _ => "OK",
-    };
+        501 => "Not Implemented",
+        503 => "Service Unavailable",
+        _ => "Error",
+    }
+}
 
-    let cors_headers = match origin {
-        Some(o) if !o.is_empty() => {
-            format!(
-                "Access-Control-Allow-Origin: {}\r\n\
-                 Access-Control-Allow-Headers: Content-Type, Authorization\r\n\
-                 Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n",
-                o
-            )
-        }
-        _ => String::new(),
-    };
+// <<< AGENT-3 HEADERS >>>
+/// Build an HTTP response with restricted CORS headers and the hardening
+/// header block (`security::security_headers`).
+///
+/// The origin is re-checked against `ALLOWED_ORIGINS` here, so any caller —
+/// including the Docker transport, which forwards a raw `Origin` header —
+/// can never get a reflected `Access-Control-Allow-Origin`.
+pub fn http_response(status: u16, content_type: &str, body: &str, origin: Option<&str>) -> String {
+    let cors_headers = security::cors_response_headers(origin);
+    let extra_headers = security::security_headers();
 
     format!(
-        "HTTP/1.1 {status} {status_text}\r\n\
+        "HTTP/1.1 {status} {}\r\n\
          Content-Type: {content_type}\r\n\
          {cors_headers}\
+         {extra_headers}\
          Content-Length: {}\r\n\
          \r\n\
          {body}",
+        status_text(status),
         body.len()
     )
 }
+
+/// Binary-safe variant of [`http_response`] used by the share-link content
+/// stream (an empty `content_type` falls back to `application/octet-stream`).
+pub fn http_response_bytes(
+    status: u16,
+    content_type: &str,
+    body: &[u8],
+    origin: Option<&str>,
+) -> String {
+    let ctype = if content_type.is_empty() {
+        "application/octet-stream"
+    } else {
+        content_type
+    };
+    format!(
+        "HTTP/1.1 {status} {}\r\n\
+         Content-Type: {ctype}\r\n\
+         Content-Disposition: inline\r\n\
+         {}{}Content-Length: {}\r\n\
+         \r\n",
+        status_text(status),
+        security::cors_response_headers(origin),
+        security::security_headers(),
+        body.len()
+    )
+}
+// <<< /AGENT-3 HEADERS >>>
 
 /// Build a JSON error response.
 fn json_error(status: u16, message: &str, origin: Option<&str>) -> String {
@@ -1898,6 +2566,8 @@ pub fn serve_static_file(stream: &mut TcpStream, static_dir: &std::path::Path, r
     let ctype = mime_type(&actual_path.to_string_lossy());
     let content_length = contents.len();
 
+    // Static assets are public, so they keep the wildcard CORS; they still
+    // get the hardening header block (nosniff / frame / CSP).
     let header = format!(
         "HTTP/1.1 200 OK\r\n\
          Content-Type: {ctype}\r\n\
@@ -1906,7 +2576,8 @@ pub fn serve_static_file(stream: &mut TcpStream, static_dir: &std::path::Path, r
          Access-Control-Allow-Origin: *\r\n\
          Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n\
          Access-Control-Allow-Headers: Content-Type, Authorization\r\n\
-         \r\n"
+         {}\r\n",
+        security::security_headers()
     );
 
     let _ = stream.write_all(header.as_bytes());

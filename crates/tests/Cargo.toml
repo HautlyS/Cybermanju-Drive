@@ -17,3 +17,8 @@ anyhow = "1"
 blake3 = "1"
 redb = "2"
 tempfile = "3"
+# AGENT-4 item 10 — backend contract tests talk to a local mock HTTP server
+# through the real `reqwest` client, and the auth matrix mints JWTs with the
+# same library the web crate verifies them with.
+cybermanju-sync = { path = "../sync" }
+jsonwebtoken = "9"

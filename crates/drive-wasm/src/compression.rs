@@ -21,14 +21,19 @@ pub fn compress_brotli(data: &[u8], quality: u32) -> Vec<u8> {
 
 #[wasm_bindgen]
 pub fn decompress_brotli(data: &[u8]) -> Result<Vec<u8>, JsValue> {
-    use std::io::Read;
+    use std::io::Write;
     let mut decompressor = brotli::DecompressorWriter::new(Vec::new(), 4096);
     decompressor
         .write_all(data)
         .map_err(|e| JsValue::from_str(&format!("Brotli decompression failed: {}", e)))?;
-    decompressor
-        .into_inner()
-        .map_err(|e| JsValue::from_str(&format!("Brotli finalize failed: {}", e)))
+    // `into_inner` returns `Result<W, W>`: the `Err` arm hands back the
+    // partial output, not an error value, so report it as bytes written.
+    decompressor.into_inner().map_err(|partial| {
+        JsValue::from_str(&format!(
+            "Brotli stream incomplete ({} bytes of output)",
+            partial.len()
+        ))
+    })
 }
 
 #[wasm_bindgen]

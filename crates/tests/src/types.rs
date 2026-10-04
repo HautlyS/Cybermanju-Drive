@@ -284,8 +284,6 @@ fn test_sync_status_serde_roundtrip() {
         SyncStatus::Linking,
         SyncStatus::Cleaning,
         SyncStatus::Error,
-        SyncStatus::Done,
-        SyncStatus::Syncing,
         SyncStatus::Completed,
         SyncStatus::Cancelled,
     ] {
@@ -293,6 +291,15 @@ fn test_sync_status_serde_roundtrip() {
         let back: SyncStatus = serde_json::from_str(&json).unwrap();
         assert_eq!(st, back);
     }
+    // Legacy payloads written before the enum collapsed still parse.
+    assert_eq!(
+        serde_json::from_str::<SyncStatus>("\"done\"").unwrap(),
+        SyncStatus::Completed
+    );
+    assert_eq!(
+        serde_json::from_str::<SyncStatus>("\"syncing\"").unwrap(),
+        SyncStatus::Scanning
+    );
 }
 
 #[test]
@@ -323,6 +330,11 @@ fn test_sync_config_serde() {
         create_previews: true,
         delete_raw_after_sync: false,
         max_concurrent_uploads: 4,
+        encrypt_before_upload: true,
+        conflict_policy: Default::default(),
+        placement: Default::default(),
+        parity: 1,
+        oauth_credentials: None,
         created_at: None,
         updated_at: None,
     };

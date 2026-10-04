@@ -8,11 +8,25 @@
 //   * the scan → compress → upload → link pipeline
 
 pub mod backends;
+// <<< AGENT-2 MODS: chunk manifest + striped placement (item 10), >>>
+// <<< AGENT-2 MODS: auto-sync scheduler (item 11) >>>
+pub mod manifest;
 pub mod oauth;
 pub mod pipeline;
+// <<< AGENT-1 MODS: transport reliability >>>
+pub mod quota;
+pub mod rate_limit;
+pub mod retry;
+// <<< AGENT-2 MODS: auto-sync scheduler >>>
+pub mod scheduler;
 pub mod state;
+pub mod transfer;
 
 pub use backends::create_backend;
 pub use cybermanju_types::sync::*;
 pub use pipeline::SyncPipeline;
 pub use state::SyncState;
+// <<< AGENT-1 RE-EXPORTS: the contract other agents consume >>>
+pub use quota::{usage as quota_usage, QuotaUsage};
+pub use retry::{classify as classify_error, RetryPolicy};
+pub use transfer::{blake3_hex, verify_blake3};

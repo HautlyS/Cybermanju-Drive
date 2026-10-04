@@ -24,18 +24,27 @@ impl std::fmt::Display for SyncBackendType {
     }
 }
 
+// <<< AGENT-2 STATUS COLLAPSE: one generation of terminal/active states.
+// The old enum carried two generations at once — `Done` *and* `Completed`
+// (same meaning), `Syncing` *and* the phase statuses (a blip that was always
+// overwritten by `Scanning` microseconds later). Canonical set:
+//   idle → scanning → {compressing|uploading|linking|cleaning} → completed
+//        | error | cancelled
+// Legacy payloads written by older builds ("done", "syncing") still
+// deserialize via serde aliases; serialization only ever emits the
+// canonical camelCase names. >>>
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
 pub enum SyncStatus {
     Idle,
+    #[serde(alias = "syncing")]
     Scanning,
     Compressing,
     Uploading,
     Linking,
     Cleaning,
     Error,
-    Done,
-    Syncing,
+    #[serde(alias = "done")]
     Completed,
     Cancelled,
 }
@@ -50,12 +59,35 @@ impl std::fmt::Display for SyncStatus {
             Self::Linking => write!(f, "linking"),
             Self::Cleaning => write!(f, "cleaning"),
             Self::Error => write!(f, "error"),
-            Self::Done => write!(f, "done"),
-            Self::Syncing => write!(f, "syncing"),
             Self::Completed => write!(f, "completed"),
             Self::Cancelled => write!(f, "cancelled"),
         }
     }
+}
+
+/// What to do when a re-sync finds the remote locator already populated
+/// with content we did not just write. `skip` keeps remote bytes safe by
+/// default; the pipeline reports every applied conflict through
+/// `SyncResult.errors` with a `conflict:` prefix.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ConflictPolicy {
+    #[default]
+    Skip,
+    Overwrite,
+    KeepBoth,
+}
+
+/// Where a file's bytes are placed. `whole` uploads one artifact to one
+/// provider (today's behaviour); `striped` splits the file into BLAKE3-
+/// addressed chunks round-robined across ≥2 enabled configs
+/// (`crates/sync/src/manifest.rs`).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PlacementMode {
+    #[default]
+    Whole,
+    Striped,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,6 +96,8 @@ pub struct CloudAccount {
     pub id: String,
     pub name: String,
     pub backend_type: SyncBackendType,
+    // <<< AGENT-3 SECRETS: never serialize a provider token to a client >>>
+    #[serde(skip_serializing)]
     pub token: Option<String>,
     pub oauth_credentials: Option<OAuthCredentials>,
     pub config: serde_json::Value,
@@ -71,31 +105,95 @@ pub struct CloudAccount {
     pub updated_at: String,
 }
 
+// <<< AGENT-3 SECRETS: `access_token`, `refresh_token` and `client_secret`
+// are omitted from every serialized form (GET /api/sync/configs and the
+// whole-object `SyncConfig`/`CloudAccount` responses). `default` keeps the
+// struct literal round-trip working when the key is absent. >>>
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OAuthCredentials {
+    #[serde(skip_serializing, default)]
     pub access_token: String,
+    #[serde(skip_serializing)]
     pub refresh_token: Option<String>,
     pub expires_at: Option<u64>,
     pub client_id: String,
+    #[serde(skip_serializing)]
     pub client_secret: Option<String>,
 }
 
+impl OAuthCredentials {
+    /// Whether the access token expired, or expires within `buffer_seconds`.
+    pub fn is_expired(&self, buffer_seconds: u64) -> bool {
+        match self.expires_at {
+            Some(expires) => {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                now + buffer_seconds >= expires
+            }
+            // No expiry information published — assume it is still valid.
+            None => false,
+        }
+    }
+}
+
+/// One synced copy of a local file, persisted in the `sync_files` table.
+///
+/// Key: `{file_id}/{config_id}` — the same file may live on several
+/// providers. `remote_path` is the durable locator the pipeline uploaded
+/// to (item 2: without it restore and remote delete are impossible);
+/// `remote_url` is what `upload_file` returned (a provider locator such as
+/// a Telegram `file_id` or a Drive file URL) which some backends need for
+/// downloads.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncFile {
     pub id: String,
+    pub config_id: Option<String>,
     pub original_path: String,
     pub compressed_path: Option<String>,
     pub preview_path: Option<String>,
     pub remote_url: Option<String>,
+    pub remote_path: Option<String>,
     pub size_bytes: u64,
     pub compressed_size_bytes: Option<u64>,
+    /// BLAKE3 of the original plaintext — the restore-time verify baseline.
     pub hash_blake3: Option<String>,
+    /// BLAKE3 of the exact bytes that were uploaded (ciphertext when
+    /// encryption was on) — the download-back verify baseline.
+    pub artifact_hash: Option<String>,
+    /// Chunk manifest reference for `placement: striped` (item 10).
+    pub manifest_ref: Option<String>,
+    /// Set when a download-back verification succeeded.
+    pub last_verified_at: Option<String>,
+    /// Keystore key handle used for `encrypted` artifacts (never the key).
+    pub key_handle: Option<String>,
+    pub compressed: Option<bool>,
+    pub encrypted: Option<bool>,
     pub backend_type: SyncBackendType,
     pub synced_at: Option<String>,
     pub status: SyncStatus,
     pub error_message: Option<String>,
+}
+
+/// One finished sync run, persisted in the `sync_runs` table so the UI can
+/// show history (item 14) and `GET /api/sync/jobs/{id}` survives a restart.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncRunRecord {
+    pub run_id: String,
+    pub config_id: String,
+    pub started_at: String,
+    pub finished_at: String,
+    pub status: SyncStatus,
+    pub files_synced: u32,
+    pub bytes_uploaded: u64,
+    pub errors: Vec<String>,
+    /// Final progress snapshot at terminal state.
+    pub progress: SyncProgress,
+    pub result: Option<SyncResult>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -109,6 +207,10 @@ pub struct SyncConfig {
     pub base_path: Option<String>,
     pub repo_name: Option<String>,
     pub branch: Option<String>,
+    // <<< AGENT-3 SECRETS: provider tokens must never reach a client.
+    // Deserialization is unaffected, so `POST /api/sync/configs` still
+    // accepts a raw token in the body. >>>
+    #[serde(skip_serializing)]
     pub token: Option<String>,
     pub folder_id: Option<String>,
     pub album_id: Option<String>,
@@ -118,8 +220,38 @@ pub struct SyncConfig {
     pub create_previews: bool,
     pub delete_raw_after_sync: bool,
     pub max_concurrent_uploads: u32,
+    // <<< AGENT-2 CONTRACT FIELDS >>>
+    // All three carry serde defaults so configs written before these fields
+    // existed keep parsing. Encryption defaults **on**: a local artifact is
+    // cheap to protect, and plaintext uploads to third parties are the
+    // failure mode this field exists to end.
+    #[serde(default = "default_encrypt_before_upload")]
+    pub encrypt_before_upload: bool,
+    #[serde(default)]
+    pub conflict_policy: ConflictPolicy,
+    #[serde(default)]
+    pub placement: PlacementMode,
+    // <<< AGENT-2 item 10: replicas per chunk in `striped` mode (not
+    // Reed–Solomon — simple replication: chunk i is uploaded to the next
+    // `min(parity, n-1)` configs in the plan). Defaults to 1 so opting into
+    // striping without a knob still tolerates one provider loss per chunk;
+    // set 0 for pure round-robin (no redundancy). Ignored in `whole` mode. >>>
+    #[serde(default = "default_parity")]
+    pub parity: u8,
+    // <<< AGENT-3 CONTRACT: filled/refreshed by the OAuth flow. Secrets
+    // inside `OAuthCredentials` are individually `skip_serializing`. >>>
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_credentials: Option<OAuthCredentials>,
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
+}
+
+fn default_encrypt_before_upload() -> bool {
+    true
+}
+
+fn default_parity() -> u8 {
+    1
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -155,6 +287,37 @@ pub struct RemoteFile {
     pub url: String,
 }
 
+// <<< AGENT-1 CAPABILITIES: static per-provider limits/feature flags.
+// `Default` is deliberately permissive (no fixed size cap, everything
+// supported except chunking) so an unimplemented backend reports *unknown*
+// rather than lying about a restriction it does not have. >>>
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Capabilities {
+    /// Largest single file the backend accepts; `u64::MAX` = no fixed cap.
+    pub max_size_bytes: u64,
+    pub supports_delete: bool,
+    /// A direct (token-free) download URL is available from `get_file_url`.
+    pub supports_direct_download: bool,
+    /// `list_files` returns every descendant under the prefix, not only
+    /// the immediate children.
+    pub recursive_list: bool,
+    /// `upload_file_chunked` is implemented (resumable/multipart upload).
+    pub chunked: bool,
+}
+
+impl Default for Capabilities {
+    fn default() -> Self {
+        Self {
+            max_size_bytes: u64::MAX,
+            supports_delete: true,
+            supports_direct_download: true,
+            recursive_list: true,
+            chunked: false,
+        }
+    }
+}
+
 pub trait StorageBackend: Send + Sync {
     fn name(&self) -> &str;
     fn backend_type(&self) -> SyncBackendType;
@@ -164,4 +327,26 @@ pub trait StorageBackend: Send + Sync {
     fn list_files(&self, prefix: &str) -> Result<Vec<RemoteFile>, String>;
     fn get_file_url(&self, remote_path: &str) -> Result<String, String>;
     fn test_connection(&self) -> Result<bool, String>;
+
+    // <<< AGENT-1 TRAIT EXTENSION: defaulted so the 8 existing methods and
+    // every current implementor (AGENT-2's pipeline, AGENT-5's UI) keep
+    // compiling untouched. >>>
+
+    /// Static capability report for this provider.
+    fn capabilities(&self) -> Capabilities {
+        Capabilities::default()
+    }
+
+    /// Best-effort metadata for one remote path.
+    /// `Ok(None)` means "unknown" — the caller treats it as "no conflict
+    /// information", never as "file missing". A path that is confirmed
+    /// missing must be `Err("not_found: …")`.
+    fn stat(&self, _remote_path: &str) -> Result<Option<RemoteFile>, String> {
+        Ok(None)
+    }
+
+    /// Resumable / chunked upload for backends that support it.
+    fn upload_file_chunked(&self, _local_path: &str, _remote_path: &str) -> Result<String, String> {
+        Err("unsupported: chunked upload is not implemented for this backend".to_string())
+    }
 }

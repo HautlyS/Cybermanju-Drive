@@ -14,3 +14,28 @@ members = [
     "docker/server",
 ]
 resolver = "2"
+
+# ─── Build speed ───────────────────────────────────────────────────────
+# Cargo's `debug = 2` default puts full DWARF into every one of the 760+
+# crates in this workspace. On a 10-crate workspace that is invisible; here
+# it dominates both compile time and `target/` size — and `target/` is what
+# CI has to tar up and download on every single run.
+#
+# Line tables keep filename/line info for real backtraces and panics, which
+# is all a test failure needs. Third-party crates get none at all.
+
+[profile.dev]
+debug = "line-tables-only"
+incremental = true
+
+[profile.dev.package."*"]
+debug = false
+
+# `cargo test` uses this profile. It inherits `dev`, but say it outright so
+# the intent does not depend on cargo's inheritance semantics staying put.
+[profile.test]
+debug = "line-tables-only"
+incremental = true
+
+[profile.test.package."*"]
+debug = false

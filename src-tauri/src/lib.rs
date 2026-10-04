@@ -194,6 +194,11 @@ pub fn run() {
             sync_cmd::test_sync_connection,
             sync_cmd::cancel_sync,
             sync_cmd::list_remote_files,
+            // <<< AGENT-2 SYNC JOBS/RESTORE >>>
+            sync_cmd::restore_sync_file,
+            sync_cmd::delete_remote_file,
+            sync_cmd::get_sync_job,
+            sync_cmd::list_sync_runs,
             // File import / upload
             import_cmd::import_file,
             import_cmd::import_from_url,

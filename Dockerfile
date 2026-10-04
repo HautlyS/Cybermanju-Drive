@@ -97,15 +97,17 @@ EXPOSE 3456
 ENV RUST_LOG=info
 ENV PORT=3456
 ENV DB_PATH=/data/cybermanju.db
+ENV SEARCH_INDEX_PATH=/data/tantivy_index
 ENV STATIC_DIR=/app/static
 ENV TZ=UTC
 
 # Volume mount point for persistent data
 VOLUME ["/data"]
 
-# Health check endpoint
+# Health check hits the readiness endpoint: 200 only when redb, the Tantivy
+# index and the data volume are all usable (/api/health is liveness).
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=15s \
-    CMD wget --spider -q http://localhost:3456/api/health || exit 1
+    CMD wget --spider -q http://localhost:3456/api/readyz || exit 1
 
 # Start the server
 CMD ["./cybermanju-drive-server"]

@@ -179,8 +179,11 @@ pub struct ShareLink {
 }
 
 impl ShareLink {
+    /// Fill `url` with a path relative to whatever origin served the request.
+    /// A hardcoded absolute origin breaks every deployment that is not
+    /// `localhost:3456` (Docker, reverse proxy, LAN).
     pub fn with_url(mut self) -> Self {
-        self.url = Some(format!("http://localhost:3456/api/shared/{}", self.token));
+        self.url = Some(format!("/api/shared/{}", self.token));
         self
     }
 }
