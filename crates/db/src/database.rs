@@ -47,6 +47,31 @@ const SYNC_SECRETS_TABLE: TableDefinition<'static, &'static str, &'static str> =
     TableDefinition::new("sync_secrets");
 const SCHEMA_VERSION_TABLE: TableDefinition<'static, &'static str, &'static str> =
     TableDefinition::new("schema_version");
+// <<< CYBERMANJU OS PUSH: tables declared up front by the supervisor so the
+// three parallel agents never edit this file. AGENT-6 = disks/volumes/block_map,
+// AGENT-7 = scrub_runs/repairs/chunk_refs/leases/provider_health,
+// AGENT-8 = compute_tasks/shell_history. Values are JSON strings, same as
+// every other table here. See MISSING.md §"Pre-wired before launch". >>>
+const DISKS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("disks");
+const VOLUMES_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("volumes");
+const BLOCK_MAP_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("block_map");
+const SCRUB_RUNS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("scrub_runs");
+const REPAIRS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("repairs");
+const CHUNK_REFS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("chunk_refs");
+const LEASES_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("leases");
+const PROVIDER_HEALTH_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("provider_health");
+const COMPUTE_TASKS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("compute_tasks");
+const SHELL_HISTORY_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("shell_history");
 
 /// Rows kept in `sync_runs` — enough for a UI history page, few enough that
 /// the prune scan stays trivial.
@@ -81,6 +106,17 @@ impl Database {
             write_txn.open_table(SYNC_FILES_TABLE)?;
             write_txn.open_table(SYNC_RUNS_TABLE)?;
             write_txn.open_table(SYNC_SECRETS_TABLE)?;
+            // <<< CYBERMANJU OS PUSH: open the new tables too >>>
+            write_txn.open_table(DISKS_TABLE)?;
+            write_txn.open_table(VOLUMES_TABLE)?;
+            write_txn.open_table(BLOCK_MAP_TABLE)?;
+            write_txn.open_table(SCRUB_RUNS_TABLE)?;
+            write_txn.open_table(REPAIRS_TABLE)?;
+            write_txn.open_table(CHUNK_REFS_TABLE)?;
+            write_txn.open_table(LEASES_TABLE)?;
+            write_txn.open_table(PROVIDER_HEALTH_TABLE)?;
+            write_txn.open_table(COMPUTE_TASKS_TABLE)?;
+            write_txn.open_table(SHELL_HISTORY_TABLE)?;
             {
                 let mut schema = write_txn.open_table(SCHEMA_VERSION_TABLE)?;
                 if schema.get("schema")?.is_none() {
@@ -157,6 +193,47 @@ impl Database {
     }
     pub fn get_sync_secrets_table() -> TableDefinition<'static, &'static str, &'static str> {
         SYNC_SECRETS_TABLE
+    }
+    // <<< CYBERMANJU OS PUSH: accessors for the pre-declared OS tables >>>
+    /// AGENT-6 — one `.cybermanju` disk record per provider binding.
+    pub fn get_disks_table() -> TableDefinition<'static, &'static str, &'static str> {
+        DISKS_TABLE
+    }
+    /// AGENT-6 — the merged logical volume definition.
+    pub fn get_volumes_table() -> TableDefinition<'static, &'static str, &'static str> {
+        VOLUMES_TABLE
+    }
+    /// AGENT-6 — LBA → chunk placement rows.
+    pub fn get_block_map_table() -> TableDefinition<'static, &'static str, &'static str> {
+        BLOCK_MAP_TABLE
+    }
+    /// AGENT-7 — one row per scrub pass (per provider).
+    pub fn get_scrub_runs_table() -> TableDefinition<'static, &'static str, &'static str> {
+        SCRUB_RUNS_TABLE
+    }
+    /// AGENT-7 — repair findings and their outcome.
+    pub fn get_repairs_table() -> TableDefinition<'static, &'static str, &'static str> {
+        REPAIRS_TABLE
+    }
+    /// AGENT-7 — chunk hash → refcount/manifest references (GC authority).
+    pub fn get_chunk_refs_table() -> TableDefinition<'static, &'static str, &'static str> {
+        CHUNK_REFS_TABLE
+    }
+    /// AGENT-7 — single-writer volume leases.
+    pub fn get_leases_table() -> TableDefinition<'static, &'static str, &'static str> {
+        LEASES_TABLE
+    }
+    /// AGENT-7 — per-provider health score and quarantine state.
+    pub fn get_provider_health_table() -> TableDefinition<'static, &'static str, &'static str> {
+        PROVIDER_HEALTH_TABLE
+    }
+    /// AGENT-8 — the process table behind `ps` / `top` / `kill`.
+    pub fn get_compute_tasks_table() -> TableDefinition<'static, &'static str, &'static str> {
+        COMPUTE_TASKS_TABLE
+    }
+    /// AGENT-8 — `cybsh` command history.
+    pub fn get_shell_history_table() -> TableDefinition<'static, &'static str, &'static str> {
+        SHELL_HISTORY_TABLE
     }
 
     /// Row key for a synced copy: one local file × one config.

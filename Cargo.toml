@@ -10,6 +10,10 @@ members = [
     "crates/faces",
     "crates/tests",
     "crates/drive-wasm",
+    # <<< CYBERMANJU OS PUSH: AGENT-6 disk, AGENT-7 erasure, AGENT-8 os >>>
+    "crates/disk",
+    "crates/erasure",
+    "crates/os",
     "src-tauri",
     "docker/server",
 ]

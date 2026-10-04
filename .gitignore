@@ -29,6 +29,7 @@ tantivy_index/
 
 # Logs
 *.log
+logs/
 
 # Tool results
 tool-results/

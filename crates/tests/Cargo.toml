@@ -21,4 +21,7 @@ tempfile = "3"
 # through the real `reqwest` client, and the auth matrix mints JWTs with the
 # same library the web crate verifies them with.
 cybermanju-sync = { path = "../sync" }
+cybermanju-disk = { path = "../disk" }
+cybermanju-erasure = { path = "../erasure" }
+cybermanju-os = { path = "../os" }
 jsonwebtoken = "9"

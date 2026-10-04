@@ -1,0 +1,14 @@
+[package]
+name = "cybermanju-erasure"
+version = "0.1.0"
+edition = "2021"
+description = "Reed-Solomon erasure coding for striped chunk placement"
+
+[dependencies]
+anyhow = "1"
+log = "0.4"
+reed-solomon-erasure = "6"
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+rand = "0.8"

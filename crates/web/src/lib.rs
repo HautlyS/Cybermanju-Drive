@@ -881,6 +881,23 @@ fn route_request(
     };
     let db: &Database = lock.db();
 
+    // <<< CYBERMANJU OS PRE-WIRE: three route families, one file each >>>
+    // Each `route()` returns `Some(response)` only for paths it owns and
+    // `None` otherwise, so the families compose without anyone having to edit
+    // this match. They run after the auth gate, like every other handler.
+    // Long work (scrub/repair/compute) must be spawned, not run in here —
+    // the database lock is held for the duration of the request.
+    if let Some(resp) = api::disk_api::route(db, method, &path_segments, body, origin) {
+        return resp;
+    }
+    if let Some(resp) = api::repair_api::route(db, method, &path_segments, body, origin) {
+        return resp;
+    }
+    if let Some(resp) = api::os_api::route(db, method, &path_segments, body, origin) {
+        return resp;
+    }
+    // <<< /CYBERMANJU OS PRE-WIRE >>>
+
     // Route to appropriate handler
     match path_segments.as_slice() {
         // ─── Auth endpoint (JWT login) ────────────────────────────

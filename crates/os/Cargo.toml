@@ -1,27 +1,25 @@
 [package]
-name = "cybermanju-web"
+name = "cybermanju-os"
 version = "0.1.0"
 edition = "2021"
-description = "HTTP REST server with JWT auth and rate limiting"
+description = "Cybermanju OS layer: cybsh terminal, task table, compute fan-out, syscall boundary"
 
 [dependencies]
 anyhow = "1"
-argon2 = "0.5"
-base64 = "0.22"
 blake3 = "1"
-chrono = { version = "0.4", features = ["serde"] }
 cybermanju-compression = { path = "../compression" }
+cybermanju-crypto = { path = "../crypto" }
 cybermanju-db = { path = "../db" }
+cybermanju-disk = { path = "../disk" }
+cybermanju-erasure = { path = "../erasure" }
 cybermanju-search = { path = "../search" }
 cybermanju-sync = { path = "../sync" }
-cybermanju-disk = { path = "../disk" }
-cybermanju-os = { path = "../os" }
 cybermanju-types = { path = "../types" }
-jsonwebtoken = "9"
 log = "0.4"
-rand_core = { version = "0.6", features = ["getrandom"] }
-redb = "2"
+rayon = "1.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
-cybermanju-crypto = { path = "../crypto" }
+
+[dev-dependencies]
+tempfile = "3"

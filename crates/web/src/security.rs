@@ -130,6 +130,16 @@ const ROUTED_SEGMENTS: &[&str] = &[
     "geo-files",
     "health",
     "locations",
+    // <<< CYBERMANJU OS PUSH: second-level segments for the three new route
+    // families (AGENT-6 disk/volume, AGENT-7 repair/scrub/lease, AGENT-8 os).
+    // Without these, `is_known_route` 404s the family before auth runs. >>>
+    "disk",
+    "volume",
+    "repair",
+    "scrub",
+    "lease",
+    "os",
+    // <<< /CYBERMANJU OS PUSH >>>
     "loose-groups",
     "metrics",
     "permissions",
