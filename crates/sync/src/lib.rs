@@ -28,5 +28,5 @@ pub use pipeline::SyncPipeline;
 pub use state::SyncState;
 // <<< AGENT-1 RE-EXPORTS: the contract other agents consume >>>
 pub use quota::{usage as quota_usage, QuotaUsage};
-pub use retry::{classify as classify_error, RetryPolicy};
+pub use retry::{classify as classify_error, ErrorClass, RetryPolicy};
 pub use transfer::{blake3_hex, verify_blake3};

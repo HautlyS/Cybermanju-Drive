@@ -179,3 +179,22 @@ _(append here; do not edit their files)_
 ## Log
 
 - _(append dated entries: `YYYY-MM-DD — item N — commit — CI status`)_
+- **2026-10-04 — run 37212587257 (`f5d9316`) — 22 test failures + 4 red jobs — CI: pending.**
+  *Red jobs:* Rust Lint & Test (22 failures), Build WASM, Docker Build, Arch/CachyOS.
+  *`backends_contract` (6):* the `starts_with("GitLab …")` asserts contradicted the
+  AGENT-1 prefix contract — rewritten to `classify_error(&err)`/`ErrorClass` (NotFound
+  + `delete failed`, Network for 500/upload, RateLimited for 429), which is what the
+  suite is actually pinning. *`sync_routes`:* POST body wrapped in the `ConfigRequest
+  { config }` envelope the route deserializes. *`compression` (4):* camelCase serde,
+  empty-input `decompress_triple`, and incompressible test data — AGENT-2/5 files,
+  details in their Logs. *`crypto` (4):* AES-256 encrypt hit `unreachable!` and
+  `created_at` lacked `Z` — AGENT-3/5 files. *`search` (4):* stale Tantivy reader
+  (`ReloadPolicy::OnCommitWithDelay`) — `reader.reload()` now runs after every
+  commit (`crates/search/src/lib.rs::refresh`). *`web` (2):* unknown paths answered
+  `401` before the router, so the 404 arm was unreachable — fixed by AGENT-3's
+  `is_known_route` gate. *Jobs:* Docker died in PQClean's `compat.h` —
+  `#if !__GNUC_PREREQ(7,1)` is glibc-only and musl's `<features.h>` defines nothing,
+  so `CFLAGS=-D__GNUC_PREREQ(major,minor)=1` is set in the `rust:alpine` stage
+  (reachable only since AGENT-3 wired `cybermanju-crypto` into the server graph);
+  Arch died in `linuxdeploy` because the container has no `/dev/fuse` —
+  `APPIMAGE_EXTRACT_AND_RUN=1` makes the AppImage tools unpack instead of mount.

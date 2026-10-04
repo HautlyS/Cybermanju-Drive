@@ -37,7 +37,11 @@ impl CompressionType {
     }
 }
 
+// `rename_all = "camelCase"`: these travel over REST and Tauri to
+// `src/types/index.ts` (`originalSize`, `layerDetails`, `inputSize`, …),
+// which reads camelCase — snake_case would surface as `undefined` in the UI.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CompressionStats {
     pub original_size: u64,
     pub compressed_size: u64,
@@ -49,6 +53,7 @@ pub struct CompressionStats {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LayerDetail {
     pub name: String,
     pub algorithm: String,

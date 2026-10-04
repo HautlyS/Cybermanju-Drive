@@ -34,6 +34,14 @@ FROM rust:alpine AS backend-builder
 # C/asm parts of `ring` (pulled in by rustls → reqwest → cybermanju-sync)
 RUN apk add --no-cache build-base pkgconf cmake perl
 
+# pqcrypto-mlkem's vendored PQClean `compat.h` gates a polyfill on
+# `__GNUC_PREREQ(7,1)`, which only glibc's <features.h> defines — on musl the
+# preprocessor sees `!__GNUC_PREREQ(7,1)` with the macro undefined and stops
+# with "missing binary operator before token '('". Defining it as true keeps
+# the modern-GCC path (the polyfill is only for GCC < 7.1, and this image
+# ships a current one).
+ENV CFLAGS="-D__GNUC_PREREQ(major,minor)=1"
+
 WORKDIR /build
 
 # ──1. Workspace manifests (change rarely → keeps the dependency layer) ──

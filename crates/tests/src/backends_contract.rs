@@ -12,7 +12,7 @@
 // of them stays green — see "Requests to other agents" in AGENT-4.md.
 
 use cybermanju_sync::backends::{GitLabBackend, LocalBackend};
-use cybermanju_sync::StorageBackend;
+use cybermanju_sync::{classify_error, ErrorClass, StorageBackend};
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
@@ -191,7 +191,13 @@ fn gitlab_list_files_never_returns_ok_for_an_error_status() {
         let err = gitlab(&base)
             .list_files("")
             .expect_err("an error status must never become Ok");
-        assert!(err.starts_with("GitLab "), "unclassified: {err}");
+        // The message must carry a class prefix (`auth: `, `not_found: `, …)
+        // — `classify` reads it to decide whether retrying can help.
+        assert_ne!(
+            classify_error(&err),
+            ErrorClass::Unclassified,
+            "unclassified: {err}"
+        );
         assert!(err.contains(&format!("list failed ({status})")), "{err}");
     }
 }
@@ -207,7 +213,11 @@ fn gitlab_download_never_writes_a_file_for_an_error_status() {
         let err = gitlab(&base)
             .download_file("docs/a.txt", target.to_str().unwrap())
             .expect_err("an error status must never become Ok");
-        assert!(err.starts_with("GitLab "), "unclassified: {err}");
+        assert_ne!(
+            classify_error(&err),
+            ErrorClass::Unclassified,
+            "unclassified: {err}"
+        );
         assert!(!target.exists(), "a failed download left {target:?}");
     }
 }
@@ -223,7 +233,10 @@ fn gitlab_delete_treats_204_as_success_and_404_as_failure() {
     let err = gitlab(&base)
         .delete_file("docs/a.txt")
         .expect_err("404 must not be Ok");
-    assert!(err.starts_with("GitLab delete failed"), "{err}");
+    // A 404 is a *decision* (retrying cannot make the file appear), so it
+    // must land in the NotFound class rather than the retryable ones.
+    assert_eq!(classify_error(&err), ErrorClass::NotFound, "{err}");
+    assert!(err.contains("delete failed"), "{err}");
 }
 
 #[test]
@@ -243,7 +256,7 @@ fn gitlab_upload_classifies_a_rejected_write() {
     let err = gitlab(&base)
         .upload_file(file.to_str().unwrap(), "docs/note.txt")
         .expect_err("500 must not be Ok");
-    assert!(err.starts_with("GitLab "), "unclassified: {err}");
+    assert_eq!(classify_error(&err), ErrorClass::Network, "{err}");
 }
 
 #[test]
@@ -256,7 +269,7 @@ fn gitlab_test_connection_reports_the_http_status_it_got() {
         .test_connection()
         .expect_err("500 must not be Ok");
     assert!(err.contains("HTTP 500"), "{err}");
-    assert!(err.starts_with("GitLab "), "{err}");
+    assert_eq!(classify_error(&err), ErrorClass::Network, "{err}");
 }
 
 // ─── 429 / preflight contracts ──────────────────────────────────────
@@ -268,7 +281,7 @@ fn gitlab_429_is_bounded_and_never_reported_as_success() {
     let err = gitlab(&base)
         .list_files("")
         .expect_err("429 must not be Ok");
-    assert!(err.starts_with("GitLab "), "{err}");
+    assert_eq!(classify_error(&err), ErrorClass::RateLimited, "{err}");
 
     // Today the backend makes exactly one attempt. If a retry/backoff layer
     // is added it must stay bounded — an unbounded loop is an outage.

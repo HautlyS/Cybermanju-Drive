@@ -2,6 +2,22 @@ use cybermanju_compression::layers::{BrotliLayer, Lz4Layer, ZstdLayer};
 use cybermanju_compression::triple::TripleCompressor;
 use cybermanju_compression::types::{CompressionStats, CompressionType, LayerDetail};
 
+/// High-entropy bytes for "incompressible" assertions.
+///
+/// BLAKE3 in counter mode: deterministic (no RNG dependency) and with no
+/// repeating structure. `(i * k) & 0xFF` sequences repeat every 256 bytes,
+/// which LZ4 matches away — they are compressible, not random.
+fn incompressible_bytes(len: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(len + 32);
+    let mut counter = 0u64;
+    while out.len() < len {
+        out.extend_from_slice(blake3::hash(&counter.to_le_bytes()).as_bytes());
+        counter += 1;
+    }
+    out.truncate(len);
+    out
+}
+
 // ─── CompressionType tests ─────────────────────────────────────────
 
 #[test]
@@ -135,9 +151,9 @@ fn test_lz4_probe_ratio_compressible() {
 
 #[test]
 fn test_lz4_probe_ratio_incompressible() {
-    let random: Vec<u8> = (0..10000).map(|i| ((i * 37 + 13) & 0xFF) as u8).collect();
+    let random = incompressible_bytes(10_000);
     let ratio = Lz4Layer::probe_ratio(&random);
-    assert!(ratio > 0.5, "random-ish data should not compress well");
+    assert!(ratio > 0.5, "incompressible data should not compress well");
 }
 
 // ─── Zstd layer tests ─────────────────────────────────────────────
@@ -243,7 +259,7 @@ fn test_triple_roundtrip_compressible() {
 
 #[test]
 fn test_triple_skips_incompressible() {
-    let data: Vec<u8> = (0..10000).map(|i| ((i * 97 + 13) & 0xFF) as u8).collect();
+    let data = incompressible_bytes(10_000);
     let compressor = TripleCompressor::new();
     let (compressed, stats) = compressor.compress_triple(&data).unwrap();
     assert_eq!(stats.layer, "skipped (incompressible)");

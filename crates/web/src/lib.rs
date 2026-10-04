@@ -741,6 +741,14 @@ fn route_request(
         .filter(|s| !s.is_empty())
         .collect();
 
+    // Unknown path → 404, before any credential is inspected. Doing it the
+    // other way round makes an anonymous probe of a typo'd route answer `401`,
+    // which both hides the 404 arm below and tells a caller nothing it did
+    // not already know (the gate rejects every unauthenticated path alike).
+    if !security::is_known_route(&path_segments) {
+        return json_error(404, &format!("Not found: {} {}", method, path), origin);
+    }
+
     // <<< AGENT-3 AUTH GATE >>>
     // Route → required role, then verify the JWT and authorize its claims.
     // Default is `Authenticated`; `Public` covers health/login/register/

@@ -203,11 +203,14 @@ impl SearchIndex {
 
         // Delete any existing document with this file_id before adding
         // (Tantivy doesn't have update — delete + add)
-        let mut writer = self.writer.write().unwrap();
-        writer.delete_term(Term::from_field_text(self.file_id_field, file_id));
-        let doc = self.build_document(&params);
-        writer.add_document(doc)?;
-        writer.commit()?;
+        {
+            let mut writer = self.writer.write().unwrap();
+            writer.delete_term(Term::from_field_text(self.file_id_field, file_id));
+            let doc = self.build_document(&params);
+            writer.add_document(doc)?;
+            writer.commit()?;
+        }
+        self.refresh()?;
 
         Ok(())
     }
@@ -218,13 +221,16 @@ impl SearchIndex {
     /// because Tantivy commits are expensive (they flush segments to disk
     /// and trigger reader reloads).
     pub fn add_document_batch(&self, docs: Vec<DocumentParams<'_>>) -> Result<()> {
-        let mut writer = self.writer.write().unwrap();
-        for params in &docs {
-            writer.delete_term(Term::from_field_text(self.file_id_field, params.file_id));
-            let doc = self.build_document(params);
-            writer.add_document(doc)?;
+        {
+            let mut writer = self.writer.write().unwrap();
+            for params in &docs {
+                writer.delete_term(Term::from_field_text(self.file_id_field, params.file_id));
+                let doc = self.build_document(params);
+                writer.add_document(doc)?;
+            }
+            writer.commit()?;
         }
-        writer.commit()?;
+        self.refresh()?;
         Ok(())
     }
 
@@ -268,8 +274,11 @@ impl SearchIndex {
     /// Call this after one or more `add_document_no_commit` / `delete_term`
     /// calls to flush changes to disk and make them searchable.
     pub fn commit(&self) -> Result<()> {
-        let mut writer = self.writer.write().unwrap();
-        writer.commit()?;
+        {
+            let mut writer = self.writer.write().unwrap();
+            writer.commit()?;
+        }
+        self.refresh()?;
         Ok(())
     }
 
@@ -284,9 +293,23 @@ impl SearchIndex {
 
     /// Remove a document from the index by file_id and commit.
     pub fn remove_document(&self, file_id: &str) -> Result<()> {
-        let mut writer = self.writer.write().unwrap();
-        writer.delete_term(Term::from_field_text(self.file_id_field, file_id));
-        writer.commit()?;
+        {
+            let mut writer = self.writer.write().unwrap();
+            writer.delete_term(Term::from_field_text(self.file_id_field, file_id));
+            writer.commit()?;
+        }
+        self.refresh()?;
+        Ok(())
+    }
+
+    /// Make the latest commit visible to the next query.
+    ///
+    /// `ReloadPolicy::OnCommitWithDelay` re-reads `meta.json` a few
+    /// milliseconds after a commit, so a search issued straight after an
+    /// add/remove would still see the previous snapshot. Reloading here keeps
+    /// read-after-write honest for both the API and the tests.
+    fn refresh(&self) -> Result<()> {
+        self.reader.reload()?;
         Ok(())
     }
 

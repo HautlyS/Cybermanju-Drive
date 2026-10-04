@@ -88,19 +88,23 @@ fn sync_config_round_trip_never_returns_a_provider_token() {
     let auth = bearer(&mint(&d, "user", now_secs() + 3_600, "jti-sync-config"));
 
     // A raw token is accepted on the way in (it is a credential, not a
-    // display field) and must never come back out.
+    // display field) and must never come back out. The body is the
+    // `ConfigRequest { config }` envelope the route deserializes — the same
+    // shape `/api/sync/test` and `/api/sync/remote-files` use.
     let config = r#"{
-        "id": "",
-        "backendType": "local",
-        "enabled": true,
-        "name": "test-config",
-        "basePath": "/tmp/cybermanju-sync-test",
-        "autoSync": false,
-        "compressBeforeUpload": false,
-        "createPreviews": false,
-        "deleteRawAfterSync": false,
-        "maxConcurrentUploads": 1,
-        "token": "super-secret-provider-token"
+        "config": {
+            "id": "",
+            "backendType": "local",
+            "enabled": true,
+            "name": "test-config",
+            "basePath": "/tmp/cybermanju-sync-test",
+            "autoSync": false,
+            "compressBeforeUpload": false,
+            "createPreviews": false,
+            "deleteRawAfterSync": false,
+            "maxConcurrentUploads": 1,
+            "token": "super-secret-provider-token"
+        }
     }"#;
 
     let created = call(&d, "POST", "/api/sync/configs", config, Some(auth.as_str()));

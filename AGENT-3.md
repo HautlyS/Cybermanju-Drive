@@ -483,3 +483,11 @@ _(append here; do not edit their files)_
   with `arch-build` unblocked and everything parallel it should be
   `windows-build` ≈ **15m30s**. Verified with `cargo fmt --all --check` only,
   per ground rules — CI proves the rest.
+- **2026-10-04 — route coverage vs. the 401 gate (post-CI fix) — commit: this push —
+  CI: pending.** `route_request`'s auth gate ran *before* the router, so any unknown
+  path answered `401` and the trailing 404 arm was unreachable without a token —
+  `web::test_handle_request_404` and the metrics 4xx counter both failed on `f5d9316`.
+  New `security::is_known_route(&[&str])` (`ROUTED_SEGMENTS` = the 24 second segments
+  `route_request` actually arms, plus `["api"]`) is consulted first and returns
+  `404 … {method} {path}` before any credential is inspected. `PROTECTED_ROUTES` in
+  the tests are all real routes, so their `401` assertions are unaffected.

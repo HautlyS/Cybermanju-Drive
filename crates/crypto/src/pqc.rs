@@ -308,7 +308,9 @@ impl PqcEngine {
             algorithm: algorithm.clone(),
             public_key,
             private_key,
-            created_at: chrono::Utc::now().to_rfc3339(),
+            // RFC 3339 UTC with the `Z` designator — `to_rfc3339()` renders
+            // `+00:00` instead, which no other timestamp in the app emits.
+            created_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         };
 
         self.active_key_id = Some(id.clone());
@@ -387,10 +389,13 @@ pub fn generate_random_nonce() -> [u8; 12] {
 /// The `kem_ciphertext` must be stored alongside the encrypted file — it is
 /// required for decapsulation during decryption.
 pub fn encrypt_data(plaintext: &[u8], keypair: &KeyPair) -> Result<FileEncryptedData> {
-    // ML-DSA variants are signature-only; they don't do key encapsulation.
-    // For signing-only keypairs, we derive the symmetric key directly from
-    // the first 32 bytes of the private key (same as ClassicalSign/Aes256).
-    if keypair.algorithm.is_signature_only() {
+    // ML-DSA variants are signature-only and `Aes256` carries a raw 32-byte
+    // key: neither can encapsulate, so both derive the ChaCha20Poly1305 key
+    // from the first 32 bytes of the private key. `decrypt_data` already
+    // routes them the same way — without this arm an AES-256 encrypt hit the
+    // `unreachable!` below instead of producing an artifact.
+    if keypair.algorithm.is_signature_only() || matches!(keypair.algorithm, EncryptionAlgo::Aes256)
+    {
         return encrypt_with_symmetric_key(plaintext, keypair);
     }
 

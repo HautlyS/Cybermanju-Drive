@@ -148,6 +148,12 @@ impl TripleCompressor {
 
     /// Triple-layer decompression: Brotli → ZSTD → LZ4.
     pub fn decompress_triple(&self, data: &[u8]) -> Result<(Vec<u8>, u64)> {
+        // Empty input is the round-trip of an empty payload: the compress
+        // probe classifies it as incompressible and returns the bytes
+        // untouched, so there is no frame for a decoder to read.
+        if data.is_empty() {
+            return Ok((Vec::new(), 0));
+        }
         let start = std::time::Instant::now();
         let brotli_out = BrotliLayer::decompress(data)?;
         let zstd_out = ZstdLayer::decompress(&brotli_out)?;

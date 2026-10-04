@@ -319,5 +319,15 @@ _(append here; do not edit their files)_
   matching `hash_blake3` ⇒ `filesSynced` +0 bytes) so auto-sync ticks don't
   re-send the library; (c) a `deleteRawAfterSync` original that is already
   absent with a placed record now **skips** instead of erroring "File not
-  found" — the intended post-sync state, and the difference between a quiet
-  scheduler and one that spams every tick.
+   found" — the intended post-sync state, and the difference between a quiet
+   scheduler and one that spams every tick.
+- 2026-10-04 — compression payload contract — commit: this push — CI: pending.
+  Two failures in AGENT-4's suite: (a) `CompressionStats`/`LayerDetail` now carry
+  `#[serde(rename_all = "camelCase")]` — the payload travels REST/Tauri into
+  `src/types/index.ts`, which reads `originalSize`, `layerDetails`, `blake3Hash`,
+  `inputSize`, so snake_case was surfacing as `undefined` in the UI (and failing
+  `test_compression_stats_serde`); (b) `decompress_triple` returns `Ok(([], 0))`
+  for empty input — `compress_triple` classifies the empty payload as
+  incompressible (lz4 ratio forced to 1.0 when `original_size == 0`) and stores
+  the bytes untouched, so there is no frame for the decoder to read and the
+  round-trip test failed with a brotli error.

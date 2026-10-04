@@ -190,3 +190,13 @@ AGENT-5's UI compile against them), or the `SyncConfig`/`SyncFile` structs (AGEN
   `remote_path` (folder chain / description / caption); shared GitHub release tag is
   `cybermanju-sync-{blake3(remote)[..16]}` with publish-on-success/delete-on-failure;
   Telegram errors strip URLs (`without_url`) so the bot token never lands in logs.
+- 2026-10-04 — error-prefix contract (post-CI fix) — commit: this push — CI: pending.
+  The `retry::{AUTH,…}` constants were **bare tokens** in the Log's contract claim but
+  shipped with a trailing `:` while every message builder already renders
+  `format!("{}: …", …)`, so constant-built errors read `network:: …`, `classify` still
+  matched, and AGENT-4's `starts_with` asserts did not. Constants are now bare
+  (`"auth"`, `"network"`, …); `http_error` renders through the new `prefix_head()`,
+  which accepts a token with or without its colon and emits `auth: ` (empty head for
+  unclassified), so the hand-written `"rate_limited:"` literals callers pass keep
+  reading correctly. `lib.rs` re-exports `ErrorClass` alongside `classify_error`/
+  `RetryPolicy` so contract tests can assert classes instead of string prefixes.

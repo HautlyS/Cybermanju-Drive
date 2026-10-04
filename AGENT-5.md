@@ -176,3 +176,13 @@ _(append here; do not edit their files)_
 ## Log
 
 - _(append dated entries: `YYYY-MM-DD — item N — commit — CI status`)_
+- **2026-10-04 — drive-wasm build (WASM job) — commit: this push — CI: pending.**
+  `ml-dsa` → `crypto-common 0.2` resolves getrandom **0.4**, which hard-errors on
+  `wasm32-unknown-unknown` unless its `wasm_js` backend is selected, so the job died
+  in `cargo check` before `wasm-pack` ever ran. Added `getrandom-wasm` (package
+  `getrandom`, `0.4`, features `["wasm_js"]`) to `crates/drive-wasm/Cargo.toml`:
+  cargo unifies *features* per resolved version, which turns `wasm_js` on for the
+  instance `crypto-common` links without touching the existing `0.2`/`js` line.
+  `Cargo.lock` gained the dep edge plus getrandom 0.4's `js-sys`/`wasm-bindgen`.
+  No C/asm crates are in the wasm graph (the ML-KEM C build belongs to
+  `cybermanju-crypto`, which `drive-wasm` does not depend on).

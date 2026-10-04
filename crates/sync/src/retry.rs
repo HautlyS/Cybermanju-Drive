@@ -4,9 +4,10 @@
 //
 //   1. The **error string contract** every backend returns: an error starts
 //      with exactly one of `auth:`, `rate_limited:`, `not_found:`,
-//      `unsupported:`, `too_large:`, `integrity:`, `network:` followed by
-//      `: `. AGENT-2 maps the prefix onto `SyncStatus`/retry policy and
-//      AGENT-5 renders it, so the prefix is the stable API.
+//      `unsupported:`, `too_large:`, `integrity:` or `network: `. AGENT-2
+//      maps the prefix onto `SyncStatus`/retry policy and AGENT-5 renders
+//      it, so the prefix is the stable API. The `pub const`s below are the
+//      *bare tokens* — the `: ` separator is added by the message builders.
 //   2. `with_retry` — bounded exponential backoff with jitter, honoring
 //      `Retry-After` / `X-RateLimit-Reset` / Telegram `retry_after`.
 //
@@ -19,13 +20,16 @@ use std::time::Duration;
 
 // ─── Error prefix contract ───────────────────────────────────────────
 
-pub const AUTH: &str = "auth:";
-pub const RATE_LIMITED: &str = "rate_limited:";
-pub const NOT_FOUND: &str = "not_found:";
-pub const UNSUPPORTED: &str = "unsupported:";
-pub const TOO_LARGE: &str = "too_large:";
-pub const INTEGRITY: &str = "integrity:";
-pub const NETWORK: &str = "network:";
+// The class tokens are *bare*: every message builder in the crate renders
+// `format!("{}: …", NETWORK)` itself. Carrying the colon here as well made
+// every constant-built message read `network:: …`.
+pub const AUTH: &str = "auth";
+pub const RATE_LIMITED: &str = "rate_limited";
+pub const NOT_FOUND: &str = "not_found";
+pub const UNSUPPORTED: &str = "unsupported";
+pub const TOO_LARGE: &str = "too_large";
+pub const INTEGRITY: &str = "integrity";
+pub const NETWORK: &str = "network";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorClass {
@@ -140,14 +144,29 @@ pub fn http_error(
             .unwrap_or_default(),
     };
     format!(
-        "{}: {} {} failed ({}){}: {}",
-        prefix,
+        "{}{} {} failed ({}){}: {}",
+        prefix_head(prefix),
         provider,
         op,
         status,
         hint,
         truncate(detail.trim(), 400)
     )
+}
+
+/// Render a class prefix as the head of a message: `"auth: "`, or `""` when
+/// the error is unclassified.
+///
+/// Accepts the token with or without its colon — callers pass both the bare
+/// constants above and hand-written literals such as `"rate_limited:"` — and
+/// never emits `auth:: …`.
+pub fn prefix_head(prefix: &str) -> String {
+    let token = prefix.trim_end_matches(':');
+    if token.is_empty() {
+        String::new()
+    } else {
+        format!("{}: ", token)
+    }
 }
 
 /// Shorthand: `http_error` with the class derived from the status.

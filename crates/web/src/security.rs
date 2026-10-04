@@ -112,6 +112,51 @@ impl RequiredRole {
     }
 }
 
+/// Second path segments the router in `route_request` actually matches.
+///
+/// Kept beside the role table on purpose: both answer "does this path exist?",
+/// so a route added to one belongs in the other.
+const ROUTED_SEGMENTS: &[&str] = &[
+    "accounts",
+    "audit",
+    "auth",
+    "batch",
+    "collection-items",
+    "collections",
+    "dashboard",
+    "encryption",
+    "face-groups",
+    "files",
+    "geo-files",
+    "health",
+    "locations",
+    "loose-groups",
+    "metrics",
+    "permissions",
+    "readyz",
+    "search",
+    "share-links",
+    "shared",
+    "sync",
+    "trash",
+    "users",
+    "versions",
+];
+
+/// Does the router handle this path at all?
+///
+/// Consulted *before* the auth gate: an unknown path has to reach the 404 arm
+/// at the bottom of `route_request`, otherwise every anonymous probe of a typo'd
+/// or not-yet-implemented route answers `401` and the 404 is unreachable
+/// without a token.
+pub fn is_known_route(segments: &[&str]) -> bool {
+    match segments {
+        ["api"] => true,
+        ["api", second, ..] => ROUTED_SEGMENTS.contains(second),
+        _ => false,
+    }
+}
+
 /// Route → required-role table.
 ///
 /// Default is `Authenticated`: every route not listed here demands a valid

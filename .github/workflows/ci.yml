@@ -412,6 +412,9 @@ jobs:
           sudo -u builder bash -c "
             export HOME=/home/builder
             export PATH=\$HOME/.cargo/bin:\$PATH
+            # No /dev/fuse in the container: make the AppImage-based tools
+            # (linuxdeploy) unpack and exec themselves instead of mounting.
+            export APPIMAGE_EXTRACT_AND_RUN=1
             cd $GITHUB_WORKSPACE
             npm ci
             npm run tauri build
