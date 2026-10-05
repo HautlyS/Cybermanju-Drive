@@ -25,8 +25,8 @@
 //   or fsck here, so they verify the catalog row, not bytes.
 
 use cybermanju_db::Database as DbDefs;
-use js_sys::{JsValue, Reflect};
-use redb::{Database as RedbDatabase, ReadableTable};
+use js_sys::Reflect;
+use redb::{Database as RedbDatabase, ReadableTable, StorageBackend};
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering};
 use wasm_bindgen::prelude::*;
@@ -131,7 +131,7 @@ async fn open_opfs_handle(file: &str) -> Result<JsValue, String> {
 }
 
 fn open_all_tables(db: &RedbDatabase) -> Result<(), String> {
-    let txn = db
+    let mut txn = db
         .begin_write()
         .map_err(|e| format!("network: begin_write failed: {e}"))?;
     // Two-phase commits on OPFS: `flush()` is not `fsync()` (see module
@@ -295,7 +295,7 @@ fn write_one(
     value: &str,
 ) -> Result<(), String> {
     with_db(|db| {
-        let txn = db.begin_write().map_err(|e| e.to_string())?;
+        let mut txn = db.begin_write().map_err(|e| e.to_string())?;
         txn.set_two_phase_commit(true);
         {
             let mut t = txn.open_table(table).map_err(|e| e.to_string())?;
@@ -311,11 +311,12 @@ fn delete_one(
     key: &str,
 ) -> Result<bool, String> {
     with_db(|db| {
-        let txn = db.begin_write().map_err(|e| e.to_string())?;
+        let mut txn = db.begin_write().map_err(|e| e.to_string())?;
         txn.set_two_phase_commit(true);
         let removed = {
             let mut t = txn.open_table(table).map_err(|e| e.to_string())?;
-            t.remove(key).map_err(|e| e.to_string())?.is_some()
+            let removed = t.remove(key).map_err(|e| e.to_string())?.is_some();
+            removed
         };
         txn.commit().map_err(|e| e.to_string())?;
         Ok(removed)
@@ -328,7 +329,7 @@ fn arg<'a>(args: &'a serde_json::Value, name: &str) -> Result<&'a str, String> {
         .ok_or_else(|| format!("invalid: missing string argument '{name}'"))
 }
 
-fn opt_arg<'a>(args: &'a serde_json::Value, name: &str) -> Option<String> {
+fn opt_arg(args: &serde_json::Value, name: &str) -> Option<String> {
     args.get(name).and_then(|v| {
         if v.is_null() {
             None
@@ -402,7 +403,7 @@ pub fn db_dispatch(op: &str, args_json: &str) -> String {
         .get("now")
         .and_then(|v| v.as_str())
         .unwrap_or("1970-01-01T00:00:00Z");
-    let result: Result<serde_json::Value, String> = match op {
+    let result: Result<serde_json::Value, String> = (|| match op {
         // ── accounts ──
         "accounts.list" => Ok(serde_json::Value::Array(
             read_all(DbDefs::get_accounts_table())?
@@ -413,7 +414,7 @@ pub fn db_dispatch(op: &str, args_json: &str) -> String {
         "accounts.create" => {
             let name = arg(&args, "name")?.trim().to_string();
             if name.is_empty() {
-                return err_envelope("invalid: account name is required");
+                return Err("invalid: account name is required".to_string());
             }
             let account_type = args
                 .get("accountType")
@@ -443,7 +444,7 @@ pub fn db_dispatch(op: &str, args_json: &str) -> String {
             let target = arg(&args, "accountId")?.to_string();
             let rows = read_all(DbDefs::get_accounts_table())?;
             if !rows.iter().any(|(k, _)| k == &target) {
-                return err_envelope(&format!("not_found: account {target}"));
+                return Err(format!("not_found: account {target}"));
             }
             let mut switched = serde_json::Value::Null;
             for (key, raw) in rows {
@@ -465,8 +466,9 @@ pub fn db_dispatch(op: &str, args_json: &str) -> String {
                 .ok_or_else(|| format!("not_found: account {target}"))?;
             let v: serde_json::Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
             if v.get("isActive").and_then(|b| b.as_bool()).unwrap_or(false) {
-                return err_envelope(
-                    "Cannot delete the active account. Switch to another account first.",
+                return Err(
+                    "Cannot delete the active account. Switch to another account first."
+                        .to_string(),
                 );
             }
             Ok(serde_json::Value::Bool(delete_one(
@@ -515,7 +517,7 @@ pub fn db_dispatch(op: &str, args_json: &str) -> String {
         "sync.delete" => {
             let id = arg(&args, "configId")?.to_string();
             if !delete_one(DbDefs::get_sync_configs_table(), &id)? {
-                return err_envelope(&format!("not_found: sync config {id}"));
+                return Err(format!("not_found: sync config {id}"));
             }
             let _ = delete_one(DbDefs::get_sync_secrets_table(), &id);
             Ok(serde_json::Value::Bool(true))
@@ -546,7 +548,7 @@ pub fn db_dispatch(op: &str, args_json: &str) -> String {
             for (_, v) in read_all(DbDefs::get_users_table())? {
                 if let Ok(u) = serde_json::from_str::<serde_json::Value>(&v) {
                     if u.get("username").and_then(|n| n.as_str()) == Some(&username) {
-                        return err_envelope(&format!("Username '{username}' already exists"));
+                        return Err(format!("Username '{username}' already exists"));
                     }
                 }
             }
@@ -586,7 +588,7 @@ pub fn db_dispatch(op: &str, args_json: &str) -> String {
         "users.delete" => {
             let id = arg(&args, "userId")?.to_string();
             if !delete_one(DbDefs::get_users_table(), &id)? {
-                return err_envelope(&format!("not_found: user {id}"));
+                return Err(format!("not_found: user {id}"));
             }
             Ok(serde_json::Value::Bool(true))
         }
@@ -594,7 +596,7 @@ pub fn db_dispatch(op: &str, args_json: &str) -> String {
             let id = arg(&args, "userId")?.to_string();
             let role = arg(&args, "role")?.to_string();
             if !["admin", "user", "viewer"].contains(&role.as_str()) {
-                return err_envelope(&format!("invalid: unknown role '{role}'"));
+                return Err(format!("invalid: unknown role '{role}'"));
             }
             let raw = read_one(DbDefs::get_users_table(), &id)?
                 .ok_or_else(|| format!("not_found: user {id}"))?;
@@ -652,7 +654,7 @@ pub fn db_dispatch(op: &str, args_json: &str) -> String {
                 .and_then(|v| v.as_u64())
                 .ok_or_else(|| "invalid: missing sizeBytes".to_string())?;
             if size < 1024 * 1024 {
-                return err_envelope("unsupported: demo disk size must be ≥ 1 MiB");
+                return Err("unsupported: demo disk size must be ≥ 1 MiB".to_string());
             }
             let count = read_all(DbDefs::get_disks_table())?.len() as u64;
             let id = new_id();
@@ -715,7 +717,7 @@ pub fn db_dispatch(op: &str, args_json: &str) -> String {
             let mut disk = get_disk(&id)?;
             let used = disk.get("usedBytes").and_then(|v| v.as_u64()).unwrap_or(0);
             if size < used {
-                return err_envelope(&format!(
+                return Err(format!(
                     "unsupported: size {size} is below {used} used bytes"
                 ));
             }
@@ -791,7 +793,7 @@ pub fn db_dispatch(op: &str, args_json: &str) -> String {
         "files.create_folder" => {
             let name = arg(&args, "name")?.trim().to_string();
             if name.is_empty() {
-                return err_envelope("invalid: folder name is required");
+                return Err("invalid: folder name is required".to_string());
             }
             let id = new_id();
             let node = serde_json::json!({
@@ -834,12 +836,12 @@ pub fn db_dispatch(op: &str, args_json: &str) -> String {
         "files.delete" => {
             let id = arg(&args, "fileId")?.to_string();
             if !delete_one(DbDefs::get_files_table(), &id)? {
-                return err_envelope(&format!("not_found: file {id}"));
+                return Err(format!("not_found: file {id}"));
             }
             Ok(serde_json::Value::Bool(true))
         }
         _ => Err(format!("unsupported: unknown demo-db op '{op}'")),
-    };
+    })();
     match result {
         Ok(data) => envelope_json(true, &data, None),
         Err(e) => envelope_json(false, &serde_json::Value::Null, Some(e)),
@@ -874,7 +876,7 @@ pub fn db_snapshot() -> Result<JsValue, JsValue> {
                 .read(0, len as usize)
                 .map_err(|e| format!("network: snapshot read failed: {e}"))
         })
-        .map_err(JsValue::from_str)?;
+        .map_err(|e| JsValue::from_str(&e))?;
     let view = js_sys::Uint8Array::new_with_length(bytes.len() as u32);
     view.copy_from(&bytes);
     Ok(view.into())

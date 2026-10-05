@@ -14,10 +14,11 @@
 // databases. The dispatcher therefore opens the database with paranoid
 // two-phase commits and keeps periodic whole-file snapshots; see `db.rs`.
 
-use js_sys::{JsValue, Object, Reflect, Uint8Array};
+use js_sys::{Object, Reflect, Uint8Array};
 use redb::StorageBackend;
 use std::fmt;
-use std::io::{Error, ErrorKind};
+use std::io::Error;
+use wasm_bindgen::prelude::JsValue;
 use wasm_bindgen::JsCast;
 
 /// An already-open OPFS sync access handle for one database file.
@@ -36,7 +37,7 @@ impl fmt::Debug for OpfsBackend {
 }
 
 fn io_err(what: &str, detail: String) -> Error {
-    Error::new(ErrorKind::Other, format!("opfs:{what}: {detail}"))
+    Error::other(format!("opfs:{what}: {detail}"))
 }
 
 fn get(obj: &JsValue, name: &str) -> Result<JsValue, Error> {
