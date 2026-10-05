@@ -172,3 +172,15 @@ npm run lint
   `describeSyncError` prefix hints, full `SyncPanel.vue` wizard (create/test/start/cancel/quota/restore/remote-delete/browse + OAuth + striped placement),
   honest `sync start` refusal text, `import_from_url` bytes-to-disk (F19), and faces no-fabrication (F7).
   Left for CI: `cargo test -p cybermanju-os`, `-p cybermanju-tests os`, `npm run typecheck/lint`, `scripts/os-acceptance.sh 2`.
+- 2026-10-06 — `sync start` runs for real; repair tasks bridged into `ps`/`top`; R6-3 closed — no toolchain, CI proves.
+  `shell.rs` gains the portable `SyncStart`/`parse_sync_start` starter core (pure parsing, no I/O —
+  coreutils-style, reusable from WASM later) + unit tests; `os_api::try_sync_start_exec` +
+  a lockless intercept in `route_request` (before the request lock, where `start_job`
+  would deadlock) runs it detached exactly like `POST /api/sync/start`, answering the
+  terminal's `ExecResult` shape. Bare-library `execute()` keeps the honest `unsupported:`.
+  `task.rs` mirrors `repair::tasks()` into `ps`/`top` as stable synthetic rows
+  (`REPAIR_ID_BASE` + FNV, never persisted, `kill` refuses with `unsupported:` since the
+  workers are detached); `kill`/`ps`/`top` call sites unchanged. R6-3 marked resolved
+  (fix already in `os-acceptance.sh:28`); Tier 0 box reworded to pending-CI.
+  Left for CI: `cargo test -p cybermanju-os -p cybermanju-sync -p cybermanju-tests`,
+  `cargo check -p cybermanju-drive` (new tree-sitter deps), `scripts/os-acceptance.sh all`.

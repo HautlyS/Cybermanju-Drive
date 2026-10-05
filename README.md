@@ -86,7 +86,7 @@
 - **Tasks & compute** — `ps/top/kill`, local rayon + per-provider `Capabilities.compute` slots; more providers = more parallelism
 - **Durability** — BLAKE3 scrub, replica/RS repair, `rebuild-from-remote` (survives laptop loss), refcount GC (never deletes referenced chunk), single-writer leases (`conflict:`)
 - Sync runs are async: `POST /api/sync/start → 202 {jobId}`, poll `GET /api/sync/jobs/{jobId}`; error prefixes `auth:/rate_limited:/not_found:/unsupported:/too_large:/integrity:/network:` mapped to UI hints
-- Honest limits: ONNX faces return empty (never fabricated); code parsing is heuristic regex (tree-sitter grammar integration pending); Telegram/Photos delete return `unsupported:`; `sync start` in `cybsh` points at the 202 job API
+- Honest limits: ONNX faces return empty (never fabricated); code parsing is real tree-sitter for rust/python/javascript/typescript/go/bash with heuristic fallback for the rest (`"engine"` says which ran); Telegram/Photos delete return `unsupported:`; `cybsh sync start` runs as a detached 202-style job via `POST /api/os/exec`
 - Ops: see `docs/OPERATIONS.md` (env, backup, TLS proxy, health/readyz) and `docs/SECURITY.md`
 
 ---
@@ -111,7 +111,7 @@
 | Hashing | BLAKE3 | 1 |
 | Content ID | UUID v4 | 1 |
 | ML Inference | ort (ONNX Runtime) | 2.0.0-rc.12 |
-| Code Parsing | heuristic regex (tree-sitter-shaped JSON; grammar integration pending) | — |
+| Code Parsing | real tree-sitter (rust/python/js/ts/go/bash) + heuristic fallback | tree-sitter 0.24 |
 | EXIF | kamadak-exif | 0.5 |
 | OS shell | cybsh (server-side) + WASM dispatcher | — |
 | Erasure coding | reed-solomon-erasure (k+m) | — |
@@ -386,7 +386,7 @@ cybermanju-drive/
 │       │   ├── backends.rs             # Local, GitHub, Google Drive, Google Photos implementations
 │       │   └── pipeline.rs             # SyncPipeline: scan → compress → preview → upload → link → clean
 │       ├── tree_sitter/
-│       │   └── mod.rs                  # Language detection, heuristic symbol extraction
+│       │   └── mod.rs                  # Real tree-sitter grammars (6 langs) + heuristic fallback
 │       └── web_dashboard/
 │           └── mod.rs                  # Embedded HTTP server, REST API router, handlers
 ├── Dockerfile                          # Multi-stage Docker build (Node → Rust → Alpine)

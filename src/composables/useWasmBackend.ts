@@ -106,3 +106,110 @@ export async function wasmSearchFiles(query: string): Promise<Array<{ path: stri
     return []
   }
 }
+
+// ── Database worker (redb in OPFS) ────────────────────────────────────
+// The database runs in a Dedicated Worker because OPFS sync access handles
+// — redb's only durable browser primitive — exist solely there. Calls are
+// message-passed (the frontend is async end-to-end, so no shared-memory
+// ferry is needed). If worker construction fails, we fall back to running
+// the same wasm module on the main thread with an in-memory database
+// (session-only persistence).
+
+interface DbReply {
+  id: number
+  ok: boolean
+  data?: unknown
+  error?: string
+}
+
+let dbWorker: Worker | null = null
+let dbWorkerFailed = false
+let dbSeq = 0
+const dbPending = new Map<
+  number,
+  { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: number }
+>()
+
+/** Which storage backs the demo database once known (`opfs`|`memory`|null). */
+let dbBackend: string | null = null
+export async function wasmDbBackend(): Promise<string | null> {
+  if (dbBackend) return dbBackend
+  try {
+    const s = (await wasmDbDispatch('_status', {}, 30000)) as { backend?: string }
+    if (s?.backend) dbBackend = s.backend
+  } catch {
+    dbBackend = null
+  }
+  return dbBackend
+}
+
+function dbRejectAll(err: Error) {
+  for (const [, p] of dbPending) {
+    window.clearTimeout(p.timer)
+    p.reject(err)
+  }
+  dbPending.clear()
+}
+
+async function mainThreadDbDispatch(op: string, args: Record<string, unknown>): Promise<unknown> {
+  if (op === '_status') return { backend: 'memory', file: 'cybermanju.db' }
+  const mod = await loadWasm()
+  if (!mod || typeof (mod as unknown as { db_dispatch?: unknown }).db_dispatch !== 'function') {
+    throw new Error('wasm database unavailable')
+  }
+  const { db_dispatch } = mod as unknown as {
+    db_dispatch: (op: string, argsJson: string) => string
+  }
+  const raw = db_dispatch(
+    op,
+    JSON.stringify({ ...args, now: new Date().toISOString() }),
+  )
+  const env = JSON.parse(raw) as { ok: boolean; data?: unknown; error?: string }
+  if (!env.ok) throw new Error(String(env.error ?? 'unknown db error'))
+  return env.data ?? null
+}
+
+/** One database op through the worker (or the main-thread fallback). */
+export async function wasmDbDispatch(
+  op: string,
+  args: Record<string, unknown> = {},
+  timeoutMs = 30000,
+): Promise<unknown> {
+  if (!dbWorker && !dbWorkerFailed) {
+    try {
+      dbWorker = new Worker(new URL('../workers/db-worker.ts', import.meta.url), {
+        type: 'module',
+      })
+      dbWorker.onmessage = (ev: MessageEvent<DbReply>) => {
+        const pending = dbPending.get(ev.data?.id)
+        if (!pending) return
+        dbPending.delete(ev.data.id)
+        window.clearTimeout(pending.timer)
+        if (ev.data.ok) pending.resolve(ev.data.data ?? null)
+        else pending.reject(new Error(String(ev.data.error ?? 'unknown db error')))
+      }
+      dbWorker.onerror = (ev) => {
+        dbRejectAll(new Error(`database worker error: ${ev.message || 'unknown'}`))
+      }
+    } catch (e) {
+      dbWorkerFailed = true
+      dbWorker = null
+      void e
+    }
+  }
+
+  if (dbWorker) {
+    const id = ++dbSeq
+    return new Promise<unknown>((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        dbPending.delete(id)
+        reject(new Error(`database worker timed out on '${op}'`))
+      }, timeoutMs)
+      dbPending.set(id, { resolve, reject, timer })
+      dbWorker?.postMessage({ id, op, args })
+    })
+  }
+
+  // Main-thread fallback: same module, in-memory database.
+  return mainThreadDbDispatch(op, args)
+}

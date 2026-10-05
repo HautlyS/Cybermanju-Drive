@@ -8,6 +8,12 @@ const stub = `
 export function os_dispatch() {
   throw new Error('cybermanju-drive-wasm is not available in the desktop build')
 }
+export async function db_open() {
+  throw new Error('cybermanju-drive-wasm is not available in the desktop build')
+}
+export function db_dispatch() {
+  throw new Error('cybermanju-drive-wasm is not available in the desktop build')
+}
 export default function init() {
   return Promise.resolve()
 }

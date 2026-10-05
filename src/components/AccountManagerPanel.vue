@@ -14,14 +14,17 @@
     <!-- Merged volume: proof that every .cybermanju disk is one volume -->
     <div class="section">
       <h3 class="section-title">[VOLUME] ONE MERGED DISK</h3>
-      <div class="df-bar" role="img" :aria-label="`Volume ${usedPct.toFixed(1)} percent used`">
-        <div class="df-used" :style="{ width: `${usedPct}%` }"></div>
+      <div v-if="staticHost" class="static-note">
+        OFFLINE DEMO VAULT — real redb cybermanju.db in this browser{{ dbBackend ? ` (${dbBackend.toUpperCase()})` : '' }}. ACCOUNTS, PROVIDERS, DISKS, USERS + FILES WORK HERE; ONLY PROVIDER NETWORK SYNC NEEDS THE SERVER.
+      </div>
+      <div class="df-bar" role="img" :aria-label="`Volume ${volumePct.toFixed(1)} percent used`">
+        <div class="df-used" :style="{ width: `${volumePct}%` }"></div>
       </div>
       <div class="df-legend">
-        <span>USED {{ human(df?.usedBytes ?? 0) }}</span>
-        <span>FREE {{ human(df?.freeBytes ?? 0) }}</span>
-        <span>TOTAL {{ human(df?.totalBytes ?? 0) }}</span>
-        <span class="text-muted">{{ df?.diskCount ?? 0 }} DISKS ATTACHED</span>
+        <span>USED {{ human(volumeView?.usedBytes ?? 0) }}</span>
+        <span>FREE {{ human(volumeView?.freeBytes ?? 0) }}</span>
+        <span>TOTAL {{ human(volumeView?.totalBytes ?? 0) }}</span>
+        <span class="text-muted">{{ volumeView?.diskCount ?? 0 }} DISKS ATTACHED</span>
       </div>
     </div>
 
@@ -145,6 +148,10 @@
             <span class="text-muted small">CHAT ID</span>
             <input v-model="draft(cfg).chatId" class="input" placeholder="chat id" autocomplete="off" />
           </label>
+          <label v-if="cfg.backendType === 'gitlab'" class="field grow">
+            <span class="text-muted small">INSTANCE URL (SELF-HOSTED — EMPTY = GITLAB.COM)</span>
+            <input v-model="draft(cfg).basePath" class="input" placeholder="https://gitlab.example.com" autocomplete="off" />
+          </label>
           <label v-if="cfg.backendType === 'local'" class="field grow">
             <span class="text-muted small">LOCAL PATH</span>
             <input v-model="draft(cfg).basePath" class="input" placeholder="/DATA/SYNC" autocomplete="off" />
@@ -157,7 +164,7 @@
         <p class="text-muted small">{{ authGuidance(cfg.backendType) }}</p>
         <div class="row-actions" style="margin-top:6px;">
           <button class="ghost-btn xs primary" type="button" :disabled="saving === cfg.id" @click="saveCreds(cfg)">{{ saving === cfg.id ? 'SAVING…' : 'SAVE & VERIFY' }}</button>
-          <button class="ghost-btn xs" type="button" @click="quota(cfg)">QUOTA</button>
+          <button class="ghost-btn xs" type="button" title="Uses saved credentials — SAVE & VERIFY first if you just pasted a token" @click="quota(cfg)">QUOTA</button>
           <span v-if="quotaMsg[cfg.id]" class="text-muted small">{{ quotaMsg[cfg.id] }}</span>
         </div>
 
@@ -226,6 +233,10 @@
             <span class="text-muted small">CHAT ID</span>
             <input v-model="wiz.chatId" class="input" placeholder="chat id" autocomplete="off" />
           </label>
+          <label v-if="wiz.backendType === 'gitlab'" class="field grow">
+            <span class="text-muted small">INSTANCE URL (SELF-HOSTED — EMPTY = GITLAB.COM)</span>
+            <input v-model="wiz.basePath" class="input" placeholder="https://gitlab.example.com" autocomplete="off" />
+          </label>
           <label v-if="wiz.backendType === 'local'" class="field grow">
             <span class="text-muted small">LOCAL PATH</span>
             <input v-model="wiz.basePath" class="input" placeholder="/DATA/SYNC" autocomplete="off" />
@@ -249,10 +260,21 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { isStaticHost } from '@/composables/useTauri'
+import { wasmDbBackend } from '@/composables/useWasmBackend'
 import { SYNC_BACKEND_INFO, describeSyncError, isOauthCapable } from '@/types'
 import type { DiskRow, SyncBackendType, SyncConfig } from '@/types'
 
 const store = useAppStore()
+
+/**
+ * Static WASM pack (GitHub Pages): no dashboard behind the page. Accounts,
+ * providers, disks, users and files run offline against a real redb
+ * `cybermanju.db` in this browser (OPFS-durable, in-memory fallback) via
+ * the DB worker. Only provider *network* calls need the server.
+ */
+const staticHost = isStaticHost()
+const dbBackend = ref<string | null>(null)
 
 const refreshing = ref(false)
 const saving = ref<string | null>(null)
@@ -306,6 +328,30 @@ const usedPct = computed(() => {
   return Math.min(100, (d.usedBytes / d.totalBytes) * 100)
 })
 
+// In the static build the OS `df` covers the terminal's virtual volume, so
+// the strip instead sums the real attached `.cybermanju` disks — the same
+// merge the server reports, computed client-side from the same rows.
+const diskVolume = computed(() => {
+  const attached = store.disks.filter(d => d.state === 'attached')
+  const total = attached.reduce((s, d) => s + (d.capacityBytes || 0), 0)
+  const used = attached.reduce((s, d) => s + (d.usedBytes || 0), 0)
+  return {
+    totalBytes: total,
+    usedBytes: used,
+    freeBytes: Math.max(0, total - used),
+    diskCount: attached.length,
+    attachedBytes: total,
+    scratchBytes: 0,
+    root: '/',
+  }
+})
+const volumeView = computed(() => (staticHost ? diskVolume.value : df.value))
+const volumePct = computed(() => {
+  const d = volumeView.value
+  if (!d || d.totalBytes === 0) return 0
+  return Math.min(100, (d.usedBytes / d.totalBytes) * 100)
+})
+
 function human(bytes: number): string {
   if (!bytes) return '0 B'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -344,7 +390,7 @@ function authGuidance(b: SyncBackendType): string {
     case 'github':
       return 'GitHub removed account passwords: sign in with OAUTH above, or paste a personal access token (repo scope) as the password.'
     case 'gitlab':
-      return 'GitLab sign-in is OAUTH, or a personal access token (api scope) pasted as the password.'
+      return 'GitLab sign-in is OAUTH, or a personal access token (api scope) pasted as the password. Self-hosted? Set the instance URL too.'
     case 'googleDrive':
     case 'googlePhotos':
       return 'Google accepts OAUTH only — there is no password login. CONNECT WITH OAUTH above.'
@@ -427,9 +473,29 @@ async function toggleEnabled(cfg: SyncConfig) {
   await store.saveSyncConfig({ ...cfg, enabled: !cfg.enabled })
 }
 
+/**
+ * The config as the user currently sees it: stored row overlaid with any
+ * draft edits (notably a freshly pasted token). Probing this — instead of
+ * the bare stored row — is what makes "paste token, hit TEST" actually
+ * verify the token before it is saved.
+ */
+function mergedForProbe(cfg: SyncConfig): SyncConfig {
+  const d = drafts[cfg.id]
+  if (!d) return cfg
+  const merged: SyncConfig = { ...cfg }
+  if (d.token.trim()) merged.token = d.token.trim()
+  if (d.repoName.trim()) merged.repoName = d.repoName.trim()
+  if (d.branch.trim()) merged.branch = d.branch.trim()
+  if (d.folderId.trim()) merged.folderId = d.folderId.trim()
+  if (d.albumId.trim()) merged.albumId = d.albumId.trim()
+  if (d.chatId.trim()) merged.chatId = d.chatId.trim()
+  if (d.basePath.trim()) merged.basePath = d.basePath.trim()
+  return merged
+}
+
 async function probe(cfg: SyncConfig) {
   authState.value[cfg.id] = { ok: null, detail: 'probing…' }
-  const r = await store.probeSyncConnection(cfg)
+  const r = await store.probeSyncConnection(mergedForProbe(cfg))
   authState.value[cfg.id] = { ok: r.ok, detail: r.detail }
 }
 
@@ -473,6 +539,13 @@ async function quota(cfg: SyncConfig) {
 
 /** PKCE OAuth: open the provider approval, then poll until credentials land. */
 async function oauthConnect(cfg: SyncConfig) {
+  // No dashboard behind the static build means no server-side callback to
+  // land credentials in — say so immediately instead of polling for 2 min.
+  if (staticHost) {
+    oauthMsg.value[cfg.id] =
+      'OAuth needs the dashboard (or desktop app) for the server callback — in this offline demo, paste a token below instead.'
+    return
+  }
   cancelOauth()
   oauthBusy.value = cfg.id
   oauthMsg.value[cfg.id] = 'Opening provider approval…'
@@ -592,6 +665,11 @@ async function addProvider(verify: boolean) {
 
 onMounted(() => {
   void refresh()
+  if (staticHost) {
+    void wasmDbBackend().then((b) => {
+      dbBackend.value = b
+    })
+  }
 })
 
 onBeforeUnmount(() => {
@@ -714,6 +792,15 @@ onBeforeUnmount(() => {
 .slider { flex: 1; min-width: 140px; accent-color: #5af78e; }
 
 .note { margin: 6px 0 0; font-size: 11px; color: #9aedfe; white-space: pre-wrap; word-break: break-word; }
+.static-note {
+  border: 1px dashed #f3f99d;
+  color: #f3f99d;
+  font-size: 10px;
+  line-height: 1.5;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  letter-spacing: 0.3px;
+}
 .mono { font-family: inherit; }
 .url { word-break: break-all; color: #9aedfe; }
 .linklike { background: none; border: none; color: #9aedfe; cursor: pointer; font: inherit; text-decoration: underline; padding: 0; }

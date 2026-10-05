@@ -37,6 +37,20 @@ brotli = "7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
+# Async JS interop (OPFS access handles resolve via Promises)
+wasm-bindgen-futures = "0.4"
+
+# Embedded database: pure-Rust redb over a custom OPFS StorageBackend
+# (worker) with an in-memory fallback. Same table names + JSON row shapes
+# as cybermanju-db, so the file the demo writes IS a real cybermanju.db.
+redb = "2"
+cybermanju-db = { path = "../db" }
+cybermanju-types = { path = "../types" }
+
+# Argon2id password hashing (pure Rust, wasm-safe), same pinned parameters
+# as the server (m=19456, t=2, p=1, 32-byte tag).
+argon2 = "0.5"
+
 # Logging
 wasm-logger = "0.2"
 log = "0.4"

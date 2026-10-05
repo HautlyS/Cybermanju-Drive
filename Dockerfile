@@ -18,14 +18,17 @@ RUN npm install --frozen-lockfile 2>/dev/null || npm install
 # Copy frontend source and build for web deployment (no Tauri)
 COPY index.html ./
 COPY tsconfig.json tsconfig.node.json env.d.ts ./
-COPY vite.config.wasm.ts ./
+COPY vite.config.wasm.ts vite.config.ts ./
+COPY vite-plugin-wasm-stub.ts ./
 COPY public/ ./public/
 COPY keymaps/ ./keymaps/
 COPY src/ ./src/
 
 # DOCKER_BUILD=true tells vite.config.wasm.ts to use base: "/" instead of
-# the GitHub Pages prefix "/cybermanju-drive/"
-RUN DOCKER_BUILD=true npm run build:wasm
+# the GitHub Pages prefix "/cybermanju-drive/". The docker image serves the
+# dashboard REST API on :3456, so the wasm backend is not needed here — the
+# frontend-only vite step uses the stub plugin (no wasm-pack in this stage).
+RUN DOCKER_BUILD=true npm run build:wasm:frontend
 
 # ─── Stage 2: Rust Backend Build ─────────────────────────────────────
 FROM rust:alpine AS backend-builder

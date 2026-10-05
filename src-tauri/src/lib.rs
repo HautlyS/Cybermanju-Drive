@@ -164,6 +164,7 @@ pub fn run() {
             // Tree-sitter code intelligence
             tree_sitter::parse_file,
             tree_sitter::get_symbols,
+            tree_sitter::parse_text,
             // Loose groups
             files::create_loose_group,
             files::add_to_loose_group,

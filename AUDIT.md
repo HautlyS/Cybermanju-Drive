@@ -249,8 +249,10 @@ honesty · 6 → workspace-wide CI + stale `src-tauri/Cargo.lock` deletion · 7 
   `user-scalable=no` removal, WASM base `/cybermanju-drive/`.
 - Honesty: F7 closed (no BLAKE3 pseudo-faces — empty set + log), F19 closed
   (`import_from_url` persists bytes to `imports/{id}_{name}` + `original_path`),
-  tree-sitter claim corrected in README (heuristic regex, grammar integration pending),
-  `cybsh sync start` refusal now points at `POST /api/sync/start → 202` (R8-1 resolved as documented).
+  F8 closed (real tree-sitter grammars for rust/python/js/ts/go/bash behind
+  default-on `real-treesitter`, heuristic fallback with `"engine"` reported),
+  `cybsh sync start` runs for real (lockless REST intercept → detached
+  `start_job`, same 202 semantics as `POST /api/sync/start`; R8-1 closed).
 - Docs: `docs/OPERATIONS.md` added; README + ARCHITECTURE §12 cover disks/volume/cybsh/tasks/compute;
   version single-source verified (`package.json` truth; `/api` version uses `CARGO_PKG_VERSION`).
 - Left for CI (no `cargo`/`node_modules` on this box): workspace fmt/clippy/test,

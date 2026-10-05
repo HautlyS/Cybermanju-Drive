@@ -26,14 +26,14 @@ pub use api::{
 pub mod task;
 
 pub use task::{
-    kill, ps, top, LoadAvg, MemInfo, PsSnapshot, Task, TaskCounts, TaskState, TaskTable,
-    TopSnapshot, MAX_TASKS,
+    kill, ps, repair_rows, top, LoadAvg, MemInfo, PsSnapshot, Task, TaskCounts, TaskState,
+    TaskTable, TopSnapshot, MAX_TASKS, REPAIR_ID_BASE,
 };
 
 /// `cybsh` — the system terminal: tokenizer, parser and the command table.
 pub mod shell;
 
-pub use shell::{command_table, completions, execute, run};
+pub use shell::{command_table, completions, execute, parse_sync_start, run, SyncStart};
 
 /// Compute fan-out: worker scoring (`workers`) and the job scheduler
 /// (`jobs`, `compute run`).

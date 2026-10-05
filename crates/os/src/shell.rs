@@ -410,6 +410,63 @@ fn strip_json(cmd: &[String]) -> (Vec<String>, bool) {
     (out, json)
 }
 
+// ─── `sync start` starter core ────────────────────────────────────────────
+
+/// A parsed `sync start` invocation.
+///
+/// Pure, portable parsing only — no I/O, no locks, no threads. This is the
+/// "coreutils-style" core shared by every transport: the native shell, the
+/// REST intercept in `POST /api/os/exec` (which turns it into a detached
+/// `202`-style job via `start_job`), and later the WASM dispatcher. Callers
+/// that cannot run a detached job (bare `execute()` with no shared database
+/// handle) keep answering the honest `unsupported:` below.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncStart {
+    /// Explicit config id, or `None` = first enabled config.
+    pub config_id: Option<String>,
+    /// File ids to sync; empty = whole library.
+    pub file_ids: Vec<String>,
+}
+
+/// Parse a full shell line as `sync start [config-id] [file-id …]`.
+///
+/// Returns `None` for anything else — including multi-stage pipelines and
+/// `sync status`/`sync cancel` (those already run lock-free inside
+/// `execute`). `--json` flags are ignored, like everywhere else in `cybsh`.
+pub fn parse_sync_start(line: &str) -> Option<SyncStart> {
+    let tokens = tokenize(line).ok()?;
+    let parsed = parse(tokens).ok()?;
+    if parsed.segments.len() != 1 {
+        return None;
+    }
+    let (_, pipeline) = &parsed.segments[0];
+    if pipeline.len() != 1 {
+        return None;
+    }
+    let cmd = &pipeline[0];
+    if cmd.first().map(String::as_str) != Some("sync") {
+        return None;
+    }
+    if cmd.get(1).map(String::as_str) != Some("start") {
+        return None;
+    }
+    let mut rest: Vec<String> = cmd
+        .iter()
+        .skip(2)
+        .filter(|a| a.as_str() != "--json")
+        .cloned()
+        .collect();
+    let config_id = if rest.is_empty() {
+        None
+    } else {
+        Some(rest.remove(0))
+    };
+    Some(SyncStart {
+        config_id,
+        file_ids: rest,
+    })
+}
+
 /// How many lines the human-readable tables keep (REST bodies stay small).
 const MAX_LINES: usize = 400;
 
@@ -1318,14 +1375,14 @@ fn sync_cmd(args: &[String], db: Option<&Database>, json: bool) -> Result<String
             })
         }
         "start" => {
-            // R8-1 resolved as documented refusal: a real sync run needs
-            // `&Arc<RwLock<Database>>` plus a worker thread, while
-            // `os_api::route` only holds `&Database` for its own request
-            // lifetime. The production path is async by design:
-            // `POST /api/sync/start -> 202 {jobId}`, then poll
-            // `GET /api/sync/jobs/{jobId}` (or `sync status` here).
-            // Returning `unsupported:` keeps the shell honest instead of
-            // blocking the request thread past the 5s write timeout.
+            // Bare `execute()` has no shared database handle (`&Database`
+            // only lives for one request) and no worker pool, so it cannot
+            // run a detached job itself. The real path is one layer up:
+            // `POST /api/os/exec` intercepts `sync start …` (see
+            // `parse_sync_start` + `try_sync_start_exec`) and runs it as a
+            // detached job exactly like `POST /api/sync/start`, returning
+            // `202`-style `{jobId}` output. This arm is the honest fallback
+            // for direct-library callers (unit tests, embedded use).
             let config_id = rest
                 .first()
                 .cloned()
@@ -1335,13 +1392,14 @@ fn sync_cmd(args: &[String], db: Option<&Database>, json: bool) -> Result<String
                 return serde_json::to_string(&serde_json::json!({
                     "started": false,
                     "configId": config_id,
-                    "error": "unsupported: `sync start` runs via POST /api/sync/start (202 job). Use the Sync panel or curl, then `sync status` here.",
+                    "error": "unsupported: `sync start` needs a detached worker — run it via POST /api/os/exec {\"line\": \"sync start …\"} or POST /api/sync/start (202 job). Then `sync status` here.",
                 }))
                 .map_err(|e| e.to_string());
             }
             Err(format!(
-                "unsupported: `sync start` runs via POST /api/sync/start (202 job, config {config_id}) — \
-                 the shell polls with `sync status`; see docs/OPERATIONS.md"
+                "unsupported: `sync start` needs a detached worker (config {config_id}) — \
+                 run it via POST /api/os/exec or POST /api/sync/start (202 job), \
+                 then poll with `sync status`; see docs/OPERATIONS.md"
             ))
         }
         other => Err(did_you_mean(
@@ -2058,5 +2116,35 @@ mod tests {
         assert!(hits.iter().any(|c| c == "disk create"));
         let hits = completions("");
         assert!(hits.len() >= command_table().len());
+    }
+
+    #[test]
+    fn sync_start_parser_accepts_only_single_start_lines() {
+        let parsed = parse_sync_start("sync start").expect("bare start");
+        assert_eq!(
+            parsed,
+            SyncStart {
+                config_id: None,
+                file_ids: vec![],
+            }
+        );
+        let parsed = parse_sync_start("sync start cfg-1 f1 f2 --json").expect("full");
+        assert_eq!(
+            parsed,
+            SyncStart {
+                config_id: Some("cfg-1".into()),
+                file_ids: vec!["f1".into(), "f2".into()],
+            }
+        );
+        assert!(parse_sync_start("sync status").is_none());
+        assert!(parse_sync_start("sync cancel").is_none());
+        assert!(parse_sync_start("disk list").is_none());
+        assert!(parse_sync_start("echo hi | sync start cfg").is_none());
+        assert!(parse_sync_start("sync start cfg && echo done").is_none());
+        assert!(parse_sync_start("sync start 'unclosed").is_none());
+        // The direct-library shell still refuses for real (no worker here);
+        // the REST intercept is what runs it detached.
+        let err = execute("sync start cfg-1", None).expect_err("no worker");
+        assert!(err.starts_with("unsupported:"), "got {err}");
     }
 }

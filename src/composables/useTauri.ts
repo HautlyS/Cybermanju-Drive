@@ -5,7 +5,7 @@
 // In Web mode: calls the Web Dashboard REST API (port 3456 by default)
 
 import type { FileNode } from '@/types'
-import { wasmOsDispatch, wasmSearchFiles, wasmBackendActive } from './useWasmBackend'
+import { wasmOsDispatch, wasmSearchFiles, wasmBackendActive, wasmDbDispatch } from './useWasmBackend'
 
 // ── Module-level connection state ─────────────────────────────
 
@@ -717,6 +717,14 @@ const REST_ROUTES: Record<string, RestMapping> = {
     transformResponse: (raw) => transformResponseKeys(raw),
   },
 
+  // ── Code intelligence (transport-agnostic: text in, symbols out) ──
+  parse_text: {
+    method: 'POST',
+    buildPath: () => '/api/code/parse',
+    transformRequest: (args) => ({ fileName: args.fileName, content: args.content }),
+    transformResponse: (raw) => transformResponseKeys(raw),
+  },
+
   // ── OS layer — cybsh, task table, compute, merged volume ──
   os_exec: {
     method: 'POST',
@@ -855,6 +863,136 @@ function wasmArgsForCommand(
   }
 }
 
+interface DbWasmRoute {
+  op: string
+  args: (a: Record<string, unknown>) => Record<string, unknown>
+  map?: (raw: unknown, a: Record<string, unknown>) => unknown
+  probe?: boolean
+}
+
+// Invoke command → demo-database op. The worker stores the same table names
+// and JSON row shapes as the server, so responses already match the
+// TypeScript types (plus the usual snake_case→camelCase pass).
+const DB_WASM_ROUTES: Record<string, DbWasmRoute> = {
+  list_accounts: { op: 'accounts.list', args: () => ({}) },
+  create_account: {
+    op: 'accounts.create',
+    args: (a) => ({ name: a.name, accountType: a.accountType, path: a.path, color: a.color }),
+  },
+  switch_account: { op: 'accounts.switch', args: (a) => ({ accountId: a.accountId }) },
+  delete_account: { op: 'accounts.delete', args: (a) => ({ accountId: a.accountId }) },
+  list_sync_configs: { op: 'sync.list', args: () => ({}) },
+  create_sync_config: { op: 'sync.save', args: (a) => ({ config: a.config }) },
+  delete_sync_config: { op: 'sync.delete', args: (a) => ({ configId: a.configId }) },
+  test_sync_connection: { op: '', args: () => ({}), probe: true },
+  list_users: { op: 'users.list', args: () => ({}) },
+  register_user: {
+    op: 'users.register',
+    args: (a) => ({ username: a.username, password: a.password, displayName: a.displayName, role: a.role }),
+  },
+  authenticate_user: {
+    op: 'users.authenticate',
+    args: (a) => ({ username: a.username, password: a.password }),
+  },
+  delete_user: { op: 'users.delete', args: (a) => ({ userId: a.userId }) },
+  update_user_role: { op: 'users.set_role', args: (a) => ({ userId: a.userId, role: a.role }) },
+  list_disks: { op: 'disks.list', args: () => ({}) },
+  create_disk: {
+    op: 'disks.create',
+    args: (a) => ({ configId: a.configId, sizeBytes: a.sizeBytes, passphrase: a.passphrase ?? '' }),
+  },
+  attach_disk: { op: 'disks.attach', args: (a) => ({ id: a.id ?? a.diskId }) },
+  detach_disk: { op: 'disks.detach', args: (a) => ({ id: a.id ?? a.diskId }) },
+  resize_disk: { op: 'disks.resize', args: (a) => ({ id: a.id ?? a.diskId, sizeBytes: a.sizeBytes }) },
+  check_disk: { op: 'disks.check', args: (a) => ({ id: a.id ?? a.diskId }) },
+  list_files: {
+    op: 'files.list',
+    args: () => ({}),
+    map: (raw, a) => {
+      // Same parentPath filtering as the REST route.
+      let files = raw as FileNode[]
+      const parentPath = a.parentPath as string | undefined
+      if (parentPath) {
+        files = files.filter(f => {
+          if (f.parentId) return f.parentId === parentPath
+          if (f.path) {
+            const prefix = parentPath === '/' ? '/' : `${parentPath}/`
+            return f.path.startsWith(prefix) && !f.path.slice(prefix.length).includes('/')
+          }
+          return false
+        })
+      }
+      return files
+    },
+  },
+  get_file: { op: 'files.get', args: (a) => ({ fileId: a.fileId }) },
+  create_folder: { op: 'files.create_folder', args: (a) => ({ name: a.name, parentId: a.parentId }) },
+  rename_file: { op: 'files.rename', args: (a) => ({ fileId: a.fileId, newName: a.newName }) },
+  delete_file: { op: 'files.delete', args: (a) => ({ fileId: a.fileId }) },
+}
+
+/**
+ * Connectivity probe for the static build: the worker holds credentials,
+ * but the network call itself runs here (Workers *can* fetch — this just
+ * keeps tokens next to the form that pasted them). Quiet by design: any
+ * failure is `false`, and the UI explains per backend.
+ */
+async function probeStaticConnection(args: Record<string, unknown>): Promise<boolean> {
+  const cfg = (args.config ?? {}) as Record<string, unknown>
+  const token = typeof cfg.token === 'string' ? cfg.token : ''
+  const backend = String(cfg.backendType ?? '')
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 10000)
+  try {
+    switch (backend) {
+      case 'local':
+        return true
+      case 'github': {
+        if (!token) return false
+        const res = await fetch('https://api.github.com/user', {
+          headers: { Authorization: `token ${token}`, Accept: 'application/vnd.github+json' },
+          signal: ctrl.signal,
+        })
+        return res.ok
+      }
+      case 'gitlab': {
+        if (!token) return false
+        const project = String(cfg.repoName ?? '')
+        if (!project) return false
+        const base = typeof cfg.basePath === 'string' && /^https?:\/\//.test(cfg.basePath)
+          ? cfg.basePath.replace(/\/+$/, '')
+          : 'https://gitlab.com'
+        const res = await fetch(
+          `${base}/api/v4/projects/${encodeURIComponent(project)}`,
+          { headers: { 'PRIVATE-TOKEN': token }, signal: ctrl.signal },
+        )
+        return res.ok
+      }
+      case 'telegram': {
+        if (!token) return false
+        const res = await fetch(`https://api.telegram.org/bot${token}/getMe`, {
+          signal: ctrl.signal,
+        })
+        return res.ok
+      }
+      case 'googleDrive': {
+        if (!token) return false
+        const res = await fetch('https://www.googleapis.com/drive/v3/about?fields=user', {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: ctrl.signal,
+        })
+        return res.ok
+      }
+      default:
+        return false
+    }
+  } catch {
+    return false
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 /** The core invoke — works in both Tauri and Web modes. */
 export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const mapping = REST_ROUTES[cmd]
@@ -865,9 +1003,10 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
   }
 
   // ── Static host (GitHub Pages / WASM pack) path ─────────
-  // No dashboard exists behind the page, so anything the wasm backend
-  // serves goes there; anything else refuses fast with one clear error
-  // instead of a volley of ERR_CONNECTION_REFUSED fetches.
+  // No dashboard exists behind the page. The OS layer goes to the wasm
+  // crate, and the database-backed commands below go to the redb database
+  // running in the DB worker (real cybermanju.db in OPFS). Anything else
+  // refuses fast with one clear error instead of ERR_CONNECTION_REFUSED.
   if (isStaticHost() && (OS_WASM_COMMANDS.has(cmd) || mapping)) {
     if (OS_WASM_COMMANDS.has(cmd)) {
       const wasmArgs = wasmArgsForCommand(cmd, args ?? {})
@@ -883,11 +1022,18 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
         snippet: '',
       })) as unknown as T
     }
-    // Everything else (files, accounts, collections, sync, …) is
-    // database-backed and has no wasm implementation.
+    const dbRoute = DB_WASM_ROUTES[cmd]
+    if (dbRoute) {
+      if (dbRoute.probe) return (await probeStaticConnection(args ?? {})) as T
+      const raw = await wasmDbDispatch(dbRoute.op, dbRoute.args(args ?? {}))
+      const out = dbRoute.map ? dbRoute.map(raw, args ?? {}) : raw
+      return transformResponseKeys(out) as T
+    }
+    // Anything else (provider network sync, encryption, faces, …) still
+    // needs the server — one clear error, no fetch spam.
     throw new Error(
       `[WASM Mode] "${cmd}" needs the Cybermanju dashboard (REST API on port 3456). ` +
-      'This static build runs the browser sandbox — the OS shell, task table and volume tools work, but file storage requires the desktop app, Docker image or dashboard server.'
+      'This static build runs the browser sandbox — accounts, files, providers and disks work offline, but provider network sync requires the desktop app, Docker image or dashboard server.'
     )
   }
 

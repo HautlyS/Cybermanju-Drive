@@ -515,24 +515,141 @@ impl TaskTable {
 }
 
 /// Convenience: `ps` + restore/persist when a database is in hand.
+///
+/// Repair/scrub/GC rows are merged in, so this is the one process table —
+/// the shell, `GET /api/os/ps` and the task panel all read it.
 pub fn ps(db: Option<&Database>) -> PsSnapshot {
     if let Some(db) = db {
         TaskTable::global().refresh(db);
     }
-    TaskTable::global().ps()
+    let mut snap = TaskTable::global().ps();
+    let (tasks, counts) = merged_tasks(snap.tasks);
+    snap.tasks = tasks;
+    snap.counts = counts;
+    snap
 }
 
 /// Convenience: `top` + restore/persist when a database is in hand.
+///
+/// Same merged table as `ps`, plus the live system stats.
 pub fn top(db: Option<&Database>) -> TopSnapshot {
     if let Some(db) = db {
         TaskTable::global().refresh(db);
     }
-    TaskTable::global().top()
+    let mut snap = TaskTable::global().top();
+    let (tasks, counts) = merged_tasks(snap.tasks);
+    snap.tasks = tasks;
+    snap.counts = counts;
+    snap
 }
 
 /// Convenience: `kill <id>`.
 pub fn kill(id: u32) -> Result<Task, String> {
+    if id >= REPAIR_ID_BASE {
+        return Err(
+            "unsupported: repair/scrub/gc tasks run detached — track them with \
+             `GET /api/repair/tasks` or `repair` in cybsh; they finish on their own"
+                .to_string(),
+        );
+    }
     TaskTable::global().kill(id)
+}
+
+// ─── repair/scrub/GC bridge (AGENT-7 items 2+10) ────────────────────────────
+
+/// First id issued to a mirrored repair/scrub/GC row. OS rows start at 1 and
+/// the table holds at most `MAX_TASKS` live rows, so the two spaces never
+/// collide. `kill` refuses these ids (see above): the workers are detached
+/// threads with no cancellation handle, and pretending otherwise would be a
+/// fake success.
+pub const REPAIR_ID_BASE: u32 = 2_000_000_000;
+
+/// FNV-1a over the repair task's string id, into `0..range`.
+fn fnv1a_32(text: &str, range: u32) -> u32 {
+    let mut hash: u32 = 0x811c_9dc5;
+    for byte in text.bytes() {
+        hash ^= u32::from(byte);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    hash % range.max(1)
+}
+
+fn repair_state_of(raw: &str) -> TaskState {
+    match raw {
+        "done" => TaskState::Done,
+        "error" => TaskState::Failed,
+        "killed" => TaskState::Killed,
+        "pending" => TaskState::Pending,
+        _ => TaskState::Running,
+    }
+}
+
+/// Repair/scrub/GC runs as `ps`/`top` rows.
+///
+/// `cybermanju_sync::repair` keeps its own lightweight registry (string
+/// ids, no cancel handles) while the OS table owns numeric ids and
+/// cancellation. Rather than merging the registries — which would couple
+/// every repair worker to the OS table — `ps`/`top` read both and present
+/// one process table. Rows are derived on the fly (never persisted into
+/// `compute_tasks`, never killable) with stable synthetic ids, so a
+/// repeated `ps` shows the same row for the same run.
+pub fn repair_rows() -> Vec<Task> {
+    let live: Vec<u32> = TaskTable::global().list().iter().map(|t| t.id).collect();
+    let mut rows = Vec::new();
+    for info in cybermanju_sync::repair::tasks() {
+        let mut id = REPAIR_ID_BASE + fnv1a_32(&info.id, 100_000_000);
+        while live.contains(&id) || rows.iter().any(|t: &Task| t.id == id) {
+            id = id.wrapping_add(1);
+        }
+        let state = repair_state_of(&info.state);
+        let name = info.detail.clone().unwrap_or_else(|| info.kind.clone());
+        rows.push(Task {
+            id,
+            kind: info.kind.clone(),
+            name,
+            state,
+            progress: info.progress.clamp(0.0, 1.0),
+            started_at: info.started_at.clone(),
+            ended_at: info.finished_at.clone(),
+            bytes: 0,
+            provider: "repair".to_string(),
+            error: if state == TaskState::Failed {
+                info.detail.clone()
+            } else {
+                None
+            },
+        });
+    }
+    rows.sort_by(|a, b| b.started_at.cmp(&a.started_at).then(b.id.cmp(&a.id)));
+    rows
+}
+
+/// `ps` + repair rows: the single process table every surface reads.
+fn merged_tasks(base: Vec<Task>) -> (Vec<Task>, TaskCounts) {
+    let mut tasks = base;
+    tasks.extend(repair_rows());
+    let mut counts = TaskCounts {
+        total: tasks.len(),
+        ..TaskCounts::default()
+    };
+    for t in &tasks {
+        match t.state {
+            TaskState::Pending => counts.pending += 1,
+            TaskState::Running => counts.running += 1,
+            TaskState::Done => counts.done += 1,
+            TaskState::Failed => counts.failed += 1,
+            TaskState::Killed => counts.killed += 1,
+        }
+    }
+    // Live rows first, newest first — same order as `TaskTable::list`.
+    tasks.sort_by(|a, b| {
+        a.state
+            .is_terminal()
+            .cmp(&b.state.is_terminal())
+            .then(b.started_at.cmp(&a.started_at))
+            .then(b.id.cmp(&a.id))
+    });
+    (tasks, counts)
 }
 
 /// RFC3339 → epoch millis (best effort).
@@ -694,6 +811,34 @@ mod tests {
             assert!(map.contains_key(&live), "live row kept");
         }
         assert!(t.get(live).is_some());
+    }
+
+    #[test]
+    fn repair_tasks_appear_in_ps_but_are_not_killable() {
+        let id = cybermanju_sync::repair::begin_task("repair", "testing bridge");
+        let rows = repair_rows();
+        let row = rows
+            .iter()
+            .find(|t| t.kind == "repair")
+            .expect("mirrored row");
+        assert!(row.id >= REPAIR_ID_BASE, "synthetic id: {}", row.id);
+        assert_eq!(row.provider, "repair");
+        assert_eq!(row.state, TaskState::Running);
+
+        let snap = fresh();
+        let (tasks, counts) = merged_tasks(snap.list());
+        assert!(tasks.iter().any(|t| t.id >= REPAIR_ID_BASE));
+        assert_eq!(counts.total, tasks.len());
+
+        let err = kill(row.id).expect_err("detached rows cannot be killed");
+        assert!(err.starts_with("unsupported:"), "got {err}");
+
+        cybermanju_sync::repair::finish_task(&id, "done", Some("ok".to_string()));
+        let rows = repair_rows();
+        // Finished rows linger until the next begin_task prunes them.
+        if let Some(row) = rows.iter().find(|t| t.provider == "repair") {
+            assert!(row.state.is_terminal() || row.state == TaskState::Running);
+        }
     }
 
     #[test]

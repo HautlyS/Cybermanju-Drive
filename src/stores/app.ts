@@ -595,6 +595,22 @@ export const useAppStore = defineStore('cybermanju', () => {
     }
   }
 
+  /**
+   * Parse source text on every transport: Tauri runs the real grammars,
+   * REST runs the shared heuristic core (same shape, honest `engine`).
+   * Returns the result for callers that render from it directly.
+   */
+  async function parseCodeText(fileName: string, content: string) {
+    try {
+      const result = await invoke<ParseResult>('parse_text', { fileName, content })
+      parseResult.value = result
+      return result
+    } catch (e) {
+      notifyError('Parse failed', e)
+      return null
+    }
+  }
+
   // ── Actions: Loose Groups ─────────────────────────────────
   async function fetchLooseGroups() {
     try {
@@ -1332,7 +1348,7 @@ export const useAppStore = defineStore('cybermanju', () => {
     fetchFaceGroups, detectFaces, detectFacesBatch, reclusterFaces,
     renameFaceGroup, mergeFaceGroups, deleteFaceGroup, findSimilarFaces,
     fetchAccounts, createAccount, switchAccount, deleteAccount, fetchGeoFiles,
-    parseFileCode, fetchLooseGroups,
+    parseFileCode, parseCodeText, fetchLooseGroups,
     fetchSyncConfigs, createSyncConfig, saveSyncConfig, probeSyncConnection, deleteSyncConfig, startSync,
     getSyncProgress, testSyncConnection, cancelSync, listRemoteFiles,
     getSyncJob, fetchSyncRuns, fetchSyncStatus, restoreSyncFile, deleteRemoteFile,

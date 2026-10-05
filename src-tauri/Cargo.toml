@@ -6,8 +6,20 @@ authors = ["Cybermanju Team"]
 edition = "2021"
 
 [features]
-default = []
+default = ["real-treesitter"]
 onnx-face = ["cybermanju-faces/onnx-face"]
+# Real tree-sitter grammars (AUDIT D2). The heuristic extractor stays as the
+# fallback for the other ~45 extensions and for parse failures, and the JSON
+# shape is identical either way (`engine` says which one ran).
+real-treesitter = [
+    "dep:tree-sitter",
+    "dep:tree-sitter-rust",
+    "dep:tree-sitter-python",
+    "dep:tree-sitter-javascript",
+    "dep:tree-sitter-typescript",
+    "dep:tree-sitter-go",
+    "dep:tree-sitter-bash",
+]
 
 [lib]
 name = "cybermanju_drive_lib"
@@ -75,3 +87,14 @@ url = "2"
 # File ops
 walkdir = "2.5"
 rayon = "1.10"
+
+# Code intelligence — real tree-sitter grammars (optional, see [features]).
+# Runtime 0.24 loads the ABI-14 grammars below; versions must stay in this
+# pairing or `cargo check` fails at resolve time (CI proves it).
+tree-sitter = { version = "0.24", optional = true }
+tree-sitter-rust = { version = "0.23", optional = true }
+tree-sitter-python = { version = "0.23", optional = true }
+tree-sitter-javascript = { version = "0.23", optional = true }
+tree-sitter-typescript = { version = "0.23", optional = true }
+tree-sitter-go = { version = "0.23", optional = true }
+tree-sitter-bash = { version = "0.23", optional = true }

@@ -119,7 +119,7 @@ The frontend composable `useTauri.ts` auto-detects the environment via `window._
 | **compression/** | `src-tauri/src/compression/` | Triple-layer cascading compression (LZ4 -> ZSTD-15 -> Brotli-11) |
 | **search/** | `src-tauri/src/search/` | Tantivy full-text search with BM25 ranking, faceted filtering, term dictionary autocomplete |
 | **faces/** | `src-tauri/src/faces/` | Face detection embeddings and DBSCAN clustering via connected components |
-| **tree_sitter/** | `src-tauri/src/tree_sitter/` | Code intelligence: language detection for 50+ extensions, heuristic symbol extraction |
+| **tree_sitter/** | `src-tauri/src/tree_sitter/` | Code intelligence: real tree-sitter grammars (rust/python/js/ts/go/bash) + heuristic fallback for the rest; `"engine"` reports which ran |
 | **preview/** | `src-tauri/src/preview/` | Lanczos3 thumbnail generation, media metadata extraction |
 | **sync/** | `src-tauri/src/sync/` | Storage backend trait + 4 implementations (Local, GitHub, Google Drive, Google Photos) |
 | **web_dashboard/** | `src-tauri/src/web_dashboard/` | Embedded HTTP/1.1 server on port 3456 with REST API |
@@ -795,9 +795,9 @@ providers → .cybermanju disks (CYBMJU1 sealed superblock, choosable capacity)
 - **Tables (17+):** files, accounts, collections, collection_items, face_groups, loose_groups, encryption_keys, users, user_file_perms, sync_configs (+`sync_files/sync_runs/sync_secrets/schema_version`), `disks/volumes/block_map`, `scrub_runs/repairs/chunk_refs/leases/provider_health`, `compute_tasks/shell_history`.
 - **Sync jobs:** `POST /api/sync/start → 202 {jobId}`, `GET /api/sync/jobs/{id}|runs|status|progress`, `POST /api/sync/cancel|restore`, `DELETE /api/sync/remote` (501 on `unsupported:`), `GET /api/sync/usage/{id}`.
 - **Durability:** `GET /api/repair/status|tasks|health`, `POST /api/repair/run|rebuild|gc`, `POST /api/scrub/run`, `GET /api/scrub/runs`, `POST /api/lease/acquire|release`, `GET /api/lease/status`.
-- **OS:** `POST /api/os/exec {line}`, `GET /api/os/complete/{prefix}|stat|ls|du|df|ps|top|workers|jobs`; `GET /api/disk/*`, `GET|PUT /api/volume/block/{lba}` (base64, body range).
+- **OS:** `POST /api/os/exec {line}` (incl. real `sync start …` → detached job), `GET /api/os/complete/{prefix}|stat|ls|du|df|ps|top|workers|jobs` (`ps`/`top` merge OS + repair rows); `GET /api/disk/*`, `GET|PUT /api/volume/block/{lba}` (base64, body range).
 - **Auth:** fail-closed `Authenticated` default, `is_known_route` 404-before-401, `Claims{role}` RBAC, bootstrap-only register, sealed secrets.
-- **Known honest limits:** `cybsh sync start` → `unsupported:` + 202 pointer (needs worker + shared handle); faces empty without ONNX; code parse heuristic; Telegram/Photos delete `unsupported:`.
+- **Known honest limits:** faces empty without ONNX; code parse heuristic for unbundled languages; Telegram/Photos delete `unsupported:`; WASM `sync` needs the dashboard.
 
 ### CI/CD Pipeline
 

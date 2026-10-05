@@ -1,0 +1,854 @@
+// Cybermanju Drive — browser-native database for the WASM demo build
+//
+// This is a REAL redb database (`cybermanju.db`), not a mock: it uses the
+// same table names (`cybermanju_db::Database::get_*_table()`) and the same
+// JSON row shapes (`cybermanju_types`) as the server, so a file written here
+// opens cleanly under the native backend later.
+//
+// Storage: `OpfsBackend` (`opfs_backend.rs`, durable, worker-only) with an
+// in-memory fallback when OPFS is unavailable. Opening is async (OPFS
+// handles resolve via Promises); every call after `db_open` is synchronous,
+// which is exactly what redb's `StorageBackend` trait needs.
+//
+// `db_dispatch(op, args_json)` always returns an envelope:
+// `{"ok":true,"data":…}` or `{"ok":false,"error":"prefix: detail"}` using
+// the same `"prefix: detail"` contract as the server, so the terminal and
+// the account manager render identically on all transports.
+//
+// Honest demo limits (documented, not hidden):
+// - tokens/PATs live in the `sync_secrets` table in cleartext inside the
+//   origin-private file. Same-origin private, but weaker than the server's
+//   sealed credential store.
+// - `users.authenticate` returns a random demo token; nothing gates on it —
+//   the demo build is a single-user local vault.
+// - disk attach/check are catalog operations: there is no sealed container
+//   or fsck here, so they verify the catalog row, not bytes.
+
+use cybermanju_db::Database as DbDefs;
+use js_sys::{JsValue, Reflect};
+use redb::{Database as RedbDatabase, ReadableTable};
+use std::cell::RefCell;
+use std::sync::atomic::{AtomicU64, Ordering};
+use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::JsFuture;
+
+use argon2::{PasswordHasher, PasswordVerifier};
+
+use crate::opfs_backend::OpfsBackend;
+
+const DB_FILE: &str = "cybermanju.db";
+const DEMO_VOLUME: &str = "wasm-demo-volume";
+
+thread_local! {
+    static DB: RefCell<Option<DbHandle>> = const { RefCell::new(None) };
+}
+
+struct DbHandle {
+    db: RedbDatabase,
+}
+
+// ─── JS bridges ────────────────────────────────────────────────────────
+
+fn js_global(name: &str) -> Result<JsValue, String> {
+    Reflect::get(&js_sys::global(), &JsValue::from_str(name))
+        .map_err(|e| format!("unavailable: global.{name} missing ({e:?})"))
+}
+
+fn call0(obj: &JsValue, name: &str) -> Result<JsValue, String> {
+    let func: js_sys::Function = Reflect::get(obj, &JsValue::from_str(name))
+        .map_err(|e| format!("unavailable: {name} missing ({e:?})"))?
+        .dyn_into()
+        .map_err(|_| format!("unavailable: {name} is not a function"))?;
+    Reflect::apply(&func, obj, &js_sys::Array::new())
+        .map_err(|e| format!("unavailable: {name} threw ({e:?})"))
+}
+
+fn new_id() -> String {
+    // `crypto.randomUUID` exists in workers and on the main thread. The
+    // Reflect probe below only ever runs in a browser (host unit tests go
+    // straight to the counter, which is unique per process).
+    #[cfg(target_arch = "wasm32")]
+    if let Ok(crypto) = js_global("crypto") {
+        if let Ok(func) = Reflect::get(&crypto, &JsValue::from_str("randomUUID")) {
+            if let Ok(func) = func.dyn_into::<js_sys::Function>() {
+                if let Ok(v) = Reflect::apply(&func, &crypto, &js_sys::Array::new()) {
+                    if let Some(s) = v.as_string() {
+                        return s;
+                    }
+                }
+            }
+        }
+    }
+    static COUNTER: AtomicU64 = AtomicU64::new(1);
+    format!("id-{}", COUNTER.fetch_add(1, Ordering::Relaxed))
+}
+
+async fn open_opfs_handle(file: &str) -> Result<JsValue, String> {
+    let navigator = js_global("navigator")?;
+    let storage = Reflect::get(&navigator, &JsValue::from_str("storage"))
+        .map_err(|e| format!("unavailable: navigator.storage missing ({e:?})"))?;
+    if storage.is_undefined() || storage.is_null() {
+        return Err("unavailable: navigator.storage is missing (insecure context?)".to_string());
+    }
+    let dir = JsFuture::from(
+        call0(&storage, "getDirectory")?
+            .dyn_into::<js_sys::Promise>()
+            .map_err(|_| "unavailable: getDirectory is not async".to_string())?,
+    )
+    .await
+    .map_err(|e| format!("unavailable: OPFS directory failed ({e:?})"))?;
+    let opts = js_sys::Object::new();
+    Reflect::set(&opts, &JsValue::from_str("create"), &JsValue::TRUE)
+        .map_err(|e| format!("unavailable: opts failed ({e:?})"))?;
+    let argv = js_sys::Array::new();
+    argv.push(&JsValue::from_str(file));
+    argv.push(&opts.into());
+    let get_fh: js_sys::Function = Reflect::get(&dir, &JsValue::from_str("getFileHandle"))
+        .map_err(|e| format!("unavailable: getFileHandle missing ({e:?})"))?
+        .dyn_into()
+        .map_err(|_| "unavailable: getFileHandle is not a function".to_string())?;
+    let fh = JsFuture::from(
+        Reflect::apply(&get_fh, &dir, &argv)
+            .map_err(|e| format!("unavailable: getFileHandle threw ({e:?})"))?
+            .dyn_into::<js_sys::Promise>()
+            .map_err(|_| "unavailable: getFileHandle is not async".to_string())?,
+    )
+    .await
+    .map_err(|e| format!("unavailable: file handle failed ({e:?})"))?;
+    let handle = JsFuture::from(
+        call0(&fh, "createSyncAccessHandle")?
+            .dyn_into::<js_sys::Promise>()
+            .map_err(|_| {
+                "unavailable: createSyncAccessHandle is not async — database must run in a Dedicated Worker".to_string()
+            })?,
+    )
+    .await
+    .map_err(|e| format!("unavailable: sync access handle failed ({e:?})"))?;
+    Ok(handle)
+}
+
+fn open_all_tables(db: &RedbDatabase) -> Result<(), String> {
+    let txn = db
+        .begin_write()
+        .map_err(|e| format!("network: begin_write failed: {e}"))?;
+    // Two-phase commits on OPFS: `flush()` is not `fsync()` (see module
+    // docs), so every write pays for the extra barrier.
+    txn.set_two_phase_commit(true);
+    {
+        txn.open_table(DbDefs::get_files_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_accounts_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_collections_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_collection_items_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_face_groups_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_loose_groups_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_encryption_keys_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_locations_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_users_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_user_file_perms_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_sync_configs_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_parent_index_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_trash_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_audit_log_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_file_versions_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_share_links_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_sync_files_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_sync_runs_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_sync_secrets_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_disks_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_volumes_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_block_map_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_scrub_runs_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_repairs_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_chunk_refs_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_leases_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_provider_health_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_compute_tasks_table())
+            .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_shell_history_table())
+            .map_err(|e| e.to_string())?;
+    }
+    txn.commit().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Open (or create) the demo database. Resolves OPFS in this context;
+/// falls back to a process-local in-memory database with zero persistence.
+#[wasm_bindgen]
+pub async fn db_open() -> Result<JsValue, JsValue> {
+    let (db, backend) = match open_opfs_handle(DB_FILE).await {
+        Ok(handle) => {
+            let backend = OpfsBackend::new(handle, DB_FILE);
+            let db = redb::Builder::new()
+                .create_with_backend(backend)
+                .map_err(|e| format!("network: redb open failed: {e}"))?;
+            (db, "opfs")
+        }
+        Err(detail) => {
+            let db = redb::Builder::new()
+                .create_with_backend(redb::backends::InMemoryBackend::new())
+                .map_err(|e| format!("network: in-memory open failed: {e}"))?;
+            let _ = detail;
+            (db, "memory")
+        }
+    };
+    if let Err(e) = open_all_tables(&db) {
+        return Ok(JsValue::from_str(&envelope_json(
+            false,
+            &serde_json::Value::Null,
+            Some(e),
+        )));
+    }
+    DB.with(|cell| {
+        *cell.borrow_mut() = Some(DbHandle { db });
+    });
+    Ok(JsValue::from_str(&envelope_json(
+        true,
+        &serde_json::json!({ "backend": backend, "file": DB_FILE }),
+        None,
+    )))
+}
+
+fn envelope_json(ok: bool, data: &serde_json::Value, error: Option<String>) -> String {
+    let mut map = serde_json::Map::new();
+    map.insert("ok".to_string(), serde_json::Value::Bool(ok));
+    if ok {
+        map.insert("data".to_string(), data.clone());
+    } else if let Some(e) = error {
+        map.insert("error".to_string(), serde_json::Value::String(e));
+    }
+    serde_json::Value::Object(map).to_string()
+}
+
+// ─── table helpers ───────────────────────────────────────────────────
+
+fn with_db<T>(f: impl FnOnce(&RedbDatabase) -> Result<T, String>) -> Result<T, String> {
+    DB.with(|cell| {
+        let borrow = cell.borrow();
+        let handle = borrow
+            .as_ref()
+            .ok_or_else(|| "unavailable: database is not open (call db_open first)".to_string())?;
+        f(&handle.db)
+    })
+}
+
+fn read_all(
+    table: redb::TableDefinition<'static, &'static str, &'static str>,
+) -> Result<Vec<(String, String)>, String> {
+    with_db(|db| {
+        let txn = db.begin_read().map_err(|e| e.to_string())?;
+        let t = txn.open_table(table).map_err(|e| e.to_string())?;
+        let mut out = Vec::new();
+        for entry in t.iter().map_err(|e| e.to_string())? {
+            let (k, v) = entry.map_err(|e| e.to_string())?;
+            out.push((k.value().to_string(), v.value().to_string()));
+        }
+        Ok(out)
+    })
+}
+
+fn read_one(
+    table: redb::TableDefinition<'static, &'static str, &'static str>,
+    key: &str,
+) -> Result<Option<String>, String> {
+    with_db(|db| {
+        let txn = db.begin_read().map_err(|e| e.to_string())?;
+        let t = txn.open_table(table).map_err(|e| e.to_string())?;
+        Ok(t.get(key)
+            .map_err(|e| e.to_string())?
+            .map(|v| v.value().to_string()))
+    })
+}
+
+fn write_one(
+    table: redb::TableDefinition<'static, &'static str, &'static str>,
+    key: &str,
+    value: &str,
+) -> Result<(), String> {
+    with_db(|db| {
+        let txn = db.begin_write().map_err(|e| e.to_string())?;
+        txn.set_two_phase_commit(true);
+        {
+            let mut t = txn.open_table(table).map_err(|e| e.to_string())?;
+            t.insert(key, value).map_err(|e| e.to_string())?;
+        }
+        txn.commit().map_err(|e| e.to_string())?;
+        Ok(())
+    })
+}
+
+fn delete_one(
+    table: redb::TableDefinition<'static, &'static str, &'static str>,
+    key: &str,
+) -> Result<bool, String> {
+    with_db(|db| {
+        let txn = db.begin_write().map_err(|e| e.to_string())?;
+        txn.set_two_phase_commit(true);
+        let removed = {
+            let mut t = txn.open_table(table).map_err(|e| e.to_string())?;
+            t.remove(key).map_err(|e| e.to_string())?.is_some()
+        };
+        txn.commit().map_err(|e| e.to_string())?;
+        Ok(removed)
+    })
+}
+
+fn arg<'a>(args: &'a serde_json::Value, name: &str) -> Result<&'a str, String> {
+    args.get(name)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("invalid: missing string argument '{name}'"))
+}
+
+fn opt_arg<'a>(args: &'a serde_json::Value, name: &str) -> Option<String> {
+    args.get(name).and_then(|v| {
+        if v.is_null() {
+            None
+        } else if let Some(s) = v.as_str() {
+            let s = s.trim();
+            if s.is_empty() {
+                None
+            } else {
+                Some(s.to_string())
+            }
+        } else {
+            None
+        }
+    })
+}
+
+// ─── validation (mirrors crates/web/src/security.rs bounds) ──────────
+
+fn validate_username(v: &str) -> Result<(), String> {
+    let v = v.trim();
+    if v.is_empty() {
+        return Err("Username is required".to_string());
+    }
+    if v.len() > 64 {
+        return Err("Username must be at most 64 characters".to_string());
+    }
+    if v.chars().any(|c| c.is_control()) {
+        return Err("Username must not contain control characters".to_string());
+    }
+    if !v
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    {
+        return Err("Username may only contain letters, digits, '.', '_' and '-'".to_string());
+    }
+    if v.starts_with('.') || v.starts_with('-') {
+        return Err("Username must not start with '.' or '-'".to_string());
+    }
+    Ok(())
+}
+
+fn validate_password(v: &str) -> Result<(), String> {
+    if v.len() < 8 {
+        return Err("Password must be at least 8 characters".to_string());
+    }
+    if v.len() > 1024 {
+        return Err("Password must be at most 1024 characters".to_string());
+    }
+    Ok(())
+}
+
+fn argon2id() -> Result<argon2::Argon2<'static>, String> {
+    let params = argon2::Params::new(19456, 2, 1, Some(32))
+        .map_err(|e| format!("unavailable: argon2 params rejected ({e})"))?;
+    Ok(argon2::Argon2::new(
+        argon2::Algorithm::Argon2id,
+        argon2::Version::V0x13,
+        params,
+    ))
+}
+
+// ─── dispatcher ──────────────────────────────────────────────────────
+
+/// One JSON call in, one envelope out. `args_json` is an object; mutating
+/// ops accept `now` (ISO-8601, supplied by the worker — no clock dep).
+#[wasm_bindgen]
+pub fn db_dispatch(op: &str, args_json: &str) -> String {
+    let args: serde_json::Value =
+        serde_json::from_str(args_json).unwrap_or(serde_json::Value::Null);
+    let now = args
+        .get("now")
+        .and_then(|v| v.as_str())
+        .unwrap_or("1970-01-01T00:00:00Z");
+    let result: Result<serde_json::Value, String> = match op {
+        // ── accounts ──
+        "accounts.list" => Ok(serde_json::Value::Array(
+            read_all(DbDefs::get_accounts_table())?
+                .into_iter()
+                .filter_map(|(_, v)| serde_json::from_str(&v).ok())
+                .collect(),
+        )),
+        "accounts.create" => {
+            let name = arg(&args, "name")?.trim().to_string();
+            if name.is_empty() {
+                return err_envelope("invalid: account name is required");
+            }
+            let account_type = args
+                .get("accountType")
+                .and_then(|v| v.as_str())
+                .unwrap_or("local")
+                .to_string();
+            let rows = read_all(DbDefs::get_accounts_table())?;
+            let id = new_id();
+            let account = serde_json::json!({
+                "id": id,
+                "name": name,
+                "accountType": account_type,
+                "path": opt_arg(&args, "path").map(serde_json::Value::String).unwrap_or(serde_json::Value::Null),
+                "color": opt_arg(&args, "color").unwrap_or_else(|| "#6366f1".to_string()),
+                "isActive": rows.is_empty(),
+                "createdAt": now,
+                "updatedAt": now,
+            });
+            write_one(
+                DbDefs::get_accounts_table(),
+                account["id"].as_str().unwrap_or(""),
+                &account.to_string(),
+            )?;
+            Ok(account)
+        }
+        "accounts.switch" => {
+            let target = arg(&args, "accountId")?.to_string();
+            let rows = read_all(DbDefs::get_accounts_table())?;
+            if !rows.iter().any(|(k, _)| k == &target) {
+                return err_envelope(&format!("not_found: account {target}"));
+            }
+            let mut switched = serde_json::Value::Null;
+            for (key, raw) in rows {
+                if let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&raw) {
+                    let active = key == target;
+                    v["isActive"] = serde_json::Value::Bool(active);
+                    v["updatedAt"] = serde_json::Value::String(now.to_string());
+                    write_one(DbDefs::get_accounts_table(), &key, &v.to_string())?;
+                    if active {
+                        switched = v;
+                    }
+                }
+            }
+            Ok(switched)
+        }
+        "accounts.delete" => {
+            let target = arg(&args, "accountId")?.to_string();
+            let raw = read_one(DbDefs::get_accounts_table(), &target)?
+                .ok_or_else(|| format!("not_found: account {target}"))?;
+            let v: serde_json::Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+            if v.get("isActive").and_then(|b| b.as_bool()).unwrap_or(false) {
+                return err_envelope(
+                    "Cannot delete the active account. Switch to another account first.",
+                );
+            }
+            Ok(serde_json::Value::Bool(delete_one(
+                DbDefs::get_accounts_table(),
+                &target,
+            )?))
+        }
+        // ── sync configs (+ side-table secrets, like the server) ──
+        "sync.list" => {
+            let mut out = Vec::new();
+            for (_, v) in read_all(DbDefs::get_sync_configs_table())? {
+                if let Ok(cfg) = serde_json::from_str::<serde_json::Value>(&v) {
+                    out.push(cfg);
+                }
+            }
+            Ok(serde_json::Value::Array(out))
+        }
+        "sync.save" => {
+            let mut cfg = args
+                .get("config")
+                .cloned()
+                .ok_or_else(|| "invalid: missing 'config' object".to_string())?;
+            let id = cfg
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let id = if id.is_empty() { new_id() } else { id };
+            cfg["id"] = serde_json::Value::String(id.clone());
+            let incoming_token = cfg
+                .get("token")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            // The row never carries the secret (mirrors `skip_serializing`).
+            if let Some(map) = cfg.as_object_mut() {
+                map.remove("token");
+            }
+            write_one(DbDefs::get_sync_configs_table(), &id, &cfg.to_string())?;
+            if let Some(token) = incoming_token {
+                if !token.trim().is_empty() {
+                    write_one(DbDefs::get_sync_secrets_table(), &id, token.trim())?;
+                }
+            }
+            Ok(cfg)
+        }
+        "sync.delete" => {
+            let id = arg(&args, "configId")?.to_string();
+            if !delete_one(DbDefs::get_sync_configs_table(), &id)? {
+                return err_envelope(&format!("not_found: sync config {id}"));
+            }
+            let _ = delete_one(DbDefs::get_sync_secrets_table(), &id);
+            Ok(serde_json::Value::Bool(true))
+        }
+        "sync.secret" => Ok(
+            read_one(DbDefs::get_sync_secrets_table(), arg(&args, "configId")?)?
+                .map(serde_json::Value::String)
+                .unwrap_or(serde_json::Value::Null),
+        ),
+        // ── users ──
+        "users.list" => {
+            let mut out = Vec::new();
+            for (_, v) in read_all(DbDefs::get_users_table())? {
+                if let Ok(mut u) = serde_json::from_str::<serde_json::Value>(&v) {
+                    if let Some(map) = u.as_object_mut() {
+                        map.remove("passwordHash");
+                    }
+                    out.push(u);
+                }
+            }
+            Ok(serde_json::Value::Array(out))
+        }
+        "users.register" => {
+            let username = arg(&args, "username")?.trim().to_string();
+            let password = arg(&args, "password")?.to_string();
+            validate_username(&username)?;
+            validate_password(&password)?;
+            for (_, v) in read_all(DbDefs::get_users_table())? {
+                if let Ok(u) = serde_json::from_str::<serde_json::Value>(&v) {
+                    if u.get("username").and_then(|n| n.as_str()) == Some(&username) {
+                        return err_envelope(&format!("Username '{username}' already exists"));
+                    }
+                }
+            }
+            let requested = opt_arg(&args, "role").unwrap_or_default();
+            let empty = read_all(DbDefs::get_users_table())?.is_empty();
+            let role = if ["admin", "user", "viewer"].contains(&requested.as_str()) {
+                requested
+            } else if empty {
+                "admin".to_string()
+            } else {
+                "user".to_string()
+            };
+            let salt = argon2::password_hash::SaltString::generate(
+                &mut argon2::password_hash::rand_core::OsRng,
+            );
+            let hash = argon2id()?
+                .hash_password(password.as_bytes(), &salt)
+                .map_err(|e| format!("unavailable: argon2 failed ({e})"))?
+                .to_string();
+            let id = new_id();
+            let mut user = serde_json::json!({
+                "id": id,
+                "username": username,
+                "passwordHash": hash,
+                "displayName": opt_arg(&args, "displayName").map(serde_json::Value::String).unwrap_or(serde_json::Value::Null),
+                "role": role,
+                "isActive": true,
+                "createdAt": now,
+                "updatedAt": now,
+            });
+            write_one(DbDefs::get_users_table(), &id, &user.to_string())?;
+            if let Some(map) = user.as_object_mut() {
+                map.remove("passwordHash");
+            }
+            Ok(user)
+        }
+        "users.delete" => {
+            let id = arg(&args, "userId")?.to_string();
+            if !delete_one(DbDefs::get_users_table(), &id)? {
+                return err_envelope(&format!("not_found: user {id}"));
+            }
+            Ok(serde_json::Value::Bool(true))
+        }
+        "users.set_role" => {
+            let id = arg(&args, "userId")?.to_string();
+            let role = arg(&args, "role")?.to_string();
+            if !["admin", "user", "viewer"].contains(&role.as_str()) {
+                return err_envelope(&format!("invalid: unknown role '{role}'"));
+            }
+            let raw = read_one(DbDefs::get_users_table(), &id)?
+                .ok_or_else(|| format!("not_found: user {id}"))?;
+            let mut user: serde_json::Value =
+                serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+            user["role"] = serde_json::Value::String(role);
+            user["updatedAt"] = serde_json::Value::String(now.to_string());
+            write_one(DbDefs::get_users_table(), &id, &user.to_string())?;
+            if let Some(map) = user.as_object_mut() {
+                map.remove("passwordHash");
+            }
+            Ok(user)
+        }
+        "users.authenticate" => {
+            let username = arg(&args, "username")?.trim().to_string();
+            let password = arg(&args, "password")?.to_string();
+            let mut found: Option<serde_json::Value> = None;
+            for (_, v) in read_all(DbDefs::get_users_table())? {
+                if let Ok(u) = serde_json::from_str::<serde_json::Value>(&v) {
+                    if u.get("username").and_then(|n| n.as_str()) == Some(username.as_str()) {
+                        found = Some(u);
+                        break;
+                    }
+                }
+            }
+            let user = found.ok_or_else(|| "Invalid credentials".to_string())?;
+            let stored = user
+                .get("passwordHash")
+                .and_then(|h| h.as_str())
+                .ok_or_else(|| "Invalid credentials".to_string())?;
+            let parsed = argon2::password_hash::PasswordHash::new(stored)
+                .map_err(|_| "Invalid credentials".to_string())?;
+            argon2id()?
+                .verify_password(password.as_bytes(), &parsed)
+                .map_err(|_| "Invalid credentials".to_string())?;
+            Ok(serde_json::json!({
+                "userId": user.get("id"),
+                "username": user.get("username"),
+                "role": user.get("role"),
+                "displayName": user.get("displayName"),
+                "token": format!("demo-{}", new_id()),
+            }))
+        }
+        // ── disks + merged volume ──
+        "disks.list" => Ok(serde_json::Value::Array(
+            read_all(DbDefs::get_disks_table())?
+                .into_iter()
+                .filter_map(|(_, v)| serde_json::from_str(&v).ok())
+                .collect(),
+        )),
+        "disks.create" => {
+            let config_id = arg(&args, "configId")?.to_string();
+            let size = args
+                .get("sizeBytes")
+                .and_then(|v| v.as_u64())
+                .ok_or_else(|| "invalid: missing sizeBytes".to_string())?;
+            if size < 1024 * 1024 {
+                return err_envelope("unsupported: demo disk size must be ≥ 1 MiB");
+            }
+            let count = read_all(DbDefs::get_disks_table())?.len() as u64;
+            let id = new_id();
+            let provider = opt_arg(&args, "provider").unwrap_or_else(|| {
+                // Default to the bound provider's backend so the disk card
+                // reads "github", not "local".
+                read_one(DbDefs::get_sync_configs_table(), &config_id)
+                    .ok()
+                    .flatten()
+                    .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+                    .and_then(|cfg| {
+                        cfg.get("backendType")
+                            .and_then(|b| b.as_str())
+                            .map(|s| s.to_string())
+                    })
+                    .unwrap_or_else(|| "local".to_string())
+            });
+            let disk = serde_json::json!({
+                "id": id,
+                "name": opt_arg(&args, "name").unwrap_or_else(|| format!("disk-{}", count + 1)),
+                "provider": provider,
+                "configId": config_id,
+                "volumeUuid": DEMO_VOLUME,
+                "capacityBytes": size,
+                "blockSize": 4096,
+                "usedBytes": 0,
+                "placementOrder": count,
+                "state": "attached",
+                "health": "ok",
+                "containerPath": format!("opfs:{DB_FILE}#/disks/{id}"),
+                "blocksWrittenSinceCheckpoint": 0,
+                "createdAt": now,
+                "updatedAt": now,
+            });
+            write_one(DbDefs::get_disks_table(), &id, &disk.to_string())?;
+            Ok(disk)
+        }
+        "disks.attach" => {
+            let id = arg(&args, "id")?.to_string();
+            let mut disk = get_disk(&id)?;
+            disk["state"] = serde_json::Value::String("attached".to_string());
+            disk["updatedAt"] = serde_json::Value::String(now.to_string());
+            write_one(DbDefs::get_disks_table(), &id, &disk.to_string())?;
+            Ok(disk)
+        }
+        "disks.detach" => {
+            let id = arg(&args, "id")?.to_string();
+            let mut disk = get_disk(&id)?;
+            disk["state"] = serde_json::Value::String("detached".to_string());
+            disk["updatedAt"] = serde_json::Value::String(now.to_string());
+            write_one(DbDefs::get_disks_table(), &id, &disk.to_string())?;
+            Ok(disk)
+        }
+        "disks.resize" => {
+            let id = arg(&args, "id")?.to_string();
+            let size = args
+                .get("sizeBytes")
+                .and_then(|v| v.as_u64())
+                .ok_or_else(|| "invalid: missing sizeBytes".to_string())?;
+            let mut disk = get_disk(&id)?;
+            let used = disk.get("usedBytes").and_then(|v| v.as_u64()).unwrap_or(0);
+            if size < used {
+                return err_envelope(&format!(
+                    "unsupported: size {size} is below {used} used bytes"
+                ));
+            }
+            disk["capacityBytes"] = serde_json::Value::Number(size.into());
+            disk["updatedAt"] = serde_json::Value::String(now.to_string());
+            write_one(DbDefs::get_disks_table(), &id, &disk.to_string())?;
+            Ok(disk)
+        }
+        "disks.check" => {
+            let id = arg(&args, "id")?.to_string();
+            let disk = get_disk(&id)?;
+            Ok(serde_json::json!({
+                "ok": true,
+                "diskId": id,
+                "state": disk.get("state"),
+                "health": disk.get("health"),
+                "detail": "demo check: catalog row present and well-formed",
+            }))
+        }
+        "volume.df" => {
+            let mut total = 0u64;
+            let mut used = 0u64;
+            let mut count = 0u64;
+            let mut attached = Vec::new();
+            for (_, v) in read_all(DbDefs::get_disks_table())? {
+                if let Ok(d) = serde_json::from_str::<serde_json::Value>(&v) {
+                    if d.get("state").and_then(|s| s.as_str()) == Some("attached") {
+                        total = total.saturating_add(
+                            d.get("capacityBytes").and_then(|n| n.as_u64()).unwrap_or(0),
+                        );
+                        used = used.saturating_add(
+                            d.get("usedBytes").and_then(|n| n.as_u64()).unwrap_or(0),
+                        );
+                        count += 1;
+                        attached.push(serde_json::json!({
+                            "id": d.get("id"),
+                            "name": d.get("name"),
+                            "provider": d.get("provider"),
+                            "capacityBytes": d.get("capacityBytes"),
+                            "state": d.get("state"),
+                            "health": d.get("health"),
+                            "createdAt": d.get("createdAt"),
+                            "usedBytes": d.get("usedBytes"),
+                            "compute": 1,
+                        }));
+                    }
+                }
+            }
+            Ok(serde_json::json!({
+                "totalBytes": total,
+                "usedBytes": used,
+                "freeBytes": total.saturating_sub(used),
+                "root": "/",
+                "diskCount": count,
+                "attachedBytes": total,
+                "scratchBytes": 0,
+                "disks": attached,
+            }))
+        }
+        // ── files (metadata only in the demo) ──
+        "files.list" => Ok(serde_json::Value::Array(
+            read_all(DbDefs::get_files_table())?
+                .into_iter()
+                .filter_map(|(_, v)| serde_json::from_str(&v).ok())
+                .collect(),
+        )),
+        "files.get" => {
+            let id = arg(&args, "fileId")?.to_string();
+            read_one(DbDefs::get_files_table(), &id)?
+                .and_then(|raw| serde_json::from_str(&raw).ok())
+                .ok_or_else(|| format!("not_found: file {id}"))
+        }
+        "files.create_folder" => {
+            let name = arg(&args, "name")?.trim().to_string();
+            if name.is_empty() {
+                return err_envelope("invalid: folder name is required");
+            }
+            let id = new_id();
+            let node = serde_json::json!({
+                "id": id,
+                "name": name,
+                "fileType": "folder",
+                "parentId": opt_arg(&args, "parentId").map(serde_json::Value::String).unwrap_or(serde_json::Value::Null),
+                "sizeBytes": 0,
+                "mimeType": serde_json::Value::Null,
+                "hashBlake3": serde_json::Value::Null,
+                "encrypted": false,
+                "encryptionAlgorithm": serde_json::Value::Null,
+                "compressionLayers": [],
+                "thumbnailPath": serde_json::Value::Null,
+                "contextData": serde_json::Value::Null,
+                "tags": [],
+                "collectionIds": [],
+                "faceGroupIds": [],
+                "looseGroupIds": [],
+                "gpsLat": serde_json::Value::Null,
+                "gpsLon": serde_json::Value::Null,
+                "createdAt": now,
+                "modifiedAt": now,
+            });
+            write_one(DbDefs::get_files_table(), &id, &node.to_string())?;
+            Ok(node)
+        }
+        "files.rename" => {
+            let id = arg(&args, "fileId")?.to_string();
+            let name = arg(&args, "newName")?.trim().to_string();
+            let raw = read_one(DbDefs::get_files_table(), &id)?
+                .ok_or_else(|| format!("not_found: file {id}"))?;
+            let mut node: serde_json::Value =
+                serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+            node["name"] = serde_json::Value::String(name);
+            node["modifiedAt"] = serde_json::Value::String(now.to_string());
+            write_one(DbDefs::get_files_table(), &id, &node.to_string())?;
+            Ok(node)
+        }
+        "files.delete" => {
+            let id = arg(&args, "fileId")?.to_string();
+            if !delete_one(DbDefs::get_files_table(), &id)? {
+                return err_envelope(&format!("not_found: file {id}"));
+            }
+            Ok(serde_json::Value::Bool(true))
+        }
+        _ => Err(format!("unsupported: unknown demo-db op '{op}'")),
+    };
+    match result {
+        Ok(data) => envelope_json(true, &data, None),
+        Err(e) => envelope_json(false, &serde_json::Value::Null, Some(e)),
+    }
+}
+
+fn err_envelope(error: &str) -> String {
+    envelope_json(false, &serde_json::Value::Null, Some(error.to_string()))
+}
+
+fn get_disk(id: &str) -> Result<serde_json::Value, String> {
+    read_one(DbDefs::get_disks_table(), id)?
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .ok_or_else(|| format!("not_found: disk {id}"))
+}

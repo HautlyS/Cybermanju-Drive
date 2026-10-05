@@ -168,5 +168,5 @@ Add it to your brief's *Requests to the supervisor* section.
 
 - AGENT-6: all boxes `[x]`; Tauri disk commands registered; `REST_FIRST` routes desktop disk/terminal via `:3456`.
 - AGENT-7: all boxes `[x]` (verified static + client surface added this pass: `repair/scrub/lease` REST mappings, Pinia actions, types).
-- AGENT-8: items 1–12, 14–15 `[x]`; 13 (docs) in progress — README/ARCHITECTURE/OPERATIONS landed this pass; R8-1 resolved as documented `unsupported:` + 202 pointer.
+- AGENT-8: items 1–12, 14–15 `[x]`; 13 (docs) in progress — README/ARCHITECTURE/OPERATIONS landed; R8-1 closed for real (`sync start` runs detached via lockless `POST /api/os/exec` intercept); repair tasks bridged into `ps`/`top` (read-only mirror, honest `kill` refusal).
 - No toolchain on this box (`cargo`/`node_modules` absent) — CI must run the gates above.

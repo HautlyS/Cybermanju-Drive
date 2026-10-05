@@ -864,6 +864,23 @@ fn route_request(
     }
     // <<< /AGENT-2 ROUTES >>>
 
+    // <<< CYBSH SYNC START (real, lockless) >>>
+    // `sync start …` typed into the terminal arrives as POST /api/os/exec,
+    // whose normal handler runs under the request write lock — under which
+    // start_job would deadlock on its own config read. Intercept the line
+    // here, before any lock is taken, and run it as a detached job exactly
+    // like POST /api/sync/start. Every other line falls through untouched.
+    // (One `if let`: nested `if` + `if let` trips `collapsible_if`, which is
+    // denied workspace-wide.)
+    if let Some(resp) = (method == "POST"
+        && matches!(path_segments.as_slice(), ["api", "os", "exec"]))
+    .then(|| api::os_api::try_sync_start_exec(db, body, origin))
+    .flatten()
+    {
+        return resp;
+    }
+    // <<< /CYBSH SYNC START >>>
+
     // Take the database lock for the duration of the request. Readers share
     // the lock; writers (POST/PUT/DELETE) take it exclusively. A poisoned lock
     // is recovered from rather than propagated, so one panicking request can
@@ -1259,6 +1276,17 @@ fn route_request(
                 api::search_api::search(&dashboard.search_index, db, &q, limit, offset),
                 origin,
             )
+        }
+
+        // ─── Code intelligence ────────────────────────────────
+        // Source-text parsing for web/Pages clients (the desktop Tauri
+        // `parse_text` runs real grammars; the server runs the shared
+        // heuristic core and labels it — same shape, honest `"engine"`).
+        ["api", "code", "parse"] if method == "POST" => {
+            match api::code::route(method, &path_segments, body, origin) {
+                Some(resp) => resp,
+                None => json_error(404, "not found: /api/code/parse", origin),
+            }
         }
 
         // ─── Location endpoints ───────────────────────────────────

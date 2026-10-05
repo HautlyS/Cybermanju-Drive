@@ -123,6 +123,7 @@ const ROUTED_SEGMENTS: &[&str] = &[
     "batch",
     "collection-items",
     "collections",
+    "code",
     "dashboard",
     "encryption",
     "face-groups",

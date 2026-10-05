@@ -13,6 +13,7 @@ use cybermanju_db::Database;
 use cybermanju_os::api::Kernel;
 use serde::Deserialize;
 use serde::Serialize;
+use std::sync::{Arc, RwLock};
 
 /// Render a `Result` the way this crate does everywhere else: 404 when the
 /// message reports a missing entity, 501 when the capability does not exist
@@ -75,6 +76,66 @@ struct DuResult {
     path: String,
     bytes: u64,
     files: u64,
+}
+
+/// `sync start …` inside `POST /api/os/exec`, run for real.
+///
+/// The normal `os_api::route` path holds the request database lock, under
+/// which `start_job` would deadlock (it takes its own short read lock to
+/// load the config). So `route_request` calls this **before** the lock is
+/// taken: a line that parses as a single `sync start` becomes a detached
+/// job via `start_job` — exactly like `POST /api/sync/start` — and answers
+/// the terminal's `ExecResult` shape (`ok: true` + `{jobId}` output).
+/// Anything else returns `None` and flows to the locked path untouched.
+pub fn try_sync_start_exec(
+    shared: &Arc<RwLock<Database>>,
+    body: &str,
+    origin: Option<&str>,
+) -> Option<String> {
+    let req: ExecRequest = serde_json::from_str(body).ok()?;
+    let start = cybermanju_os::shell::parse_sync_start(&req.line)?;
+    let line = req.line.clone();
+
+    // Resolve the config id with a short-lived read; the guard is dropped
+    // before `start_job` takes its own lock.
+    let config_id = match start.config_id {
+        Some(id) => id,
+        None => {
+            let guard = shared.read().ok()?;
+            let configs = crate::api::sync_api::list_configs(&guard).ok()?;
+            drop(guard);
+            configs.into_iter().find(|c| c.enabled).map(|c| c.id)?
+        }
+    };
+
+    let output = match crate::api::sync_api::start_job(shared, &config_id, start.file_ids) {
+        Ok(job) => format!(
+            "started sync job {} (config {}) · {}/{} files — poll with `sync status`",
+            job.job_id, job.config_id, job.progress.processed_files, job.progress.total_files,
+        ),
+        Err(message) => {
+            return Some(crate::json_ok(
+                &ExecResult {
+                    ok: false,
+                    line,
+                    output: message.clone(),
+                    error: None,
+                    prompt: cybermanju_os::PROMPT,
+                },
+                origin,
+            ));
+        }
+    };
+    Some(crate::json_ok(
+        &ExecResult {
+            ok: true,
+            line,
+            output,
+            error: None,
+            prompt: cybermanju_os::PROMPT,
+        },
+        origin,
+    ))
 }
 
 /// Dispatch `/api/os/*` (exec, stat, ls, du, df, ps, top, jobs, workers).

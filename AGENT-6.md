@@ -134,11 +134,12 @@ Run the workspace gate only when you are done — it is expensive on this machin
 - [x] `cargo test -p cybermanju-disk` green (28 tests), `cargo test -p cybermanju-tests disk`
       green (6 tests), `cargo clippy -p cybermanju-disk --all-targets -- -D warnings` clean,
       and `cargo clippy --workspace --all-targets -- -D warnings` clean (2026-10-05).
-- [ ] `scripts/os-acceptance.sh` **Tier 0** — all 7 symbol checks pass; the two test-count
-      checks cannot pass for any agent because `want_tests()`'s grep never matches cargo's
-      output (R6-3). Suite counts: 28 and 6 tests, both green. (create two sized disks → attach →
-      `df` reports the merged total → data spans both disks → byte-identical read-back →
-      artifacts sealed `CYBE1` and compressed → all driven through `cybsh`)
+- [ ] `scripts/os-acceptance.sh` **Tier 0** — all 7 symbol checks pass; suite counts
+      (28 + 6 tests) pending a toolchain run in CI. (R6-3's grep bug is fixed
+      in the script; the remaining gate is execution, not counting.) (create two
+      sized disks → attach → `df` reports the merged total → data spans both
+      disks → byte-identical read-back → artifacts sealed `CYBE1` and
+      compressed → all driven through `cybsh`)
 - [x] No edit outside *Files you own* (checked by `git status` in the supervisor gate)
 - [x] **Log** section below has a dated entry per unit of work
 
@@ -174,15 +175,12 @@ because `commands/mod.rs` and `lib.rs` are not AGENT-6 files). Please apply:
   `cybermanju_disk::disk::list(&db)` (`DiskRow`: id, name, provider, capacityBytes,
   usedBytes, state, health). AGENT-6 does not edit `crates/os/**`.
 
-**R6-3 — `scripts/os-acceptance.sh` cannot count tests (blocks Tier 0 for *every* agent).**
-`want_tests()` extracts the count with `grep -Eo '^[[:space:]]*[0-9]+ passed'`, which never
-matches cargo's `test result: ok. 28 passed; 0 failed; …`, so every suite reads "0 tests".
-All 7 Tier 0 symbol checks pass; `cargo test -p cybermanju-disk` (28) and
-`cargo test -p cybermanju-tests disk` (6) are both green. Suggested one-line fix (scripts
-are not an agent file):
-```bash
-count=$(grep -Eo '[0-9]+ passed' <<<"$out" | grep -Eo '[0-9]+' | awk '{s+=$1} END {print s+0}')
-```
+**R6-3 — (resolved 2026-10-06 — the fix is already in the script, nothing to apply).**
+`want_tests()` used to extract the count with `grep -Eo '^[[:space:]]*[0-9]+ passed'`,
+which never matched cargo's `test result: ok. 28 passed; 0 failed; …`, so every suite
+read "0 tests". `scripts/os-acceptance.sh:28` now contains exactly the suggested
+pipeline (`grep -Eo '[0-9]+ passed' … | awk '{s+=$1} …'`); the Tier 0 gate is a
+toolchain run in CI, not a counting bug. Kept here for the audit trail.
 
 **R6-4 — (resolved, recorded for the audit trail).** While this work was in flight,
 `cargo clippy -p cybermanju-disk -- -D warnings` failed on 4 lints in

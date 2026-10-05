@@ -47,7 +47,7 @@ df
 
 ## 4. Sync runs (async by design)
 
-`POST /api/sync/start → 202 {jobId}` (never blocks the 5s request thread), poll `GET /api/sync/jobs/{jobId}` or `GET /api/sync/progress`, `POST /api/sync/cancel {jobId?}`. `cybsh sync start` intentionally answers `unsupported:` with this pointer; `sync status/cancel` work in the shell.
+`POST /api/sync/start → 202 {jobId}` (never blocks the 5s request thread), poll `GET /api/sync/jobs/{jobId}` or `GET /api/sync/progress`, `POST /api/sync/cancel {jobId?}`. `cybsh sync start [config] [files…]` runs the same detached job via `POST /api/os/exec` (intercepted lock-free, before the request lock); bare-library `execute()` without a worker still answers `unsupported:` honestly.
 
 Error prefixes (AGENT-1 contract) → UI hints (`describeSyncError`): `auth: / rate_limited: / not_found: / unsupported: (→501) / too_large: / integrity: / network:`, plus `disk_full:` and `conflict:`.
 

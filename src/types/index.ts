@@ -176,6 +176,8 @@ export interface CodeSymbol {
 export interface ParseResult {
   filePath: string
   language: string
+  /** Which engine ran: real grammars (desktop) or heuristic fallback. */
+  engine?: 'tree-sitter' | 'heuristic' | string
   symbols: CodeSymbol[]
   totalLines: number
   parseTimeMs: number
