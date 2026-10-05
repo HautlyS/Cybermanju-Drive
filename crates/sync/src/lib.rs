@@ -21,6 +21,13 @@ pub mod retry;
 pub mod scheduler;
 pub mod state;
 pub mod transfer;
+// <<< AGENT-7 MODS: durability, repair, erasure coding, catalog, provider
+// health, chunk GC/eviction/rebalance and multi-writer leases >>>
+pub mod gc;
+pub mod health;
+pub mod lease;
+pub mod repair;
+pub mod scrub;
 
 pub use backends::create_backend;
 pub use cybermanju_types::sync::*;

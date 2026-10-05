@@ -32,6 +32,14 @@
 
     <div class="sb-right">
       <span
+        class="sb-clickable job-icon"
+        :class="{ 'sb-active': hasJob }"
+        title="RUNNING TASKS (OPENS TASKS)"
+        aria-label="RUNNING TASKS"
+        @click="wm.open('processes')"
+      >{{ jobLabel }}</span>
+      <span class="sb-div">|</span>
+      <span
         class="sb-clickable sync-icon"
         :class="{ 'sb-active': isSyncActive }"
         title="SYNC STATUS"
@@ -54,11 +62,37 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { isWebMode } from '@/composables/useTauri'
+import { useWindowManager } from '@/composables/useWindowManager'
 
 const store = useAppStore()
+const wm = useWindowManager()
+
+// AGENT-8 item 11: the bar shows background work — a `cybsh` line in flight
+// or any task running in the table — and jumps to the task list on click.
+const runningTasks = computed(() => store.osPs?.counts.running ?? 0)
+const hasJob = computed(() => store.shellBusy || runningTasks.value > 0)
+const jobLabel = computed(() => {
+  if (store.shellBusy) return 'CYBSH:BUSY'
+  return `JOB:${runningTasks.value}`
+})
+
+const pollMs = 4000
+let poll = 0
+
+onMounted(() => {
+  void store.fetchOsPs()
+  poll = window.setInterval(() => {
+    void store.fetchOsPs()
+  }, pollMs)
+})
+
+onBeforeUnmount(() => {
+  if (poll) window.clearInterval(poll)
+})
+
 const isSyncActive = computed(() => {
   const status = store.syncProgress?.status
   if (!status) return false
@@ -179,6 +213,11 @@ const isSyncActive = computed(() => {
 .sb-active {
   color: #FFFFFF;
   font-weight: 700;
+}
+
+.job-icon {
+  color: rgba(255,255,255,0.5);
+  font-size: 9px;
 }
 
 @media (max-width: 768px) {

@@ -202,3 +202,137 @@ fn gitlab_usage(config: &SyncConfig) -> Result<QuotaUsage, String> {
     usage.used_bytes = used;
     Ok(usage)
 }
+
+// ===========================================================================
+// <<< AGENT-6 VOLUME ACCOUNTING: "more providers → more space" needs one
+// number the write path can consult before a single byte leaves — how much
+// room the merged `.cybermanju` volume still has (MISSING.md D1).
+//
+// The `disks` rows live in redb, which this crate deliberately does not
+// depend on: the dependency arrow points *into* `cybermanju-sync`
+// (`cybermanju-disk` needs `create_backend` and `usage`), and a cycle is not
+// allowed. So the substrate *publishes* its accounting through these hooks
+// and `cybermanju-disk` registers them from a `#[ctor]`, which arms them
+// before `main` — no call-ordering requirement on the HTTP layer, the
+// auto-sync scheduler, or a test.
+//
+// A build without `crates/disk` has no volume at all: `admit_write` and
+// `charge_disk` then have nothing to police and return `Ok`, while
+// `volume_usage` reports `unsupported:` rather than inventing a number.
+// >>>
+
+use cybermanju_db::Database;
+
+/// Merged view of every **attached** `.cybermanju` disk — one logical volume.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VolumeUsage {
+    /// Sum of the choosable `capacityBytes` of all attached disks.
+    pub total_bytes: u64,
+    /// Bytes already placed on those disks.
+    pub used_bytes: u64,
+    /// `total_bytes - used_bytes` (never negative).
+    pub free_bytes: u64,
+    /// How many disks are attached right now.
+    pub disk_count: u32,
+}
+
+/// The three operations `cybermanju-disk` installs at process start.
+#[derive(Clone, Copy)]
+pub struct VolumeHooks {
+    /// `df` numbers for the merged volume.
+    pub usage: fn(&Database) -> Result<VolumeUsage, String>,
+    /// Refuse `bytes` when the volume cannot hold them.
+    pub admit: fn(&Database, u64) -> Result<(), String>,
+    /// Charge `bytes` of provider space to the disk bound to `config_id`.
+    pub charge: fn(&Database, &str, u64) -> Result<(), String>,
+}
+
+static VOLUME_HOOKS: std::sync::OnceLock<VolumeHooks> = std::sync::OnceLock::new();
+
+/// Install the volume hooks. Called exactly once, from `cybermanju-disk`'s
+/// static constructor; a second registration is a programming error and is
+/// refused instead of silently replacing the live hooks.
+pub fn register_volume_hooks(hooks: VolumeHooks) -> Result<(), String> {
+    VOLUME_HOOKS
+        .set(hooks)
+        .map_err(|_| "volume hooks are already registered".to_string())
+}
+
+/// The live hooks, when a substrate is linked in.
+pub fn volume_hooks() -> Option<&'static VolumeHooks> {
+    VOLUME_HOOKS.get()
+}
+
+/// `df` for the merged volume. `unsupported:` when no substrate is linked —
+/// never a fabricated total.
+pub fn volume_usage(db: &Database) -> Result<VolumeUsage, String> {
+    let hooks = VOLUME_HOOKS.get().ok_or_else(|| {
+        "unsupported: no .cybermanju volume substrate is linked into this build".to_string()
+    })?;
+    (hooks.usage)(db)
+}
+
+/// Admission control (D1): refuse a payload the merged volume cannot hold.
+///
+/// Returns `Ok(())` when no volume exists — there is nothing to enforce, and
+/// the sync engine must keep working for installs that never created a disk.
+pub fn admit_write(db: &Database, bytes: u64) -> Result<(), String> {
+    match VOLUME_HOOKS.get() {
+        Some(hooks) => (hooks.admit)(db, bytes),
+        None => Ok(()),
+    }
+}
+
+/// Charge `bytes` to the disk bound to `config_id` after a successful
+/// upload, so provider space consumed by the sync engine shows up in `df`.
+/// A no-op when no disk is bound to that config (or no substrate is linked).
+pub fn charge_disk(db: &Database, config_id: &str, bytes: u64) -> Result<(), String> {
+    match VOLUME_HOOKS.get() {
+        Some(hooks) => (hooks.charge)(db, config_id, bytes),
+        None => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod volume_tests {
+    use super::*;
+    use cybermanju_db::Database;
+
+    #[test]
+    fn without_a_substrate_admission_stays_open_and_usage_is_honest() {
+        // A build (or test binary) that never links `cybermanju-disk` has no
+        // volume: writes must keep working, and `df` must not invent numbers.
+        if volume_hooks().is_some() {
+            return; // substrate linked in this binary — the other arm is moot
+        }
+        let path = std::env::temp_dir().join(format!(
+            "cybermanju-quota-{}-{}.redb",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let db = Database::new(path.to_str().expect("utf8 path")).expect("db");
+        assert!(admit_write(&db, u64::MAX).is_ok(), "no volume → admit");
+        assert!(charge_disk(&db, "cfg", 1024).is_ok(), "no volume → charge");
+        let err = volume_usage(&db).expect_err("must not fabricate a volume");
+        assert!(err.starts_with("unsupported:"), "{err}");
+        drop(db);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn volume_usage_serializes_camel_case() {
+        let json = serde_json::to_string(&VolumeUsage {
+            total_bytes: 3,
+            used_bytes: 1,
+            free_bytes: 2,
+            disk_count: 1,
+        })
+        .expect("json");
+        assert!(json.contains("\"totalBytes\":3"), "{json}");
+        assert!(json.contains("\"diskCount\":1"), "{json}");
+    }
+}

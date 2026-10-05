@@ -304,6 +304,16 @@ pub struct Capabilities {
     pub recursive_list: bool,
     /// `upload_file_chunked` is implemented (resumable/multipart upload).
     pub chunked: bool,
+    // <<< AGENT-8 COMPUTE: concurrent compute slots this provider offers.
+    // "More providers → more processing" (MISSING.md E2) is only
+    // representable if the model can score compute, so the scheduler sums
+    // this across the attached pool and adds it to the local rayon slots.
+    // `#[serde(default)]` keeps stored/older JSON deserializing. >>>
+    /// Concurrent compute slots the provider offers to the fan-out
+    /// scheduler (0 = storage only, no compute contribution).
+    #[serde(default)]
+    pub compute: u32,
+    // <<< /AGENT-8 COMPUTE >>>
 }
 
 impl Default for Capabilities {
@@ -314,6 +324,11 @@ impl Default for Capabilities {
             supports_direct_download: true,
             recursive_list: true,
             chunked: false,
+            // <<< AGENT-8 COMPUTE: a backend that has not reported a value
+            // still contributes one slot — attaching it must never *reduce*
+            // parallelism. >>>
+            compute: 1,
+            // <<< /AGENT-8 COMPUTE >>>
         }
     }
 }

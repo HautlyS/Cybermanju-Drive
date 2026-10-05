@@ -58,14 +58,44 @@
         <div class="info-row"><span class="info-key text-muted">FILES WITH FACES</span><span class="info-value">{{ faceCount }}</span></div>
       </div>
     </div>
+
+    <div class="section">
+      <h3 class="section-title">[VOLUME] MERGED DISKS ({{ df ? df.diskCount : 0 }})</h3>
+      <div class="df-bar" role="img" :aria-label="`Volume ${usedPct.toFixed(1)} percent used`">
+        <div class="df-used" :style="{ width: usedPct + '%' }"></div>
+      </div>
+      <div class="df-figures">
+        <span>USED {{ df ? formatSize(df.usedBytes) : '—' }}</span>
+        <span>FREE {{ df ? formatSize(df.freeBytes) : '—' }}</span>
+        <span>TOTAL {{ df ? formatSize(df.totalBytes) : '—' }}</span>
+        <span class="text-muted">ROOT {{ df ? df.root : '—' }}</span>
+      </div>
+      <button class="open-disks" type="button" @click="wm.open('disks')">OPEN DISK MANAGER</button>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { useWindowManager } from '@/composables/useWindowManager'
 
 const store = useAppStore()
+const wm = useWindowManager()
+
+// AGENT-8: the storage dashboard doubles as the volume overview — the merged
+// `df` bar grows as providers are attached.
+const df = computed(() => store.osDf)
+const usedPct = computed(() => {
+  const d = df.value
+  if (!d || d.totalBytes === 0) return 0
+  return Math.min(100, (d.usedBytes / d.totalBytes) * 100)
+})
+
+onMounted(() => {
+  void store.fetchOsDf()
+  void store.fetchDisks()
+})
 
 const trashCount = computed(() => store.trashItems.length)
 
@@ -232,6 +262,41 @@ function formatSize(bytes: number): string {
 
 .info-key { color: rgba(255,255,255,0.5); }
 .info-value { font-weight: 700; }
+
+.df-bar {
+  height: 16px;
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.25);
+}
+
+.df-used {
+  height: 100%;
+  background: linear-gradient(90deg, #5af78e, #57c7ff);
+}
+
+.df-figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 10px;
+  margin-top: 6px;
+}
+
+.open-disks {
+  margin-top: 8px;
+  background: transparent;
+  border: 1px solid #FFFFFF;
+  color: #FFFFFF;
+  font-family: inherit;
+  font-size: 10px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.open-disks:hover {
+  background: #FFFFFF;
+  color: #000000;
+}
 
 .text-muted { color: rgba(255,255,255,0.5) !important; }
 </style>

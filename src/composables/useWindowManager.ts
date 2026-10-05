@@ -1,4 +1,4 @@
-import { ref, computed, markRaw, type Component } from 'vue'
+import { ref, computed, markRaw, defineAsyncComponent, type Component } from 'vue'
 import type { PanelType } from '@/types'
 import { MODULE_METADATA } from '@/types'
 import FileGrid from '@/components/FileGrid.vue'
@@ -15,7 +15,16 @@ import EncryptionPanel from '@/components/EncryptionPanel.vue'
 import CompressionPanel from '@/components/CompressionPanel.vue'
 import FilePermissionsPanel from '@/components/FilePermissionsPanel.vue'
 import FilePreview from '@/components/FilePreview.vue'
+import ProcessPanel from '@/components/ProcessPanel.vue'
+import DiskManagerPage from '@/components/DiskManagerPage.vue'
 import WindowContent from '@/components/WindowContent.vue'
+
+// AGENT-8: the terminal is the heaviest new panel (a few thousand scrollback
+// lines), so it is the first panel in the shell to be code-split — it is
+// fetched the first time someone opens it, not on boot.
+const TerminalPanel = defineAsyncComponent(
+  () => import('@/components/TerminalPanel.vue')
+)
 
 export interface WindowState {
   id: string
@@ -53,6 +62,9 @@ const defaultSizes: SizeMap = {
   'loose-groups': { width: 440, height: 380 },
   style: { width: 440, height: 360 },
   storage: { width: 580, height: 480 },
+  terminal: { width: 760, height: 520 },
+  processes: { width: 660, height: 460 },
+  disks: { width: 700, height: 540 },
   dashboard: { width: 600, height: 460 },
   webdash: { width: 640, height: 500 },
   encryption: { width: 480, height: 420 },
@@ -77,6 +89,9 @@ const panelComponentMap: Record<string, Component> = {
   sync: SyncPanel,
   settings: SettingsPage,
   storage: StorageDashboard,
+  terminal: TerminalPanel,
+  processes: ProcessPanel,
+  disks: DiskManagerPage,
   encryption: EncryptionPanel,
   compression: CompressionPanel,
   permissions: FilePermissionsPanel,

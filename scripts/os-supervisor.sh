@@ -30,7 +30,7 @@ AGENTS=(6 7 8)
 STALL_SECS=900          # 15 min with no new log bytes → kill + relaunch
 TICK_SECS=30
 COOLDOWN_SECS=60        # min gap between launches of the same agent
-MIN_FREE_MB=1200        # halt below this
+MIN_FREE_MB=700         # last-resort halt; the janitor keeps us far above this
 INSTANT_FAIL_LIMIT=6    # agent exited <60s after launch this many times → halt
 GATE_ROUNDS_MAX=25      # safety valve on the outer loop
 

@@ -1,5 +1,5 @@
 export type ViewMode = 'grid' | 'list' | 'masonry'
-export type PanelType = 'landing' | 'files' | 'preview' | 'encryption' | 'compression' | 'collections' | 'faces' | 'map' | 'code' | 'search' | 'style' | 'accounts' | 'loose-groups' | 'sync' | 'webdash' | 'users' | 'dashboard' | 'settings' | 'trash' | 'activity' | 'favorites' | 'recent' | 'storage'
+export type PanelType = 'landing' | 'files' | 'preview' | 'encryption' | 'compression' | 'collections' | 'faces' | 'map' | 'code' | 'search' | 'style' | 'accounts' | 'loose-groups' | 'sync' | 'webdash' | 'users' | 'dashboard' | 'settings' | 'trash' | 'activity' | 'favorites' | 'recent' | 'storage' | 'terminal' | 'processes' | 'disks'
 export type SidebarSection = 'tree' | 'locations' | 'collections' | 'people' | 'styles' | 'loose' | 'users' | 'sync' | 'dashboard' | 'landing' | 'tools'
 
 export interface ModuleInfo {
@@ -430,6 +430,128 @@ export const MODULE_METADATA: Record<PanelType, ModuleInfo> = {
   favorites: { id: 'favorites', label: 'FAVORITES', icon: '[*]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #0d0800 50%, #000000 100%)', description: 'Starred files', requiresAuth: true },
   recent: { id: 'recent', label: 'RECENT', icon: '[T]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #080808 50%, #000000 100%)', description: 'Recently modified files', requiresAuth: true },
   storage: { id: 'storage', label: 'STORAGE', icon: '[$]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #000a00 50%, #000000 100%)', description: 'Storage usage dashboard', requiresAuth: true },
+  terminal: { id: 'terminal', label: 'CYBSH', icon: '[>]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #000d08 50%, #000000 100%)', description: 'System terminal — cybsh', requiresAuth: true },
+  processes: { id: 'processes', label: 'TASKS', icon: '[%]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #000d0d 50%, #000000 100%)', description: 'Process table, top and task control', requiresAuth: true },
+  disks: { id: 'disks', label: 'DISKS', icon: '[=]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #000a00 50%, #000000 100%)', description: 'Per-provider disks and the merged volume', requiresAuth: true },
+}
+
+// ── OS layer (AGENT-8): cybsh, task table, compute fan-out ───────────────
+
+/** `POST /api/os/exec` — one `cybsh` line in, one rendered answer out. */
+export interface ShellResult {
+  ok: boolean
+  line: string
+  output: string
+  error?: string
+  prompt: string
+}
+
+/** One row of the process table (`compute_tasks`). */
+export interface OsTask {
+  id: number
+  /** `sync` · `scrub` · `repair` · `gc` · `compute` · `shell` · `index`. */
+  kind: string
+  name: string
+  state: 'pending' | 'running' | 'done' | 'failed' | 'killed'
+  /** 0 … 1. */
+  progress: number
+  startedAt: string
+  endedAt?: string
+  bytes: number
+  provider: string
+  error?: string
+}
+
+export interface OsTaskCounts {
+  pending: number
+  running: number
+  done: number
+  failed: number
+  killed: number
+  total: number
+}
+
+/** `GET /api/os/ps`. */
+export interface OsPs {
+  tasks: OsTask[]
+  counts: OsTaskCounts
+  pid: number
+  uptimeMs: number
+}
+
+/** `GET /api/os/top` — live system stats over the same table. */
+export interface OsTop {
+  uptimeMs: number
+  load: { load1: number; load5: number; load15: number; source: string }
+  mem: { rssBytes: number; sharedBytes: number; totalBytes: number; availableBytes: number }
+  cpuPercent: number
+  counts: OsTaskCounts
+  tasks: OsTask[]
+}
+
+/** One provider's contribution to the worker pool. */
+export interface OsProviderWorker {
+  provider: string
+  slots: number
+}
+
+/** `GET /api/os/workers` — local rayon slots + provider slots. */
+export interface OsWorkers {
+  localThreads: number
+  providerSlots: number
+  total: number
+  providers: OsProviderWorker[]
+}
+
+/** `GET /api/os/jobs` — the compute catalogue. */
+export interface OsJob {
+  name: string
+  description: string
+  takesPath: boolean
+}
+
+/** One `.cybermanju` disk as the OS layer sees it (`GET /api/os/df`). */
+export interface OsDisk {
+  id: string
+  name: string
+  provider: string
+  capacityBytes: number
+  state: string
+  health: string
+  createdAt: string
+  usedBytes: number
+  compute: number
+}
+
+/** `GET /api/os/df` — the merged volume. */
+export interface OsVolumeDf {
+  totalBytes: number
+  usedBytes: number
+  freeBytes: number
+  root: string
+  diskCount: number
+  attachedBytes: number
+  scratchBytes: number
+  disks: OsDisk[]
+}
+
+/** AGENT-6's disk catalog row (`GET /api/disk/list`). */
+export interface DiskRow {
+  id: string
+  name: string
+  provider: string
+  configId: string
+  volumeUuid: string
+  capacityBytes: number
+  blockSize: number
+  usedBytes: number
+  placementOrder: number
+  state: string
+  health: string
+  containerPath: string
+  blocksWrittenSinceCheckpoint: number
+  createdAt: string
+  updatedAt: string
 }
 
 export const SYNC_BACKEND_INFO: Record<SyncBackendType, { name: string; description: string; color: string; icon: string }> = {

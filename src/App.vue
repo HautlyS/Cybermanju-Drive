@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, provide, onMounted, watch, nextTick } from 'vue'
+import { ref, provide, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { useKeyboardShortcuts, getGlobalShortcuts } from '@/composables/useKeyboardShortcuts'
 import { useShortcuts } from '@/composables/useShortcuts'
@@ -402,10 +402,27 @@ function handleUpload() {
   showUploadDialog.value = true
 }
 
+/**
+ * Ctrl+` opens the system terminal (AGENT-8 item 11). Registered here rather
+ * than in the `.kpl` profile so the binding exists in every build, including
+ * ones that load a custom profile without an `open_terminal` action.
+ */
+function toggleTerminal(event: KeyboardEvent) {
+  if (!event.ctrlKey || event.shiftKey || event.altKey) return
+  if (event.key !== '`' && event.key !== '~' && event.key !== 'Dead') return
+  event.preventDefault()
+  wm.open('terminal')
+}
+
 onMounted(() => {
   store.currentPanel = 'landing'
   store.initialize()
   window.addEventListener('cybermanju:upload', handleUpload)
+  window.addEventListener('keydown', toggleTerminal)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', toggleTerminal)
 })
 </script>
 

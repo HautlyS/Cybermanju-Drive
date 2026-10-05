@@ -594,6 +594,73 @@ const REST_ROUTES: Record<string, RestMapping> = {
     },
     transformResponse: (raw) => transformResponseKeys(raw),
   },
+
+  // ── OS layer — cybsh, task table, compute, merged volume ──
+  os_exec: {
+    method: 'POST',
+    buildPath: () => '/api/os/exec',
+    transformRequest: (args) => ({ line: args.line }),
+  },
+  os_complete: {
+    method: 'GET',
+    buildPath: (args) => `/api/os/complete/${encodeURIComponent(String(args.prefix ?? ''))}`,
+  },
+  os_stat: {
+    method: 'GET',
+    buildPath: (args) => `/api/os/stat${String(args.path ?? '')}`,
+  },
+  os_ls: {
+    method: 'GET',
+    buildPath: (args) => `/api/os/ls${String(args.path ?? '')}`,
+  },
+  os_du: {
+    method: 'GET',
+    buildPath: (args) => `/api/os/du${String(args.path ?? '')}`,
+  },
+  os_df: { method: 'GET', buildPath: () => '/api/os/df' },
+  os_ps: { method: 'GET', buildPath: () => '/api/os/ps' },
+  os_top: { method: 'GET', buildPath: () => '/api/os/top' },
+  os_workers: { method: 'GET', buildPath: () => '/api/os/workers' },
+  os_jobs: { method: 'GET', buildPath: () => '/api/os/jobs' },
+
+  // ── Disks & merged volume (AGENT-6 surface, disk manager) ─
+  list_disks: { method: 'GET', buildPath: () => '/api/disk/list' },
+  get_disk: { method: 'GET', buildPath: (args) => `/api/disk/${args.id}` },
+  create_disk: {
+    method: 'POST',
+    buildPath: () => '/api/disk/create',
+    transformRequest: (args) => ({
+      configId: args.configId,
+      sizeBytes: args.sizeBytes,
+      passphrase: args.passphrase ?? '',
+    }),
+  },
+  attach_disk: {
+    method: 'POST',
+    buildPath: () => '/api/disk/attach',
+    transformRequest: (args) => ({ id: args.id, passphrase: args.passphrase ?? '' }),
+  },
+  detach_disk: {
+    method: 'POST',
+    buildPath: () => '/api/disk/detach',
+    transformRequest: (args) => ({ id: args.id }),
+  },
+  resize_disk: {
+    method: 'POST',
+    buildPath: () => '/api/disk/resize',
+    transformRequest: (args) => ({ id: args.id, sizeBytes: args.sizeBytes }),
+  },
+  destroy_disk: {
+    method: 'POST',
+    buildPath: () => '/api/disk/destroy',
+    transformRequest: (args) => ({ id: args.id }),
+  },
+  check_disk: {
+    method: 'POST',
+    buildPath: () => '/api/disk/check',
+    transformRequest: (args) => ({ id: args.id }),
+  },
+  volume_df: { method: 'GET', buildPath: () => '/api/volume/df' },
 }
 
 // Commands that exist in Tauri but have NO REST equivalent yet
@@ -622,16 +689,29 @@ const WRITE_ONLY_COMMANDS = new Set([
   'import_from_url',
 ])
 
+/**
+ * Commands served over HTTP in *every* transport. The OS layer has no Tauri
+ * IPC twin — the desktop app runs the same web server on :3456 — so routing
+ * these through `core.invoke` would fail on the very machine that has the
+ * feature. Same for the disk/volume API.
+ */
+const REST_FIRST = new Set([
+  'os_exec', 'os_complete', 'os_stat', 'os_ls', 'os_du', 'os_df', 'os_ps',
+  'os_top', 'os_workers', 'os_jobs',
+  'list_disks', 'get_disk', 'create_disk', 'attach_disk', 'detach_disk',
+  'resize_disk', 'destroy_disk', 'check_disk', 'volume_df',
+])
+
 /** The core invoke — works in both Tauri and Web modes. */
 export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  if (isTauri()) {
+  const mapping = REST_ROUTES[cmd]
+  if (isTauri() && !REST_FIRST.has(cmd)) {
     // ── Tauri IPC path ────────────────────────────────────
     const core = await import('@tauri-apps/api/core')
     return core.invoke<T>(cmd, args)
   }
 
   // ── Web / REST path ────────────────────────────────────
-  const mapping = REST_ROUTES[cmd]
   if (mapping) {
     const path = mapping.buildPath(args ?? {})
 

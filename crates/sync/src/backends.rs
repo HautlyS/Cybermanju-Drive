@@ -641,6 +641,10 @@ impl StorageBackend for LocalBackend {
             supports_direct_download: true,
             recursive_list: false,
             chunked: false,
+            // <<< AGENT-8 COMPUTE: a local disk absorbs as much concurrent
+            // work as the machine has cores. >>>
+            compute: std::thread::available_parallelism().map_or(1, |n| n.get() as u32),
+            // <<< /AGENT-8 COMPUTE >>>
         }
     }
 
@@ -1513,6 +1517,9 @@ impl StorageBackend for GitHubBackend {
             supports_direct_download: true,
             recursive_list: true,
             chunked: true,
+            // <<< AGENT-8 COMPUTE >>>
+            compute: 1,
+            // <<< /AGENT-8 COMPUTE >>>
         }
     }
 
@@ -1903,6 +1910,9 @@ impl StorageBackend for GitLabBackend {
             supports_direct_download: true,
             recursive_list: true,
             chunked: false,
+            // <<< AGENT-8 COMPUTE >>>
+            compute: 1,
+            // <<< /AGENT-8 COMPUTE >>>
         }
     }
 
@@ -2486,6 +2496,9 @@ impl StorageBackend for GoogleDriveBackend {
             supports_direct_download: false,
             recursive_list: false,
             chunked: true,
+            // <<< AGENT-8 COMPUTE >>>
+            compute: 1,
+            // <<< /AGENT-8 COMPUTE >>>
         }
     }
 
@@ -2782,6 +2795,9 @@ impl StorageBackend for GooglePhotosBackend {
             supports_direct_download: true,
             recursive_list: true,
             chunked: false,
+            // <<< AGENT-8 COMPUTE >>>
+            compute: 1,
+            // <<< /AGENT-8 COMPUTE >>>
         }
     }
 
@@ -3032,6 +3048,9 @@ impl StorageBackend for TelegramBackend {
             supports_direct_download: false,
             recursive_list: false,
             chunked: false,
+            // <<< AGENT-8 COMPUTE >>>
+            compute: 1,
+            // <<< /AGENT-8 COMPUTE >>>
         }
     }
 

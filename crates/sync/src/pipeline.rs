@@ -8,6 +8,7 @@
 
 use crate::backends::create_backend;
 use crate::manifest;
+use crate::quota;
 use crate::rate_limit;
 use crate::retry;
 use crate::state::SyncState;
@@ -313,6 +314,23 @@ impl SyncPipeline {
             return Err(format!("File not found on disk: {}", original_path));
         }
 
+        // <<< AGENT-6 ADMISSION >>>
+        // D1 — police the write *before* anything is built, encrypted or
+        // uploaded, so a full volume leaves nothing partial behind. Bytes a
+        // previous sync of this same file already occupies only need their
+        // growth to fit: an idempotent re-sync is never refused for space.
+        let payload_bytes = fs::metadata(&original_path).map(|m| m.len()).unwrap_or(0);
+        let already_synced = self
+            .load_sync_file(file_id, db)
+            .map(|rec| rec.size_bytes)
+            .unwrap_or(0);
+        let needed = payload_bytes.saturating_sub(already_synced);
+        if needed > 0 {
+            let guard = db.read().map_err(|e| e.to_string())?;
+            quota::admit_write(&guard, needed)?;
+        }
+        // <<< /AGENT-6 ADMISSION >>>
+
         self.state.set_current(Some(original_path.clone()));
 
         // 2. Plaintext BLAKE3 — the restore-verify baseline and the
@@ -390,6 +408,17 @@ impl SyncPipeline {
                 backend.upload_file(&artifact.path, &remote_name)
             })?
         };
+
+        // <<< AGENT-6 ADMISSION >>>
+        // The bytes are on the disk: account them so `df` sees them. An
+        // upload that already landed is never failed by bookkeeping.
+        if needed > 0 {
+            let guard = db.read().map_err(|e| e.to_string())?;
+            if let Err(e) = quota::charge_disk(&guard, &self.config.id, needed) {
+                warn!("volume accounting for '{}' failed: {}", original_path, e);
+            }
+        }
+        // <<< /AGENT-6 ADMISSION >>>
 
         // 9. Verified delete gate (item 1): the local original is only ever
         //    removed after a download-back BLAKE3 match. On any doubt the
@@ -617,6 +646,11 @@ impl SyncPipeline {
             }
         }
 
+        let already = self
+            .load_sync_file(file_id, db)
+            .map(|rec| rec.size_bytes)
+            .unwrap_or(0);
+
         // Participants: this config first (it owns the `sync_files` record),
         // then every other enabled config in stable id order.
         let participants: Vec<SyncConfig> = {
@@ -788,6 +822,18 @@ impl SyncPipeline {
             error_message: None,
         };
         write_sync_file(&record, db)?;
+
+        // <<< AGENT-6 ADMISSION >>>
+        // Same ledger as the whole-file path: only growth is charged, and the
+        // placement is already durable here.
+        let needed = total_size.saturating_sub(already);
+        if needed > 0 {
+            let guard = db.read().map_err(|e| e.to_string())?;
+            if let Err(e) = quota::charge_disk(&guard, &self.config.id, needed) {
+                warn!("volume accounting for '{}' failed: {}", original_path, e);
+            }
+        }
+        // <<< /AGENT-6 ADMISSION >>>
 
         if keep_local {
             self.state.set_status(SyncStatus::Cleaning);

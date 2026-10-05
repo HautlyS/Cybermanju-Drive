@@ -11,6 +11,7 @@ import type {
   SyncConfig, SyncProgress, SyncResult, RemoteFile,
   AuthResult, ModuleInfo, TrashItem, AuditEntry, FileVersion, User,
   DashboardStatus,
+  ShellResult, OsPs, OsTop, OsWorkers, OsJob, OsVolumeDf, DiskRow,
 } from '@/types'
 import { MODULE_METADATA } from '@/types'
 import { setAuthToken, getAuthToken, isWebMode } from '@/composables/useTauri'
@@ -65,6 +66,16 @@ export const useAppStore = defineStore('cybermanju', () => {
   // ── Sync State ────────────────────────────────────────────
   const syncConfigs = ref<SyncConfig[]>([])
   const syncProgress = ref<SyncProgress | null>(null)
+
+  // ── OS layer (AGENT-8): cybsh, tasks, compute, volume ───
+  const osPs = ref<OsPs | null>(null)
+  const osTop = ref<OsTop | null>(null)
+  const osWorkers = ref<OsWorkers | null>(null)
+  const osJobs = ref<OsJob[]>([])
+  const osDf = ref<OsVolumeDf | null>(null)
+  const disks = ref<DiskRow[]>([])
+  /** True while a `cybsh` line is in flight — the status bar shows it. */
+  const shellBusy = ref(false)
 
   // ── Code Intelligence State ───────────────────────────────
   const parseResult = ref<ParseResult | null>(null)
@@ -889,12 +900,170 @@ export const useAppStore = defineStore('cybermanju', () => {
     }
   }
 
+  // ── Actions: OS layer (AGENT-8) ───────────────────────────
+  /**
+   * Run one `cybsh` line. A command that ran and reported a failure comes
+   * back as `{ ok: false }` with the message in `output` — only a transport
+   * failure lands in the catch, and that is reported as a shell error too so
+   * the terminal never silently drops a line.
+   */
+  async function execShellLine(line: string): Promise<ShellResult> {
+    shellBusy.value = true
+    try {
+      return await invoke<ShellResult>('os_exec', { line })
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e)
+      return { ok: false, line, output: detail, error: detail, prompt: 'cybsh> ' }
+    } finally {
+      shellBusy.value = false
+    }
+  }
+
+  /** Tab completion off the live command table; never throws. */
+  async function completeShellLine(prefix: string): Promise<string[]> {
+    try {
+      return await invoke<string[]>('os_complete', { prefix })
+    } catch {
+      return []
+    }
+  }
+
+  /** Polled from the status bar, so failures stay quiet — the task panel
+   *  shows `…` until the API is reachable instead of spamming toasts. */
+  async function fetchOsPs() {
+    try {
+      osPs.value = await invoke<OsPs>('os_ps')
+    } catch {
+      osPs.value = null
+    }
+  }
+
+  async function fetchOsTop() {
+    try {
+      osTop.value = await invoke<OsTop>('os_top')
+    } catch (e) {
+      notifyError('Failed to fetch system stats', e)
+    }
+  }
+
+  async function fetchOsWorkers() {
+    try {
+      osWorkers.value = await invoke<OsWorkers>('os_workers')
+    } catch (e) {
+      notifyError('Failed to fetch worker pool', e)
+    }
+  }
+
+  async function fetchOsJobs() {
+    try {
+      osJobs.value = await invoke<OsJob[]>('os_jobs')
+    } catch (e) {
+      notifyError('Failed to fetch compute jobs', e)
+    }
+  }
+
+  async function fetchOsDf() {
+    try {
+      osDf.value = await invoke<OsVolumeDf>('os_df')
+    } catch (e) {
+      notifyError('Failed to fetch volume usage', e)
+    }
+  }
+
+  /** `kill <id>` through the same syscall boundary the terminal uses. */
+  async function killOsTask(taskId: number) {
+    const result = await execShellLine(`kill ${taskId}`)
+    if (!result.ok) {
+      notifyError('Failed to kill task', result.output)
+      return
+    }
+    await fetchOsPs()
+    notifySuccess(`Task ${taskId} killed`)
+  }
+
+  /** `compute run <job> <path>` — starts a fan-out job in the background. */
+  async function runComputeJob(job: string, path: string) {
+    const result = await execShellLine(`compute run ${job} ${path}`)
+    if (!result.ok) notifyError('Failed to start compute job', result.output)
+    else notifySuccess(`${job} started on ${osWorkers.value?.total ?? '?'} workers`)
+    await fetchOsPs()
+    return result
+  }
+
+  async function fetchDisks() {
+    try {
+      disks.value = await invoke<DiskRow[]>('list_disks')
+    } catch (e) {
+      notifyError('Failed to fetch disks', e)
+    }
+  }
+
+  async function createDisk(configId: string, sizeBytes: number, passphrase: string) {
+    try {
+      const disk = await invoke<DiskRow>('create_disk', { configId, sizeBytes, passphrase })
+      await fetchDisks()
+      await fetchOsDf()
+      notifySuccess(`Disk created — ${disk?.id ?? 'ok'}`)
+      return disk
+    } catch (e) {
+      notifyError('Failed to create disk', e)
+      return null
+    }
+  }
+
+  async function attachDisk(diskId: string, passphrase: string) {
+    try {
+      await invoke('attach_disk', { id: diskId, passphrase })
+      await fetchDisks()
+      await fetchOsDf()
+      notifySuccess('Disk attached — volume grew')
+    } catch (e) {
+      notifyError('Failed to attach disk', e)
+    }
+  }
+
+  async function detachDisk(diskId: string) {
+    try {
+      await invoke('detach_disk', { id: diskId })
+      await fetchDisks()
+      await fetchOsDf()
+      notifySuccess('Disk detached')
+    } catch (e) {
+      notifyError('Failed to detach disk', e)
+    }
+  }
+
+  async function resizeDisk(diskId: string, sizeBytes: number) {
+    try {
+      await invoke('resize_disk', { id: diskId, sizeBytes })
+      await fetchDisks()
+      await fetchOsDf()
+      notifySuccess('Disk resized')
+    } catch (e) {
+      notifyError('Failed to resize disk', e)
+    }
+  }
+
+  async function checkDisk(diskId: string) {
+    try {
+      const report = await invoke<{ ok: boolean }>('check_disk', { id: diskId })
+      await fetchDisks()
+      if (report?.ok) notifySuccess('Disk check passed')
+      else notifyError('Disk check found problems', 'see the disk card for details')
+      return report
+    } catch (e) {
+      notifyError('Failed to check disk', e)
+      return null
+    }
+  }
+
   return {
     // State
     currentPath, currentPanel, viewMode, selectedFileId, sidebarSection, sidebarCollapsed,
     files, accounts, activeAccountId, collections, faceGroups, looseGroups,
     searchResults, geoMarkers, encryptionStatus, encryptionKeys,
     compressionStats, parseResult, syncConfigs, syncProgress,
+    osPs, osTop, osWorkers, osJobs, osDf, disks, shellBusy,
     trashItems, showTrashPanel, auditLog, fileVersions, dashboardStatus, shareLinks,
     searchQuery, searchTotalResults, isSearching, isLoading, lastError, matrixRainEnabled,
     showEncryptionPanel, showCompressionPanel, showPermissionsPanel, commandPaletteOpen,
@@ -914,6 +1083,11 @@ export const useAppStore = defineStore('cybermanju', () => {
     parseFileCode, fetchLooseGroups,
     fetchSyncConfigs, createSyncConfig, deleteSyncConfig, startSync,
     getSyncProgress, testSyncConnection, cancelSync, listRemoteFiles,
+    // OS layer (cybsh, tasks, compute, disks, volume)
+    execShellLine, completeShellLine,
+    fetchOsPs, fetchOsTop, fetchOsWorkers, fetchOsJobs, fetchOsDf,
+    killOsTask, runComputeJob,
+    fetchDisks, createDisk, attachDisk, detachDisk, resizeDisk, checkDisk,
     // User Management
     fetchUsers, createUser, deleteUser, updateUserRole,
     // Trash

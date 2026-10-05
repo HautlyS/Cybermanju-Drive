@@ -29,7 +29,7 @@
             <div class="shortcut-icon">[@]</div>
             <div class="shortcut-label">Settings</div>
           </div>
-          <div class="desktop-shortcut" @dblclick="store.currentPanel = 'landing'">
+          <div class="desktop-shortcut" @dblclick="wm.open('terminal')">
             <div class="shortcut-icon">[>]</div>
             <div class="shortcut-label">Terminal</div>
           </div>
@@ -69,6 +69,8 @@
         </div>
       </div>
     </div>
+
+    <StatusBar />
   </div>
 </template>
 
@@ -78,6 +80,7 @@ import { useAppStore } from '@/stores/app'
 import { useWindowManager } from '@/composables/useWindowManager'
 import TopMenuBar from './TopMenuBar.vue'
 import Dock from './Dock.vue'
+import StatusBar from './StatusBar.vue'
 import AppWindow from './AppWindow.vue'
 
 const store = useAppStore()
