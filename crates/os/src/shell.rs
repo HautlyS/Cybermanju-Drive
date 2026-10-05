@@ -98,6 +98,7 @@ pub fn command_table() -> &'static [&'static str] {
         "encrypt",
         "decrypt",
         "search",
+        "ai",
     ]
 }
 
@@ -116,6 +117,10 @@ pub fn completions(prefix: &str) -> Vec<String> {
         "disk resize",
         "disk list",
         "disk check",
+        "ai ask",
+        "ai status",
+        "ai abort",
+        "ai sessions",
         "sync start",
         "sync status",
         "sync cancel",
@@ -467,6 +472,79 @@ pub fn parse_sync_start(line: &str) -> Option<SyncStart> {
     })
 }
 
+// ─── `ai …` starter core ─────────────────────────────────────────────────
+
+/// A parsed `ai` invocation — same portable-core contract as `SyncStart`:
+/// pure parsing shared by the shell and the lockless REST intercept, which
+/// turns `ai ask` into a detached agent job.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AiCommand {
+    /// `ai ask "<prompt>" [--config <id>] [--session <id>]`.
+    Ask {
+        prompt: String,
+        config_id: Option<String>,
+        session_id: Option<String>,
+    },
+    /// `ai status [job-id]`.
+    Status { job_id: Option<String> },
+    /// `ai abort [job-id]`.
+    Abort { job_id: Option<String> },
+    /// `ai sessions`.
+    Sessions,
+}
+
+/// Parse a full shell line as one `ai` subcommand. Single-command lines
+/// only; `--json` is accepted anywhere and ignored here (the dispatcher
+/// strips it again). Returns `None` for anything else.
+pub fn parse_ai_command(line: &str) -> Option<AiCommand> {
+    let tokens = tokenize(line).ok()?;
+    let parsed = parse(tokens).ok()?;
+    if parsed.segments.len() != 1 {
+        return None;
+    }
+    let (_, pipeline) = &parsed.segments[0];
+    if pipeline.len() != 1 {
+        return None;
+    }
+    let cmd = &pipeline[0];
+    if cmd.first().map(String::as_str) != Some("ai") {
+        return None;
+    }
+    match cmd.get(1).map(String::as_str) {
+        Some("ask") => {
+            let mut prompt_parts: Vec<String> = Vec::new();
+            let mut config_id: Option<String> = None;
+            let mut session_id: Option<String> = None;
+            let mut rest = cmd.iter().skip(2);
+            while let Some(arg) = rest.next() {
+                match arg.as_str() {
+                    "--config" => config_id = rest.next().cloned(),
+                    "--session" => session_id = rest.next().cloned(),
+                    "--json" => {}
+                    other => prompt_parts.push(other.to_string()),
+                }
+            }
+            let prompt = prompt_parts.join(" ").trim().to_string();
+            if prompt.is_empty() {
+                return None;
+            }
+            Some(AiCommand::Ask {
+                prompt,
+                config_id,
+                session_id,
+            })
+        }
+        Some("status") => Some(AiCommand::Status {
+            job_id: cmd.get(2).filter(|s| s.as_str() != "--json").cloned(),
+        }),
+        Some("abort") => Some(AiCommand::Abort {
+            job_id: cmd.get(2).filter(|s| s.as_str() != "--json").cloned(),
+        }),
+        Some("sessions") => Some(AiCommand::Sessions),
+        _ => None,
+    }
+}
+
 /// How many lines the human-readable tables keep (REST bodies stay small).
 const MAX_LINES: usize = 400;
 
@@ -532,6 +610,7 @@ fn dispatch(
         "encrypt" => encrypt_cmd(args, json),
         "decrypt" => decrypt_cmd(args, json),
         "search" => search_cmd(args, json),
+        "ai" => ai_cmd(args, db, json),
         unknown => Err(did_you_mean("unknown command", unknown, command_table())),
     }
 }
@@ -568,6 +647,10 @@ fn help_text(json: bool) -> String {
         ("tasks", &["ps", "top", "kill <id>"]),
         ("compute", &["jobs", "compute run <job> <path>", "workers"]),
         ("crypto/search", &["keygen", "encrypt", "decrypt", "search"]),
+        (
+            "agent",
+            &["ai ask \"…\" [--config <id>] [--session <id>]", "ai status|abort|sessions"],
+        ),
     ];
     if json {
         let value = serde_json::json!({
@@ -1325,6 +1408,39 @@ fn quota_cmd(db: Option<&Database>, json: bool) -> Result<String, String> {
         "{} ({}): used {} of {} · source: {}",
         config.id, config.backend_type, used, total, usage.detail
     ))
+}
+
+/// `ai …` — native agent runs from the terminal.
+///
+/// Like `sync start`, the real execution needs a detached worker plus the
+/// shared database handle, which bare `execute()` does not have (and the
+/// job registry lives in `cybermanju-web`, which this crate cannot depend
+/// on without a cycle). So this arm is the honest fallback: `POST
+/// /api/os/exec` intercepts `ai ask …` locklessly and runs it detached —
+/// see `parse_ai_command` and the REST intercept.
+fn ai_cmd(args: &[String], _db: Option<&Database>, json: bool) -> Result<String, String> {
+    const HINT: &str =
+        "run it via POST /api/os/exec {\"line\": \"ai …\"} or the Agent panel; see docs/OPERATIONS.md";
+    let sub = args.first().map(String::as_str).unwrap_or("ask");
+    if json {
+        return serde_json::to_string(&serde_json::json!({
+            "started": false,
+            "subcommand": sub,
+            "error": format!("unsupported: `ai {sub}` needs a detached worker — {HINT}"),
+        }))
+        .map_err(|e| e.to_string());
+    }
+    Err(match sub {
+        "ask" => format!("unsupported: `ai ask` needs a detached worker — {HINT}"),
+        "status" | "abort" | "sessions" => {
+            format!("unsupported: `ai {sub}` is served over REST — {HINT}")
+        }
+        other => did_you_mean(
+            "unknown ai subcommand",
+            other,
+            &["ask", "status", "abort", "sessions"],
+        ),
+    })
 }
 
 fn sync_cmd(args: &[String], db: Option<&Database>, json: bool) -> Result<String, String> {
@@ -2107,6 +2223,43 @@ mod tests {
         assert!(out.contains("echo recorded"), "got {out}");
         assert!(execute("history clear", None).is_ok());
         lock(history()).clear();
+    }
+
+    #[test]
+    fn ai_parser_covers_ask_status_abort_sessions() {
+        assert_eq!(
+            parse_ai_command("ai ask \"refactor this\" --config cfg-1"),
+            Some(AiCommand::Ask {
+                prompt: "refactor this".into(),
+                config_id: Some("cfg-1".into()),
+                session_id: None,
+            })
+        );
+        assert_eq!(
+            parse_ai_command("ai ask fix it --session ses-1 --config cfg-2"),
+            Some(AiCommand::Ask {
+                prompt: "fix it".into(),
+                config_id: Some("cfg-2".into()),
+                session_id: Some("ses-1".into()),
+            })
+        );
+        assert_eq!(
+            parse_ai_command("ai status"),
+            Some(AiCommand::Status { job_id: None })
+        );
+        assert_eq!(
+            parse_ai_command("ai abort agent-1"),
+            Some(AiCommand::Abort {
+                job_id: Some("agent-1".into())
+            })
+        );
+        assert_eq!(parse_ai_command("ai sessions"), Some(AiCommand::Sessions));
+        assert!(parse_ai_command("ai ask").is_none());
+        assert!(parse_ai_command("ai frobnicate").is_none());
+        assert!(parse_ai_command("ai ask x | cat").is_none());
+        // Direct-library execution stays honest (the REST intercept runs it).
+        let err = execute("ai ask hello", None).expect_err("no worker");
+        assert!(err.starts_with("unsupported:"), "got {err}");
     }
 
     #[test]

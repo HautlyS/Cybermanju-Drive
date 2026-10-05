@@ -53,6 +53,19 @@ Error prefixes (AGENT-1 contract) → UI hints (`describeSyncError`): `auth: / r
 
 Encrypt-before-upload (`compress → encrypt CYBE1`, keystore handle in `sync_files`) is default-on; striped placement (`whole|striped`, `parity:1` = one replica, RS `k+m` under the hood) needs ≥2 enabled configs.
 
+## 4b. Agent runs (same async contract)
+
+`POST /api/agent/prompt {configId, sessionId?, prompt} → 202 {jobId}`, poll
+`GET /api/agent/jobs/{jobId}` (turns, usage, `pending` approvals),
+`POST /api/agent/jobs/{jobId}/approve {approved, answer?}`,
+`POST /api/agent/jobs/{jobId}/abort`. Asks park up to 10 min then auto-deny;
+`deny` rules always win, even with auto-approve.
+`cybsh`: `ai ask "<prompt>" [--config <id>] [--session <id>]` (detached via
+the same lock-free intercept), `ai status [job]`, `ai abort [job]`,
+`ai sessions`. Provider keys live sealed in `sync_secrets`
+(`agent:key:<config_id>`); configs/sessions are plain JSON rows. Transcripts
+sync like any file via export → striped placement.
+
 ## 5. Durability: scrub / repair / gc / leases
 
 | Task | Route | Notes |

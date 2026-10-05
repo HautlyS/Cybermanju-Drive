@@ -6,6 +6,7 @@
 // callers are responsible for acquiring the right lock for the operation.
 
 pub mod accounts;
+pub mod agent_api;
 pub mod audit;
 pub mod batch;
 pub mod code;

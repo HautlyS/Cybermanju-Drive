@@ -62,6 +62,7 @@ const dockApps = computed<DockApp[]>(() => [
   { panelType: 'map', label: 'Map', icon: '[@]', category: 'tools' },
   { panelType: 'code', label: 'Code', icon: '[T]', category: 'tools' },
   { panelType: 'editor', label: 'Editor', icon: '[E]', category: 'tools' },
+  { panelType: 'agent', label: 'Agent', icon: '[A]', category: 'tools' },
   { panelType: 'sync', label: 'Sync', icon: '[~]', category: 'tools' },
   { panelType: 'storage', label: 'Storage', icon: '[$]', category: 'tools' },
   { panelType: 'disks', label: 'Disks', icon: '[=]', category: 'tools' },

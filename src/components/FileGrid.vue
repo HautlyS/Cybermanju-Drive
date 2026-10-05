@@ -73,7 +73,7 @@
           <span class="file-icon">{{ getIcon(file) }}</span>
         </div>
         <div class="file-card-name truncate" :title="file.name">{{ file.name }}</div>
-        <div class="file-card-meta text-muted">{{ formatSize(file.sizeBytes) }}</div>
+        <div class="file-card-meta text-muted">{{ humanBytes(file.sizeBytes) }}</div>
         <div class="file-card-badges" aria-hidden="true">
           <span v-if="file.encrypted" class="card-badge" title="ENCRYPTED">[E]</span>
           <span v-if="file.compressionLayers && file.compressionLayers[0] && file.compressionLayers[0] !== 'none'" class="card-badge" title="COMPRESSED">[C]</span>
@@ -119,7 +119,7 @@
             <span class="file-icon">{{ getIcon(file) }}</span>
           </div>
           <div class="masonry-name truncate" :title="file.name">{{ file.name }}</div>
-          <div class="masonry-meta text-muted">{{ formatSize(file.sizeBytes) }}</div>
+          <div class="masonry-meta text-muted">{{ humanBytes(file.sizeBytes) }}</div>
           <div class="masonry-badges" aria-hidden="true">
             <span v-if="file.encrypted" class="card-badge" title="ENCRYPTED">[E]</span>
             <span v-if="file.compressionLayers && file.compressionLayers[0] && file.compressionLayers[0] !== 'none'" class="card-badge" title="COMPRESSED">[C]</span>
@@ -175,7 +175,7 @@
           <span v-else class="file-icon-sm" aria-hidden="true">{{ getIcon(file) }}</span>
           <span class="truncate">{{ file.name }}</span>
         </span>
-        <span class="lc lc-size text-muted">{{ formatSize(file.sizeBytes) }}</span>
+        <span class="lc lc-size text-muted">{{ humanBytes(file.sizeBytes) }}</span>
         <span class="lc lc-type text-muted">{{ file.mimeType || (file.fileType === 'folder' ? 'FOLDER' : 'FILE') }}</span>
         <span class="lc lc-date text-muted">{{ formatDate(file.modifiedAt) }}</span>
         <span class="lc lc-status" aria-hidden="true">
@@ -222,6 +222,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { humanBytes } from '@/utils/format'
 import { useContextMenu } from '@/composables/useContextMenu'
 import { useDrag } from '@/composables/useDrag'
 import type { FileNode } from '@/types'
@@ -319,13 +320,6 @@ function getIcon(file: FileNode): string {
   return '[=]'
 }
 
-function formatSize(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const k = 1024
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + units[i]
-}
 
 function formatDate(dateStr: string): string {
   if (!dateStr) return '--'
@@ -433,7 +427,7 @@ function buildFileCtxEntries(file: FileNode) {
 
   const meta = [
     { id: 'permissions', label: 'PERMISSIONS', icon: '[!]', action: () => { store.selectedFileId = file.id; store.showPermissionsPanel = true } },
-    { id: 'properties', label: 'PROPERTIES', icon: '[i]', action: () => store.notifySuccess('PROPS: ' + file.name + ' | SIZE: ' + formatSize(file.sizeBytes) + ' | ' + (file.mimeType || '')) },
+    { id: 'properties', label: 'PROPERTIES', icon: '[i]', action: () => store.notifySuccess('PROPS: ' + file.name + ' | SIZE: ' + humanBytes(file.sizeBytes) + ' | ' + (file.mimeType || '')) },
   ]
   const deleteAction = { id: 'delete', label: 'DELETE', icon: '[X]', action: () => store.deleteFile(file.id) }
 
@@ -484,7 +478,7 @@ function showContextMenu(e: MouseEvent, file: FileNode) {
     decrypt: () => store.notifySuccess('DECRYPT: ' + file.name),
     decompress: () => store.notifySuccess('DECOMPRESS: ' + file.name),
     permissions: () => { store.selectedFileId = file.id; store.showPermissionsPanel = true },
-    properties: () => store.notifySuccess('PROPS: ' + file.name + ' | SIZE: ' + formatSize(file.sizeBytes) + ' | ' + file.mimeType || ''),
+    properties: () => store.notifySuccess('PROPS: ' + file.name + ' | SIZE: ' + humanBytes(file.sizeBytes) + ' | ' + file.mimeType || ''),
     delete: () => store.deleteFile(file.id),
     duplicate: () => store.duplicateFileContext?.(file.id) || store.notifySuccess('DUPLICATE: ' + file.name),
     rotate: (dir: string) => store.notifySuccess(`ROTATE ${dir}: ` + file.name),

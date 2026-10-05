@@ -14,7 +14,7 @@
         <div class="meta-grid">
           <div class="meta-row">
             <span class="meta-key text-muted">SIZE</span>
-            <span class="meta-value mono">{{ formatSize(store.selectedFile.sizeBytes) }}</span>
+            <span class="meta-value mono">{{ humanBytes(store.selectedFile.sizeBytes) }}</span>
           </div>
           <div class="meta-row">
             <span class="meta-key text-muted">TYPE</span>
@@ -127,6 +127,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { humanBytes } from '@/utils/format'
 import type { FileNode } from '@/types'
 
 const store = useAppStore()
@@ -150,13 +151,6 @@ function getFaceGroupName(groupId: string): string {
   return store.faceGroups.find(fg => fg.id === groupId)?.name || groupId
 }
 
-function formatSize(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const k = 1024
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + units[i]
-}
 
 function formatDate(dateStr: string): string {
   if (!dateStr) return '--'

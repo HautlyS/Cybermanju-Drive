@@ -71,3 +71,11 @@ Stage Summary:
 - Cross-device saves: `GET|PUT /api/files/{id}/content` (shared `api::files` logic — version snapshot before overwrite, size/hash refresh, honest `encrypted:`/`binary:`/`too_large:`/`not_found:` refusals) with Tauri twins; Pages edits the WASM volume via a new `write` dispatcher op (1 MiB cap, round-trip tested).
 - Store actions (`read/saveManagedContent`, `read/saveWasmFile`, `listWasmDir`), invoke mappings, `FileContent`/`SavedContent` types, `os_write` wasm bridge; `crates/tests/src/editor.rs` pins auth gating, round-trip + versioning, refusals, and code-parse shape.
 - Not run here: `cargo test` (new `files.rs`, `code.rs`, wasm `os.rs`, integration tests), clippy, `os-acceptance.sh`.
+## 2026-10-06 — native AI agent core, production vertical (no cargo on box; CI must prove)
+
+- New pure-Rust `crates/agent` (providers catalog ×10 + custom, opencode-style permission matcher, OpenAI+Anthropic protocol builders/parsers, turn state machine, hash-anchored edits) with unit tests; `native` feature gates blocking HTTP.
+- Server runtime `crates/web/src/api/agent_api.rs`: keyless config CRUD (keys sealed in `sync_secrets`, `hasKey` only), model refresh, sessions + import/export, detached jobs (202 poll/abort/approve with 10-min ask parking), 7 native tools (read/write/edit/list/grep/bash/task-subagent) contained under the working root, audited, caps everywhere; routes in `lib.rs` (jobs lockless like sync), `agent` auth segment, Tauri thin commands, `cybsh ai` (parser + lockless intercept + honest direct fallback).
+- WASM: `drive-wasm` agent bridge (catalog + single-turn fetch) + `useAgent` browser loop (volume tools, local matcher mirror, in-memory keys, localStorage transcripts) + `write` dispatcher op.
+- UI: lazy `AgentPanel` (Dock, Ctrl+G, presets/custom/endpoints/models/keys/permissions/sessions/thread/approvals/usage, dual server+local modes), `FileContent`/`SavedContent`/agent types, store actions, invoke mappings; `files/{id}/content` read/write (versioned saves) backing the editor on REST; `crates/tests/src/agent.rs` pins gating, key hygiene, validation, import re-keying, `ai` intercept.
+- Docs: README features + REST table, ARCHITECTURE endpoints + `agent_configs`/`agent_sessions` tables, OPERATIONS §4b.
+- Not run here: `cargo fmt/clippy/test --workspace`, Tauri/desktop builds, `os-acceptance.sh`.

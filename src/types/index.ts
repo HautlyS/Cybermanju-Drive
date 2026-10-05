@@ -1,5 +1,5 @@
 export type ViewMode = 'grid' | 'list' | 'masonry'
-export type PanelType = 'landing' | 'files' | 'preview' | 'encryption' | 'compression' | 'collections' | 'faces' | 'map' | 'code' | 'editor' | 'search' | 'style' | 'accounts' | 'loose-groups' | 'sync' | 'webdash' | 'users' | 'dashboard' | 'settings' | 'trash' | 'activity' | 'favorites' | 'recent' | 'storage' | 'terminal' | 'processes' | 'disks' | 'permissions'
+export type PanelType = 'landing' | 'files' | 'preview' | 'encryption' | 'compression' | 'collections' | 'faces' | 'map' | 'code' | 'editor' | 'agent' | 'search' | 'style' | 'accounts' | 'loose-groups' | 'sync' | 'webdash' | 'users' | 'dashboard' | 'settings' | 'trash' | 'activity' | 'favorites' | 'recent' | 'storage' | 'terminal' | 'processes' | 'disks' | 'permissions'
 export type SidebarSection = 'tree' | 'locations' | 'collections' | 'people' | 'styles' | 'loose' | 'users' | 'sync' | 'dashboard' | 'landing' | 'tools'
 
 export interface ModuleInfo {
@@ -592,6 +592,7 @@ export const MODULE_METADATA: Record<PanelType, ModuleInfo> = {
   recent: { id: 'recent', label: 'RECENT', icon: '[T]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #080808 50%, #000000 100%)', description: 'Recently modified files', requiresAuth: true },
   storage: { id: 'storage', label: 'STORAGE', icon: '[$]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #000a00 50%, #000000 100%)', description: 'Storage usage dashboard', requiresAuth: true },
   terminal: { id: 'terminal', label: 'CYBSH', icon: '[>]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #000d08 50%, #000000 100%)', description: 'System terminal — cybsh', requiresAuth: true },
+  agent: { id: 'agent', label: 'AGENT', icon: '[A]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #000d08 50%, #000000 100%)', description: 'Native AI coding agent', requiresAuth: true },
   processes: { id: 'processes', label: 'TASKS', icon: '[%]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #000d0d 50%, #000000 100%)', description: 'Process table, top and task control', requiresAuth: true },
   disks: { id: 'disks', label: 'DISKS', icon: '[=]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #000a00 50%, #000000 100%)', description: 'Per-provider disks and the merged volume', requiresAuth: true },
   permissions: { id: 'permissions', label: 'PERMS', icon: '[!]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #0d0000 50%, #000000 100%)', description: 'Per-file access control', requiresAuth: true },
@@ -779,4 +780,129 @@ export function oauthSlugForBackend(backend: SyncBackendType | string): string |
 /** Backends that can show an "OAuth connect" button. */
 export function isOauthCapable(backend: SyncBackendType | string): boolean {
   return oauthSlugForBackend(backend) !== null
+}
+
+/* ── AI agent (native core + sidecar-compatible shapes) ─────────────── */
+
+export type LlmDialect = 'openAi' | 'anthropic'
+export type AuthScheme = 'bearer' | 'header' | 'query' | 'none'
+export type PermissionAction = 'allow' | 'ask' | 'deny'
+export type AgentKind = 'build' | 'plan'
+
+export interface ProviderPreset {
+  id: string
+  label: string
+  family: string
+  baseUrl: string
+  defaultModel: string
+  dialect: LlmDialect
+  auth: AuthScheme
+  authName?: string | null
+  keyEnv: string
+  keyless: boolean
+  extraHeaders: Array<[string, string]>
+}
+
+export type PermissionRule = PermissionAction | Array<[string, PermissionAction]>
+
+export interface PermissionRuleset {
+  default: PermissionAction
+  rules: Record<string, PermissionRule>
+}
+
+export interface AgentConfig {
+  id: string
+  name: string
+  providerId: string
+  model: string
+  baseUrlOverride?: string | null
+  dialectOverride?: LlmDialect | null
+  authSchemeOverride?: AuthScheme | null
+  authNameOverride?: string | null
+  workingDir: string
+  agentKind: AgentKind
+  permission: PermissionRuleset
+  autoApprove: boolean
+  maxTurns: number
+  hasKey: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ChatMessage {
+  role: string
+  content: string
+  toolCallId?: string | null
+  toolName?: string | null
+  toolInput?: unknown
+}
+
+export interface ToolCall {
+  id: string
+  name: string
+  input: Record<string, unknown>
+}
+
+export interface TokenUsage {
+  inputTokens: number
+  outputTokens: number
+}
+
+export interface AgentSession {
+  id: string
+  title: string
+  configId: string
+  providerId: string
+  model: string
+  agentKind: AgentKind
+  workingDir: string
+  messages: ChatMessage[]
+  usage: TokenUsage
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PendingApproval {
+  tool: string
+  input: Record<string, unknown>
+  summary: string
+  question?: string | null
+}
+
+export interface AgentJob {
+  jobId: string
+  sessionId: string
+  configId: string
+  status: string
+  turnsUsed: number
+  maxTurns: number
+  usage: TokenUsage
+  result?: string | null
+  error?: string | null
+  pending?: PendingApproval | null
+}
+
+/** Built-in permission presets offered by the Agent panel wizard. */
+export function agentPermissionPreset(name: 'strict' | 'balanced' | 'yolo'): PermissionRuleset {
+  if (name === 'strict') {
+    return { default: 'ask', rules: {} }
+  }
+  if (name === 'yolo') {
+    return {
+      default: 'allow',
+      rules: {
+        bash: [['*', 'ask'], ['rm *', 'deny'], ['git push *', 'ask']],
+        edit: [['*', 'allow']],
+      },
+    }
+  }
+  return {
+    default: 'ask',
+    rules: {
+      read: 'allow',
+      list: 'allow',
+      grep: 'allow',
+      bash: [['*', 'ask'], ['git *', 'allow'], ['rm *', 'deny']],
+    },
+  }
 }

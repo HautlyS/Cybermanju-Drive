@@ -22,7 +22,7 @@
         <div v-if="files.length > 0" class="upload-files">
           <div v-for="(f, idx) in files" :key="idx" class="upload-file-row" :class="{ done: f.status === 'done', error: f.status === 'error' }">
             <span class="uf-name truncate">{{ f.name }}</span>
-            <span class="uf-size text-muted">{{ formatSize(f.size) }}</span>
+            <span class="uf-size text-muted">{{ humanBytes(f.size) }}</span>
             <span class="uf-status">{{ f.status === 'uploading' ? 'UPLOADING..' : f.status === 'done' ? 'DONE' : f.status === 'error' ? 'FAILED' : 'PENDING' }}</span>
             <span v-if="f.error" class="uf-error text-muted">{{ f.error }}</span>
           </div>
@@ -40,6 +40,7 @@
 <script setup lang="ts">
 import { ref, toRef, computed, watch, nextTick } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { humanBytes } from '@/utils/format'
 import { invoke } from '@/composables/useTauri'
 import { useFocusTrap } from '@/composables/useFocusTrap'
 
@@ -64,14 +65,6 @@ interface UploadFile {
 const files = ref<UploadFile[]>([])
 
 const completedCount = computed(() => files.value.filter(f => f.status === 'done').length)
-
-function formatSize(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const k = 1024
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + units[i]
-}
 
 async function readFile(file: File): Promise<ArrayBuffer> {
   return new Promise((resolve, reject) => {

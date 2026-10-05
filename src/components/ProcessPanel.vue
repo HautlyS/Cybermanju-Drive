@@ -5,6 +5,7 @@
 // the same syscall boundary the terminal uses (`kill <id>`, `compute run …`).
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { humanBytes } from '@/utils/format'
 import type { OsTask } from '@/types'
 
 const store = useAppStore()
@@ -19,18 +20,6 @@ const tasks = computed<OsTask[]>(() => store.osPs?.tasks ?? store.osTop?.tasks ?
 const counts = computed(() => store.osTop?.counts ?? store.osPs?.counts ?? null)
 const load = computed(() => store.osTop?.load ?? null)
 const mem = computed(() => store.osTop?.mem ?? null)
-
-function human(bytes: number): string {
-  if (!bytes) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let value = bytes
-  let unit = 0
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024
-    unit += 1
-  }
-  return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`
-}
 
 function clock(ms: number): string {
   const total = Math.floor(ms / 1000)
@@ -98,7 +87,7 @@ onBeforeUnmount(() => {
       </div>
       <div class="stat">
         <span class="stat-key">RSS</span>
-        <span class="stat-val">{{ mem ? human(mem.rssBytes) : '—' }}</span>
+        <span class="stat-val">{{ mem ? humanBytes(mem.rssBytes) : '—' }}</span>
       </div>
       <div class="stat">
         <span class="stat-key">UP</span>
@@ -140,7 +129,7 @@ onBeforeUnmount(() => {
               <span class="pct">{{ pct(task) }}%</span>
             </td>
             <td>{{ task.provider }}</td>
-            <td>{{ human(task.bytes) }}</td>
+            <td>{{ humanBytes(task.bytes) }}</td>
             <td>
               <button
                 v-if="task.state === 'running' || task.state === 'pending'"

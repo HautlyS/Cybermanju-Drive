@@ -28,6 +28,9 @@ getrandom = { version = "0.2", features = ["js"] }
 # resolved version, so this turns `wasm_js` on for the very instance
 # crypto-common links, without touching the 0.2 line above.
 getrandom-wasm = { package = "getrandom", version = "0.4", features = ["wasm_js"] }
+# uuid v4 on wasm may resolve getrandom 0.3 (via cybermanju-db); give that
+# instance its JS backend too. Harmless when 0.3 is absent from the tree.
+getrandom03-wasm = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 
 # Compression (pure Rust only)
 lz4_flex = "0.11"
@@ -36,6 +39,19 @@ brotli = "7"
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# Pure agent core (providers, protocol builders/parsers — no HTTP here).
+# The `native` feature stays OFF: the browser fetches via web-sys below.
+cybermanju-agent = { path = "../agent" }
+
+# Browser fetch for agent turns (WASM target only in practice).
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Request",
+    "RequestInit",
+    "Response",
+    "Headers",
+] }
 
 # Async JS interop (OPFS access handles resolve via Promises)
 wasm-bindgen-futures = "0.4"

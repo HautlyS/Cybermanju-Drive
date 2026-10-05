@@ -42,11 +42,11 @@
       <div class="stats-card">
         <div class="stat-row">
           <span class="stat-key text-muted">ORIGINAL</span>
-          <span class="stat-value">{{ formatSize(compressionStats.originalSize) }}</span>
+          <span class="stat-value">{{ humanBytes(compressionStats.originalSize) }}</span>
         </div>
         <div class="stat-row">
           <span class="stat-key text-muted">COMPRESSED</span>
-          <span class="stat-value">{{ formatSize(compressionStats.compressedSize) }}</span>
+          <span class="stat-value">{{ humanBytes(compressionStats.compressedSize) }}</span>
         </div>
         <div class="stat-row">
           <span class="stat-key text-muted">RATIO</span>
@@ -64,6 +64,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { humanBytes } from '@/utils/format'
 import { isWebMode } from '@/composables/useTauri'
 import type { CompressionType } from '@/types'
 import { COMPRESSION_INFO } from '@/types'
@@ -77,13 +78,6 @@ const selectedFile = computed(() => store.selectedFile)
 const compressionStats = computed(() => store.compressionStats)
 const selectedAlgo = ref<CompressionType>('zstd')
 
-function formatSize(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const k = 1024
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + units[i]
-}
 
 async function handleCompress() {
   if (!store.selectedFileId) return

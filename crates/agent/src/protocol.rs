@@ -1,0 +1,596 @@
+// Provider wire protocol: request builders, response parsers, tool schemas.
+//
+// Two dialects, one normalized shape. Everything here is pure JSON in/out;
+// the actual HTTP hop is caller-provided (blocking reqwest behind `native`,
+// `fetch` in drive-wasm, the dashboard proxy later). Errors carry the house
+// machine prefixes (`auth:`, `rate_limited:`, `network:`, `integrity:`).
+
+use cybermanju_types::agent::{
+    AuthScheme, ChatMessage, LlmDialect, ProviderPreset, TokenUsage, ToolCall,
+};
+
+// ─── tool schemas (one set, every transport) ──────────────────────────────
+
+/// The agent's tool surface. Native executes these against the Kernel and
+/// the volume; WASM executes the file subset against its volume map
+/// (`bash`/`task` answer `unsupported:` there — no fake success).
+pub const TOOL_NAMES: &[&str] = &[
+    "read", "write", "edit", "list", "grep", "bash", "task",
+];
+
+fn tool_def(name: &str, description: &str, properties: serde_json::Value, required: &[&str]) -> serde_json::Value {
+    serde_json::json!({
+        "name": name,
+        "description": description,
+        "parameters": {
+            "type": "object",
+            "properties": properties,
+            "required": required,
+        },
+    })
+}
+
+/// Canonical tool definitions (name/description/JSON-schema).
+pub fn tool_definitions() -> Vec<serde_json::Value> {
+    vec![
+        tool_def(
+            "read",
+            "Read a UTF-8 text file from the working root. Refuses encrypted, binary and oversized files.",
+            serde_json::json!({ "path": { "type": "string", "description": "Workspace-relative file path" } }),
+            &["path"],
+        ),
+        tool_def(
+            "write",
+            "Create or overwrite a text file (snapshots a version first where supported).",
+            serde_json::json!({
+                "path": { "type": "string" },
+                "content": { "type": "string", "description": "Full new file content" },
+            }),
+            &["path", "content"],
+        ),
+        tool_def(
+            "edit",
+            "Hash-anchored edit: replace one exact old_block with new_block. Fails when the block is missing (not_found:) or ambiguous (conflict:); pass expected_hash (BLAKE3 of the whole file) to also verify it did not change under you.",
+            serde_json::json!({
+                "path": { "type": "string" },
+                "old_block": { "type": "string" },
+                "new_block": { "type": "string" },
+                "expected_hash": { "type": "string", "description": "Optional BLAKE3 hex of the file before editing" },
+            }),
+            &["path", "old_block", "new_block"],
+        ),
+        tool_def(
+            "list",
+            "List a directory under the working root.",
+            serde_json::json!({ "path": { "type": "string", "description": "Directory, default \"/\"" } }),
+            &[],
+        ),
+        tool_def(
+            "grep",
+            "Search file contents (bounded recursive scan, text files only).",
+            serde_json::json!({
+                "pattern": { "type": "string" },
+                "path": { "type": "string", "description": "Subdirectory, default \"/\"" },
+                "limit": { "type": "integer", "description": "Max matches, default 50" },
+            }),
+            &["pattern"],
+        ),
+        tool_def(
+            "bash",
+            "Run a shell command with a timeout (native transports only). Output truncated at 64 KiB.",
+            serde_json::json!({
+                "command": { "type": "string" },
+                "timeout_secs": { "type": "integer", "description": "Default 120" },
+            }),
+            &["command"],
+        ),
+        tool_def(
+            "task",
+            "Launch one subagent for a delegated goal (depth-guarded, reduced turns).",
+            serde_json::json!({
+                "goal": { "type": "string" },
+                "context": { "type": "string", "description": "Relevant file paths or notes" },
+            }),
+            &["goal"],
+        ),
+    ]
+}
+
+/// OpenAI `tools` array wrapping the canonical definitions.
+pub fn openai_tools() -> serde_json::Value {
+    tool_definitions()
+        .into_iter()
+        .map(|d| {
+            serde_json::json!({ "type": "function", "function": d })
+        })
+        .collect()
+}
+
+/// Anthropic `tools` array (same definitions, `input_schema` key).
+pub fn anthropic_tools() -> serde_json::Value {
+    tool_definitions()
+        .into_iter()
+        .map(|mut d| {
+            if let Some(obj) = d.as_object_mut() {
+                if let Some(params) = obj.remove("parameters") {
+                    obj.insert("input_schema".to_string(), params);
+                }
+            }
+            d
+        })
+        .collect()
+}
+
+// ─── auth ─────────────────────────────────────────────────────────────────
+
+/// Headers for a chat call. The key itself travels only here, never in a
+/// body or a log line.
+pub fn auth_headers(preset: &ProviderPreset, api_key: &str) -> Vec<(String, String)> {
+    let mut headers = preset.extra_headers.clone();
+    match preset.auth {
+        AuthScheme::Bearer => {
+            if !api_key.is_empty() {
+                headers.push(("Authorization".into(), format!("Bearer {api_key}")));
+            }
+        }
+        AuthScheme::Header => {
+            let name = preset.auth_name.clone().unwrap_or_else(|| "x-api-key".into());
+            headers.push((name, api_key.to_string()));
+        }
+        AuthScheme::Query | AuthScheme::None => {}
+    }
+    headers.push(("Content-Type".into(), "application/json".into()));
+    headers
+}
+
+/// Append a query-scheme key (`?key=`) to a URL.
+pub fn with_query_key(url: &str, name: &str, api_key: &str) -> String {
+    if api_key.is_empty() {
+        return url.to_string();
+    }
+    let sep = if url.contains('?') { '&' } else { '?' };
+    format!("{url}{sep}{name}={api_key}")
+}
+
+// ─── normalized turn ──────────────────────────────────────────────────────
+
+/// One model reply, dialect-free.
+#[derive(Debug, Clone, Default)]
+pub struct ParsedTurn {
+    pub content: String,
+    pub tool_calls: Vec<ToolCall>,
+    pub usage: TokenUsage,
+    /// `stop` | `tool_calls` | `length` | `error:<msg>`.
+    pub finish: String,
+}
+
+fn u64_at(v: &serde_json::Value, key: &str) -> u64 {
+    v.get(key).and_then(|n| n.as_u64()).unwrap_or(0)
+}
+
+// ─── OpenAI dialect ───────────────────────────────────────────────────────
+
+/// Build an OpenAI `/chat/completions` body.
+pub fn openai_request(
+    model: &str,
+    system: &str,
+    messages: &[ChatMessage],
+    tools: bool,
+) -> serde_json::Value {
+    let mut wire: Vec<serde_json::Value> = Vec::with_capacity(messages.len() + 1);
+    if !system.is_empty() {
+        wire.push(serde_json::json!({ "role": "system", "content": system }));
+    }
+    for m in messages {
+        match m.role.as_str() {
+            "tool" => wire.push(serde_json::json!({
+                "role": "tool",
+                "tool_call_id": m.tool_call_id,
+                "content": m.content,
+            })),
+            "assistant_tool" => {
+                let calls = m.tool_input.clone().unwrap_or(serde_json::Value::Null);
+                wire.push(serde_json::json!({
+                    "role": "assistant",
+                    "content": m.content,
+                    "tool_calls": calls,
+                }));
+            }
+            role => wire.push(serde_json::json!({ "role": role, "content": m.content })),
+        }
+    }
+    let mut body = serde_json::json!({ "model": model, "messages": wire });
+    if tools {
+        body["tools"] = openai_tools();
+        body["tool_choice"] = serde_json::json!("auto");
+    }
+    body
+}
+
+/// Parse an OpenAI chat response (or error envelope) into a turn.
+pub fn openai_parse(body: &serde_json::Value) -> Result<ParsedTurn, String> {
+    if let Some(err) = body.get("error") {
+        let msg = err
+            .get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("unknown provider error");
+        let code = err
+            .get("code")
+            .and_then(|c| c.as_str())
+            .unwrap_or_default();
+        return Err(classify_provider_error(None, msg, code));
+    }
+    let choice = body
+        .get("choices")
+        .and_then(|c| c.as_array())
+        .and_then(|a| a.first())
+        .ok_or_else(|| "integrity: provider returned no choices".to_string())?;
+    let message = choice.get("message").unwrap_or(&serde_json::Value::Null);
+    let content = message
+        .get("content")
+        .and_then(|c| c.as_str())
+        .unwrap_or("")
+        .to_string();
+    let mut tool_calls = Vec::new();
+    if let Some(calls) = message.get("tool_calls").and_then(|c| c.as_array()) {
+        for call in calls {
+            let id = call
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("call-0")
+                .to_string();
+            let func = call.get("function").unwrap_or(&serde_json::Value::Null);
+            let name = func
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let input = func
+                .get("arguments")
+                .and_then(|v| v.as_str())
+                .and_then(|s| serde_json::from_str(s).ok())
+                .unwrap_or(serde_json::json!({}));
+            tool_calls.push(ToolCall { id, name, input });
+        }
+    }
+    let usage = body.get("usage").map(|u| TokenUsage {
+        input_tokens: u64_at(u, "prompt_tokens"),
+        output_tokens: u64_at(u, "completion_tokens"),
+    });
+    let finish = choice
+        .get("finish_reason")
+        .and_then(|f| f.as_str())
+        .unwrap_or("stop")
+        .to_string();
+    Ok(ParsedTurn {
+        content,
+        tool_calls,
+        usage: usage.unwrap_or_default(),
+        finish,
+    })
+}
+
+// ─── Anthropic dialect ────────────────────────────────────────────────────
+
+/// Build an Anthropic `/v1/messages` body (`max_tokens` required).
+pub fn anthropic_request(
+    model: &str,
+    system: &str,
+    messages: &[ChatMessage],
+    tools: bool,
+) -> serde_json::Value {
+    let mut wire: Vec<serde_json::Value> = Vec::with_capacity(messages.len());
+    for m in messages {
+        match m.role.as_str() {
+            "tool" => wire.push(serde_json::json!({
+                "role": "user",
+                "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": m.tool_call_id,
+                    "content": m.content,
+                }],
+            })),
+            "assistant_tool" => {
+                let mut blocks = Vec::new();
+                if !m.content.is_empty() {
+                    blocks.push(serde_json::json!({ "type": "text", "text": m.content }));
+                }
+                if let Some(calls) = m.tool_input.as_ref().and_then(|v| v.as_array()) {
+                    for call in calls {
+                        blocks.push(serde_json::json!({
+                            "type": "tool_use",
+                            "id": call.get("id"),
+                            "name": call.get("name"),
+                            "input": call.get("input"),
+                        }));
+                    }
+                }
+                wire.push(serde_json::json!({ "role": "assistant", "content": blocks }));
+            }
+            "system" => continue,
+            role => {
+                let api_role = if role == "assistant" { "assistant" } else { "user" };
+                wire.push(serde_json::json!({ "role": api_role, "content": m.content }));
+            }
+        }
+    }
+    let mut body = serde_json::json!({
+        "model": model,
+        "max_tokens": 4096,
+        "messages": wire,
+    });
+    if !system.is_empty() {
+        body["system"] = serde_json::json!(system);
+    }
+    if tools {
+        body["tools"] = anthropic_tools();
+    }
+    body
+}
+
+/// Parse an Anthropic message response (or error envelope) into a turn.
+pub fn anthropic_parse(body: &serde_json::Value) -> Result<ParsedTurn, String> {
+    if body.get("error").is_some() {
+        let msg = body
+            .pointer("/error/message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("unknown provider error");
+        let kind = body
+            .pointer("/error/type")
+            .and_then(|m| m.as_str())
+            .unwrap_or_default();
+        return Err(classify_provider_error(None, msg, kind));
+    }
+    let mut content = String::new();
+    let mut tool_calls = Vec::new();
+    if let Some(blocks) = body.get("content").and_then(|c| c.as_array()) {
+        for block in blocks {
+            match block.get("type").and_then(|t| t.as_str()) {
+                Some("text") => {
+                    if let Some(text) = block.get("text").and_then(|t| t.as_str()) {
+                        if !content.is_empty() {
+                            content.push('\n');
+                        }
+                        content.push_str(text);
+                    }
+                }
+                Some("tool_use") => tool_calls.push(ToolCall {
+                    id: block
+                        .get("id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("call-0")
+                        .to_string(),
+                    name: block
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    input: block.get("input").cloned().unwrap_or(serde_json::json!({})),
+                }),
+                _ => {}
+            }
+        }
+    }
+    let usage = body.get("usage").map(|u| TokenUsage {
+        input_tokens: u64_at(u, "input_tokens"),
+        output_tokens: u64_at(u, "output_tokens"),
+    });
+    let finish = body
+        .get("stop_reason")
+        .and_then(|s| s.as_str())
+        .map(|s| {
+            if s == "tool_use" {
+                "tool_calls".to_string()
+            } else {
+                s.to_string()
+            }
+        })
+        .unwrap_or_else(|| "stop".to_string());
+    Ok(ParsedTurn {
+        content,
+        tool_calls,
+        usage: usage.unwrap_or_default(),
+        finish,
+    })
+}
+
+// ─── error classification (house prefixes) ────────────────────────────────
+
+/// Map an HTTP status / provider error onto `auth:`, `rate_limited:` or
+/// `network:`. Used by every transport so the UI hints stay uniform.
+pub fn classify_provider_error(status: Option<u16>, message: &str, code: &str) -> String {
+    let haystack = format!("{message} {code}").to_lowercase();
+    let authy = ["invalid api key", "incorrect api key", "unauthorized", "authentication",
+        "invalid_api_key", "authentication_error", "permission_denied", "account_deactivated"];
+    if status == Some(401) || status == Some(403) || authy.iter().any(|s| haystack.contains(s)) {
+        return format!("auth: provider rejected credentials: {message}");
+    }
+    if status == Some(429)
+        || haystack.contains("rate limit")
+        || haystack.contains("rate_limit")
+        || haystack.contains("quota")
+        || haystack.contains("overloaded")
+        || haystack.contains("529")
+    {
+        return format!("rate_limited: provider throttled the request: {message}");
+    }
+    if let Some(status) = status {
+        return format!("network: provider HTTP {status}: {message}");
+    }
+    format!("network: provider error: {message}")
+}
+
+// ─── blocking transport (feature `native`) ────────────────────────────────
+
+/// POST JSON and parse the reply. Timeouts are generous — agentic turns
+/// think for a while — but always finite.
+#[cfg(feature = "native")]
+pub fn post_json(
+    url: &str,
+    headers: &[(String, String)],
+    body: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let client = reqwest::blocking::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(|e| format!("network: cannot build HTTP client: {e}"))?;
+    let mut req = client.post(url).json(body);
+    for (name, value) in headers {
+        req = req.header(name.as_str(), value.as_str());
+    }
+    let resp = req
+        .send()
+        .map_err(|e| format!("network: request failed: {e}"))?;
+    let status = resp.status().as_u16();
+    let value: serde_json::Value = resp
+        .json()
+        .map_err(|e| format!("network: unreadable provider reply: {e}"))?;
+    if !(200..300).contains(&status) {
+        let msg = value
+            .get("error")
+            .and_then(|e| {
+                e.get("message")
+                    .or_else(|| e.pointer("/message"))
+                    .and_then(|m| m.as_str())
+                    .map(str::to_string)
+            })
+            .unwrap_or_else(|| format!("HTTP {status}"));
+        return Err(classify_provider_error(Some(status), &msg, ""));
+    }
+    Ok(value)
+}
+
+/// GET JSON (models refresh). Same prefix contract.
+#[cfg(feature = "native")]
+pub fn get_json(url: &str, headers: &[(String, String)]) -> Result<serde_json::Value, String> {
+    let client = reqwest::blocking::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| format!("network: cannot build HTTP client: {e}"))?;
+    let mut req = client.get(url);
+    for (name, value) in headers {
+        req = req.header(name.as_str(), value.as_str());
+    }
+    let resp = req
+        .send()
+        .map_err(|e| format!("network: request failed: {e}"))?;
+    let status = resp.status().as_u16();
+    let value: serde_json::Value = resp
+        .json()
+        .map_err(|e| format!("network: unreadable provider reply: {e}"))?;
+    if !(200..300).contains(&status) {
+        return Err(classify_provider_error(Some(status), "models request failed", ""));
+    }
+    Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tool_schemas_cover_seven_tools_in_openai_shape() {
+        let tools = openai_tools();
+        assert_eq!(tools.as_array().map(|a| a.len()), Some(7));
+        let first = &tools[0];
+        assert_eq!(first["type"], "function");
+        assert_eq!(first["function"]["name"], "read");
+        let anthropic = anthropic_tools();
+        assert!(anthropic[0].get("input_schema").is_some());
+        assert!(anthropic[0].get("parameters").is_none());
+    }
+
+    #[test]
+    fn openai_round_trip_with_tool_calls() {
+        let body = openai_request(
+            "gpt-5",
+            "sys",
+            &[ChatMessage {
+                role: "user".into(),
+                content: "hi".into(),
+                tool_call_id: None,
+                tool_name: None,
+                tool_input: None,
+            }],
+            true,
+        );
+        assert_eq!(body["model"], "gpt-5");
+        assert_eq!(body["messages"][0]["role"], "system");
+        assert_eq!(body["tools"].as_array().map(|a| a.len()), Some(7));
+
+        let reply = serde_json::json!({
+            "choices": [{
+                "finish_reason": "tool_calls",
+                "message": {
+                    "content": "looking",
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "read",
+                            "arguments": "{\"path\":\"a.rs\"}",
+                        },
+                    }],
+                },
+            }],
+            "usage": { "prompt_tokens": 10, "completion_tokens": 5 },
+        });
+        let turn = openai_parse(&reply).expect("parse");
+        assert_eq!(turn.content, "looking");
+        assert_eq!(turn.tool_calls.len(), 1);
+        assert_eq!(turn.tool_calls[0].name, "read");
+        assert_eq!(turn.tool_calls[0].input["path"], "a.rs");
+        assert_eq!(turn.usage.input_tokens, 10);
+        assert_eq!(turn.finish, "tool_calls");
+
+        let err = serde_json::json!({ "error": { "message": "Incorrect API key", "code": "invalid_api_key" } });
+        assert!(openai_parse(&err).expect_err("auth").starts_with("auth:"));
+    }
+
+    #[test]
+    fn anthropic_round_trip_with_tool_use() {
+        let body = anthropic_request("claude-sonnet-4-5", "sys", &[], true);
+        assert_eq!(body["max_tokens"], 4096);
+        assert_eq!(body["system"], "sys");
+
+        let reply = serde_json::json!({
+            "content": [
+                { "type": "text", "text": "on it" },
+                { "type": "tool_use", "id": "toolu_1", "name": "bash",
+                  "input": { "command": "git status" } },
+            ],
+            "stop_reason": "tool_use",
+            "usage": { "input_tokens": 7, "output_tokens": 3 },
+        });
+        let turn = anthropic_parse(&reply).expect("parse");
+        assert_eq!(turn.content, "on it");
+        assert_eq!(turn.finish, "tool_calls");
+        assert_eq!(turn.tool_calls[0].input["command"], "git status");
+        assert_eq!(turn.usage.output_tokens, 3);
+
+        let err = serde_json::json!({ "error": { "type": "overloaded_error", "message": "busy" } });
+        assert!(anthropic_parse(&err).expect_err("limited").starts_with("rate_limited:"));
+    }
+
+    #[test]
+    fn auth_headers_follow_the_scheme() {
+        let preset = ProviderPreset {
+            id: "x".into(),
+            label: "X".into(),
+            family: "x".into(),
+            base_url: "https://x.test/v1".into(),
+            default_model: "m".into(),
+            dialect: LlmDialect::OpenAi,
+            auth: AuthScheme::Header,
+            auth_name: Some("x-api-key".into()),
+            key_env: String::new(),
+            keyless: false,
+            extra_headers: vec![],
+        };
+        let headers = auth_headers(&preset, "k");
+        assert!(headers.iter().any(|(n, v)| n == "x-api-key" && v == "k"));
+        assert_eq!(with_query_key("https://h.test/v", "key", "k"), "https://h.test/v?key=k");
+    }
+}

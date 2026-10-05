@@ -16,7 +16,8 @@ use serde_json::{json, Value};
 // `cybermanju-types::code` so the Tauri commands, the REST route and the
 // WASM dispatcher all parse the same way. Only the real grammars (below)
 // are desktop-only.
-use cybermanju_types::code::{detect_language, extract_symbols_heuristic};
+pub use cybermanju_types::code::detect_language;
+use cybermanju_types::code::extract_symbols_heuristic;
 
 // ---------------------------------------------------------------------------
 // Real tree-sitter engine (feature `real-treesitter`)
@@ -41,12 +42,12 @@ const MAX_TS_SYMBOLS: usize = 2_000;
 #[cfg(feature = "real-treesitter")]
 fn ts_language_for(language: &str) -> Option<tree_sitter::Language> {
     match language {
-        "rust" => Some(tree_sitter_rust::LANGUAGE_RUST.into()),
-        "python" => Some(tree_sitter_python::LANGUAGE_PYTHON.into()),
-        "javascript" => Some(tree_sitter_javascript::LANGUAGE_JAVASCRIPT.into()),
+        "rust" => Some(tree_sitter_rust::LANGUAGE.into()),
+        "python" => Some(tree_sitter_python::LANGUAGE.into()),
+        "javascript" => Some(tree_sitter_javascript::LANGUAGE.into()),
         "typescript" => Some(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
-        "go" => Some(tree_sitter_go::LANGUAGE_GO.into()),
-        "bash" => Some(tree_sitter_bash::LANGUAGE_BASH.into()),
+        "go" => Some(tree_sitter_go::LANGUAGE.into()),
+        "bash" => Some(tree_sitter_bash::LANGUAGE.into()),
         _ => None,
     }
 }

@@ -21,9 +21,9 @@
         <div class="df-used" :style="{ width: `${volumePct}%` }"></div>
       </div>
       <div class="df-legend">
-        <span>USED {{ human(volumeView?.usedBytes ?? 0) }}</span>
-        <span>FREE {{ human(volumeView?.freeBytes ?? 0) }}</span>
-        <span>TOTAL {{ human(volumeView?.totalBytes ?? 0) }}</span>
+        <span>USED {{ humanBytes(volumeView?.usedBytes ?? 0) }}</span>
+        <span>FREE {{ humanBytes(volumeView?.freeBytes ?? 0) }}</span>
+        <span>TOTAL {{ humanBytes(volumeView?.totalBytes ?? 0) }}</span>
         <span class="text-muted">{{ volumeView?.diskCount ?? 0 }} DISKS ATTACHED</span>
       </div>
     </div>
@@ -99,7 +99,7 @@
               @click="toggleEnabled(cfg)"
               :title="cfg.enabled ? 'Disable provider' : 'Enable provider'"
             >{{ cfg.enabled ? 'ON' : 'OFF' }}</button>
-            <button class="ghost-btn xs" type="button" @click="probe(cfg)">TEST</button>
+            <button class="ghost-btn xs" type="button" :disabled="probing.has(cfg.id)" @click="probe(cfg)">TEST</button>
             <button class="ghost-btn xs danger" type="button" @click="removeProvider(cfg.id)">DEL</button>
           </span>
         </header>
@@ -187,32 +187,36 @@
         <!-- disks bound to this provider: the .cybermanju file size lives here -->
         <div class="disks-block">
           <div class="row-between">
-            <span class="small">DISKS ON THIS PROVIDER ({{ disksFor(cfg.id).length }}) — EACH IS ONE .CYBERMANJU FILE, MERGED INTO THE VOLUME</span>
+            <span class="small">SYSTEM DISKS ON THIS PROVIDER ({{ disksFor(cfg.id).length }}) — EACH IS ONE .CYBERMANJU FILE, MERGED INTO THE VOLUME</span>
           </div>
+          <p v-if="disksFor(cfg.id).length === 0" class="note">
+            No system disk yet — provision one below and this provider contributes space + compute to the merged volume.
+          </p>
           <div v-for="d in disksFor(cfg.id)" :key="d.id" class="disk-row">
             <div class="row-between">
               <span>{{ d.name || d.id.slice(0, 8) }} · <span class="text-muted">{{ d.state }} / {{ d.health }}</span></span>
               <span class="row-actions">
-                <button v-if="d.state !== 'attached'" class="ghost-btn xs primary" type="button" :disabled="diskBusy === d.id" @click="attachDisk(d.id)">ATTACH</button>
-                <button v-else class="ghost-btn xs" type="button" :disabled="diskBusy === d.id" @click="store.detachDisk(d.id).then(afterDiskChange)">DETACH</button>
+                <button v-if="d.state !== 'attached'" class="ghost-btn xs primary" type="button" :disabled="diskBusy === d.id" @click="attachDisk(d.id, cfg.id)">ATTACH</button>
+                <button v-else class="ghost-btn xs" type="button" :disabled="diskBusy === d.id" @click="store.detachDisk(d.id)">DETACH</button>
                 <button class="ghost-btn xs" type="button" :disabled="diskBusy === d.id" @click="store.checkDisk(d.id)">CHECK</button>
               </span>
             </div>
+            <div class="text-muted small truncate" :title="d.containerPath">FILE {{ d.containerPath }}</div>
             <div class="mini-bar"><div class="mini-used" :style="{ width: `${diskPct(d.usedBytes, d.capacityBytes)}%` }"></div></div>
             <div class="row-between small">
-              <span>{{ human(d.usedBytes) }} / {{ human(d.capacityBytes) }}</span>
+              <span>{{ humanBytes(d.usedBytes) }} / {{ humanBytes(d.capacityBytes) }}</span>
               <span class="row-actions">
-                <input v-model.number="resizeMb[d.id]" class="input xs-num" type="number" min="64" max="8192" step="64" :aria-label="`New size MB for ${d.name}`" />
+                <input v-model.number="resizeMb[d.id]" class="input xs-num" type="number" min="64" max="8192" step="64" :placeholder="String(Math.max(64, Math.round(d.capacityBytes / 1048576)))" :aria-label="`New size MB for ${d.name}`" />
                 <span class="text-muted">MB</span>
                 <button class="ghost-btn xs" type="button" :disabled="diskBusy === d.id" @click="applyResize(d.id)">APPLY SIZE</button>
               </span>
             </div>
           </div>
           <div class="form-row">
-            <label class="small text-muted">NEW DISK — {{ newDiskMb[cfg.id] ?? 512 }} MB</label>
+            <label class="small text-muted">{{ disksFor(cfg.id).length === 0 ? 'PROVISION SYSTEM DISK' : 'NEW DISK' }} — {{ newDiskMb[cfg.id] ?? 512 }} MB</label>
             <input v-model.number="newDiskMb[cfg.id]" class="slider" type="range" min="64" max="8192" step="64" :aria-label="`New disk size for ${cfg.name || cfg.backendType}`" />
-            <input v-model="newDiskPass[cfg.id]" class="input" type="password" placeholder="PASSPHRASE" autocomplete="off" :aria-label="`Passphrase for new disk on ${cfg.name || cfg.backendType}`" />
-            <button class="ghost-btn xs primary" type="button" :disabled="diskBusy === cfg.id" @click="createDisk(cfg.id)">{{ diskBusy === cfg.id ? 'CREATING…' : 'CREATE & ATTACH' }}</button>
+            <input v-model="newDiskPass[cfg.id]" class="input" type="password" placeholder="PASSPHRASE (ALSO UNLOCKS)" autocomplete="off" :aria-label="`Passphrase for new disk on ${cfg.name || cfg.backendType}`" />
+            <button class="ghost-btn xs primary" type="button" :disabled="diskBusy === cfg.id" @click="createDisk(cfg.id)">{{ diskBusy === cfg.id ? 'CREATING…' : disksFor(cfg.id).length === 0 ? 'PROVISION SYSTEM DISK' : 'CREATE & ATTACH' }}</button>
           </div>
         </div>
       </article>
@@ -289,6 +293,21 @@ import {
 } from '@/composables/useSupabase'
 import { SYNC_BACKEND_INFO, describeSyncError, isOauthCapable } from '@/types'
 import type { DiskRow, SyncBackendType, SyncConfig } from '@/types'
+import { humanBytes, diskPct } from '@/utils/format'
+import {
+  authGuidance,
+  backendLabel,
+  blankCredentialDraft,
+  draftToSave,
+  needsRepo,
+  needsToken,
+  overlayDraft,
+  refreshDraftFromSaved,
+  syncConfigDefaults,
+  tokenLabel,
+} from '@/utils/providers'
+import type { CredentialDraft } from '@/utils/providers'
+import { pollUntilTrue } from '@/utils/poll'
 
 const store = useAppStore()
 
@@ -303,18 +322,19 @@ const dbBackend = ref<string | null>(null)
 
 const refreshing = ref(false)
 const saving = ref<string | null>(null)
+const probing = ref<Set<string>>(new Set())
 const diskBusy = ref<string | null>(null)
 const wizBusy = ref(false)
 const wizMsg = ref('')
 const oauthBusy = ref<string | null>(null)
-const oauthTimer = ref(0)
+const oauthAbort = ref<AbortController | null>(null)
 
 const oauthMsg = ref<Record<string, string>>({})
 const oauthUrl = ref<Record<string, string>>({})
 const quotaMsg = ref<Record<string, string>>({})
 const authState = ref<Record<string, { ok: boolean | null; detail: string }>>({})
 const sbBusy = ref<string | null>(null)
-const sbTimer = ref(0)
+const sbAbort = ref<AbortController | null>(null)
 const sbMsg = ref<Record<string, string>>({})
 const sbConfigured = computed(() => supabaseConfigured())
 
@@ -326,17 +346,7 @@ const newDiskMb = ref<Record<string, number>>({})
 const newDiskPass = ref<Record<string, string>>({})
 const resizeMb = ref<Record<string, number>>({})
 
-interface Draft {
-  repoName: string
-  branch: string
-  token: string
-  folderId: string
-  albumId: string
-  chatId: string
-  basePath: string
-  name: string
-}
-const drafts = reactive<Record<string, Draft>>({})
+const drafts = reactive<Record<string, CredentialDraft>>({})
 
 const wiz = reactive({
   backendType: 'local' as SyncBackendType,
@@ -381,68 +391,18 @@ const volumePct = computed(() => {
   return Math.min(100, (d.usedBytes / d.totalBytes) * 100)
 })
 
-function human(bytes: number): string {
-  if (!bytes) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let v = bytes
-  let u = 0
-  while (v >= 1024 && u < units.length - 1) { v /= 1024; u += 1 }
-  return `${v >= 10 || u === 0 ? v.toFixed(0) : v.toFixed(1)} ${units[u]}`
-}
-
-function diskPct(used: number, capacity: number): number {
-  if (!capacity) return 0
-  return Math.min(100, (used / capacity) * 100)
-}
-
-function backendLabel(b: SyncBackendType): string {
-  return SYNC_BACKEND_INFO[b]?.name ?? b
-}
-
-function needsRepo(b: SyncBackendType): boolean {
-  return b === 'github' || b === 'gitlab'
-}
-
-function needsToken(b: SyncBackendType): boolean {
-  return b === 'github' || b === 'gitlab' || b === 'telegram' || b === 'googleDrive' || b === 'googlePhotos'
-}
-
-function tokenLabel(b: SyncBackendType): string {
-  if (b === 'telegram') return 'BOT TOKEN (PASSWORD FOR THIS CHAT)'
-  if (b === 'github') return 'TOKEN — PERSONAL ACCESS TOKEN (USED AS THE PASSWORD)'
-  if (b === 'gitlab') return 'TOKEN — PERSONAL ACCESS TOKEN (USED AS THE PASSWORD)'
-  return 'TOKEN — OPTIONAL WHEN USING OAUTH'
-}
-
-function authGuidance(b: SyncBackendType): string {
-  switch (b) {
-    case 'github':
-      return 'GitHub removed account passwords: sign in with OAUTH above, or paste a personal access token (repo scope) as the password.'
-    case 'gitlab':
-      return 'GitLab sign-in is OAUTH, or a personal access token (api scope) pasted as the password. Self-hosted? Set the instance URL too.'
-    case 'googleDrive':
-    case 'googlePhotos':
-      return 'Google accepts OAUTH only — there is no password login. CONNECT WITH OAUTH above.'
-    case 'telegram':
-      return 'Telegram uses a bot token from @BotFather plus the chat id — no OAuth, no password. Browsers cannot verify it (Telegram sends no CORS headers), so the demo saves it UNREACHABLE and live sync runs on desktop/Docker.'
-    default:
-      return 'Local directory needs no login — just the path.'
-  }
-}
-
-function draft(cfg: SyncConfig): Draft {
+function draft(cfg: SyncConfig): CredentialDraft {
   let d = drafts[cfg.id]
   if (!d) {
-    d = {
+    d = blankCredentialDraft({
       repoName: cfg.repoName ?? '',
       branch: cfg.branch ?? 'main',
-      token: '',
       folderId: cfg.folderId ?? '',
       albumId: cfg.albumId ?? '',
       chatId: cfg.chatId ?? '',
       basePath: cfg.basePath ?? '',
       name: cfg.name ?? '',
-    }
+    })
     drafts[cfg.id] = d
   }
   return d
@@ -507,33 +467,25 @@ async function removeAccount(id: string) {
 }
 
 async function toggleEnabled(cfg: SyncConfig) {
-  await store.saveSyncConfig({ ...cfg, enabled: !cfg.enabled })
-}
-
-/**
- * The config as the user currently sees it: stored row overlaid with any
- * draft edits (notably a freshly pasted token). Probing this — instead of
- * the bare stored row — is what makes "paste token, hit TEST" actually
- * verify the token before it is saved.
- */
-function mergedForProbe(cfg: SyncConfig): SyncConfig {
-  const d = drafts[cfg.id]
-  if (!d) return cfg
-  const merged: SyncConfig = { ...cfg }
-  if (d.token.trim()) merged.token = d.token.trim()
-  if (d.repoName.trim()) merged.repoName = d.repoName.trim()
-  if (d.branch.trim()) merged.branch = d.branch.trim()
-  if (d.folderId.trim()) merged.folderId = d.folderId.trim()
-  if (d.albumId.trim()) merged.albumId = d.albumId.trim()
-  if (d.chatId.trim()) merged.chatId = d.chatId.trim()
-  if (d.basePath.trim()) merged.basePath = d.basePath.trim()
-  return merged
+  if (saving.value) return
+  saving.value = cfg.id
+  try {
+    await store.saveSyncConfig({ ...cfg, enabled: !cfg.enabled })
+  } finally {
+    saving.value = null
+  }
 }
 
 async function probe(cfg: SyncConfig) {
+  if (probing.value.has(cfg.id)) return
+  probing.value.add(cfg.id)
   authState.value[cfg.id] = { ok: null, detail: 'probing…' }
-  const r = await store.probeSyncConnection(mergedForProbe(cfg))
-  authState.value[cfg.id] = { ok: r.ok, detail: r.detail }
+  try {
+    const r = await store.probeSyncConnection(overlayDraft(cfg, drafts[cfg.id]))
+    authState.value[cfg.id] = { ok: r.ok, detail: r.detail }
+  } finally {
+    probing.value.delete(cfg.id)
+  }
 }
 
 async function removeProvider(id: string) {
@@ -544,33 +496,25 @@ async function removeProvider(id: string) {
 }
 
 async function saveCreds(cfg: SyncConfig) {
+  if (saving.value) return
   const d = draft(cfg)
   saving.value = cfg.id
-  const updated: SyncConfig = {
-    ...cfg,
-    name: d.name.trim() || cfg.name,
-    repoName: d.repoName.trim() || undefined,
-    branch: d.branch.trim() || undefined,
-    folderId: d.folderId.trim() || undefined,
-    albumId: d.albumId.trim() || undefined,
-    chatId: d.chatId.trim() || undefined,
-    basePath: d.basePath.trim() || undefined,
-  }
-  if (d.token.trim()) updated.token = d.token.trim()
-  const saved = await store.saveSyncConfig(updated)
-  d.token = ''
-  if (saved) {
-    const r = await store.probeSyncConnection({ ...saved, ...(updated.token ? { token: updated.token } : {}) })
+  try {
+    const saved = await store.saveSyncConfig(draftToSave(cfg, d))
+    if (!saved) return
+    refreshDraftFromSaved(d, saved)
+    const r = await store.probeSyncConnection(overlayDraft(saved, d))
     authState.value[cfg.id] = { ok: r.ok, detail: r.detail }
     if (r.ok) store.notifySuccess('Provider verified — credentials work')
+  } finally {
+    saving.value = null
   }
-  saving.value = null
 }
 
 async function quota(cfg: SyncConfig) {
   const u = await store.fetchSyncUsage(cfg.id)
   quotaMsg.value[cfg.id] = u
-    ? `quota: ${[u.totalBytes != null ? `total ${human(u.totalBytes)}` : null, u.usedBytes != null ? `used ${human(u.usedBytes)}` : null, u.remainingRequests != null ? `${u.remainingRequests} req left` : null].filter(Boolean).join(' · ') || u.detail}`
+    ? `quota: ${[u.totalBytes != null ? `total ${humanBytes(u.totalBytes)}` : null, u.usedBytes != null ? `used ${humanBytes(u.usedBytes)}` : null, u.remainingRequests != null ? `${u.remainingRequests} req left` : null].filter(Boolean).join(' · ') || u.detail}`
     : 'quota unavailable'
 }
 
@@ -597,29 +541,38 @@ async function oauthConnect(cfg: SyncConfig) {
   const popup = window.open(res.authorizeUrl, 'cyb_oauth', 'width=620,height=720')
   if (!popup) oauthUrl.value[cfg.id] = res.authorizeUrl
   oauthMsg.value[cfg.id] = 'Approve in the browser tab — waiting for the callback…'
-  let attempts = 0
-  oauthTimer.value = window.setInterval(async () => {
-    attempts += 1
-    const r = await store.probeSyncConnection(cfg)
-    if (r.ok) {
-      cancelOauth()
+  const abort = new AbortController()
+  oauthAbort.value = abort
+  try {
+    const ok = await pollUntilTrue(
+      async () => (await store.probeSyncConnection(cfg)).ok,
+      {
+        intervalMs: 3000,
+        maxAttempts: 40,
+        signal: abort.signal,
+        onAttempt: (n) => {
+          oauthMsg.value[cfg.id] = `Approve in the browser tab — waiting… (${n * 3}s)`
+        },
+      },
+    )
+    if (ok) {
       authState.value[cfg.id] = { ok: true, detail: 'OAuth credentials verified' }
       oauthMsg.value[cfg.id] = 'Connected — OAuth credentials verified.'
       store.notifySuccess(`${cfg.name || cfg.backendType}: OAuth connected`)
-      return
-    }
-    if (attempts >= 40) {
-      cancelOauth()
-      oauthMsg.value[cfg.id] = 'Timed out waiting for approval (2 min). Retry, or paste a token below.'
     } else {
-      oauthMsg.value[cfg.id] = `Approve in the browser tab — waiting… (${attempts * 3}s)`
+      oauthMsg.value[cfg.id] = 'Timed out waiting for approval (2 min). Retry, or paste a token below.'
     }
-  }, 3000)
+  } catch {
+    oauthMsg.value[cfg.id] = 'Cancelled.'
+  } finally {
+    oauthAbort.value = null
+    oauthBusy.value = null
+  }
 }
 
 function cancelOauth() {
-  if (oauthTimer.value) window.clearInterval(oauthTimer.value)
-  oauthTimer.value = 0
+  oauthAbort.value?.abort()
+  oauthAbort.value = null
   oauthBusy.value = null
 }
 
@@ -651,46 +604,59 @@ async function supabaseConnect(cfg: SyncConfig) {
     return
   }
   sbMsg.value[cfg.id] = 'Approve at the provider in the popup — waiting for the token…'
-  let attempts = 0
-  sbTimer.value = window.setInterval(async () => {
-    attempts += 1
-    if (popup.closed) {
-      cancelSupabase()
-      sbMsg.value[cfg.id] = 'Popup closed before approval — retry, or paste a token below.'
-      return
-    }
-    let token = ''
-    try {
-      const session = await supabaseSession()
-      token = session?.provider_token ?? ''
-    } catch {
-      token = ''
-    }
-    if (token) {
-      cancelSupabase()
-      try { popup.close() } catch { /* already gone */ }
-      await finalizeSupabaseToken(cfg, token)
-      return
-    }
-    if (attempts >= 90) {
-      cancelSupabase()
-      sbMsg.value[cfg.id] = 'Timed out waiting for approval (3 min). Retry, or paste a token below.'
-    } else if (attempts % 10 === 0) {
-      sbMsg.value[cfg.id] = `Approve at the provider in the popup — waiting… (${attempts * 2}s)`
-    }
-  }, 2000)
+  const abort = new AbortController()
+  sbAbort.value = abort
+  try {
+    const ok = await pollUntilTrue(
+      async () => {
+        if (popup.closed) throw new Error('popup-closed')
+        let token = ''
+        try {
+          const session = await supabaseSession()
+          token = session?.provider_token ?? ''
+        } catch {
+          token = ''
+        }
+        if (!token) return false
+        try { popup.close() } catch { /* already gone */ }
+        await finalizeSupabaseToken(cfg, token)
+        return true
+      },
+      {
+        intervalMs: 2000,
+        maxAttempts: 90,
+        signal: abort.signal,
+        onAttempt: (n) => {
+          if (n % 10 === 0) sbMsg.value[cfg.id] = `Approve at the provider in the popup — waiting… (${n * 2}s)`
+        },
+      },
+    )
+    if (!ok) sbMsg.value[cfg.id] = 'Timed out waiting for approval (3 min). Retry, or paste a token below.'
+  } catch (e) {
+    sbMsg.value[cfg.id] =
+      e instanceof Error && e.message === 'popup-closed'
+        ? 'Popup closed before approval — retry, or paste a token below.'
+        : 'Cancelled.'
+  } finally {
+    sbAbort.value = null
+    sbBusy.value = null
+  }
 }
 
 function cancelSupabase() {
-  if (sbTimer.value) window.clearInterval(sbTimer.value)
-  sbTimer.value = 0
+  sbAbort.value?.abort()
+  sbAbort.value = null
   sbBusy.value = null
 }
 
 async function finalizeSupabaseToken(cfg: SyncConfig, token: string) {
-  const updated = { ...cfg, token }
-  const saved = await store.saveSyncConfig(updated)
-  const r = await store.probeSyncConnection({ ...(saved ?? cfg), token })
+  const saved = await store.saveSyncConfig({ ...cfg, token })
+  if (!saved) {
+    sbMsg.value[cfg.id] = 'Token received, but saving it failed — retry.'
+    setPendingOAuthConfig(null)
+    return
+  }
+  const r = await store.probeSyncConnection({ ...saved, token })
   authState.value[cfg.id] = { ok: r.ok, detail: r.detail }
   if (r.ok) {
     sbMsg.value[cfg.id] = 'Connected — provider token verified.'
@@ -701,46 +667,53 @@ async function finalizeSupabaseToken(cfg: SyncConfig, token: string) {
   setPendingOAuthConfig(null)
 }
 
-async function attachDisk(diskId: string) {
+async function attachDisk(diskId: string, configId: string) {
+  if (diskBusy.value) return
   diskBusy.value = diskId
-  const pass = promptPass(diskId)
-  await store.attachDisk(diskId, pass)
-  await afterDiskChange()
-  diskBusy.value = null
+  try {
+    // The per-provider passphrase field doubles as the unlock secret —
+    // no popup prompts. Empty means "no passphrase".
+    await store.attachDisk(diskId, newDiskPass.value[configId] ?? '')
+  } finally {
+    diskBusy.value = null
+  }
 }
 
-function promptPass(diskId: string): string {
-  const d = store.disks.find(x => x.id === diskId)
-  const v = window.prompt(`Passphrase to unlock disk "${d?.name || diskId}" (empty = none):`, '')
-  return v ?? ''
+function clampDiskMb(mb: number | undefined, fallback: number): number {
+  if (!mb || !Number.isFinite(mb)) return fallback
+  return Math.min(8192, Math.max(64, Math.round(mb)))
 }
 
 async function applyResize(diskId: string) {
-  const mb = resizeMb.value[diskId]
-  if (!mb || mb < 64) return
+  const disk = store.disks.find(x => x.id === diskId)
+  const currentMb = disk ? Math.max(64, Math.round(disk.capacityBytes / (1024 * 1024))) : 512
+  const mb = clampDiskMb(resizeMb.value[diskId], currentMb)
+  if (diskBusy.value) return
   diskBusy.value = diskId
-  await store.resizeDisk(diskId, Math.round(mb) * 1024 * 1024)
-  await afterDiskChange()
-  diskBusy.value = null
+  try {
+    await store.resizeDisk(diskId, mb * 1024 * 1024)
+  } finally {
+    diskBusy.value = null
+  }
 }
 
 async function createDisk(configId: string) {
+  if (diskBusy.value) return
   diskBusy.value = configId
-  const mb = newDiskMb.value[configId] ?? 512
-  await store.createDisk(configId, Math.round(mb) * 1024 * 1024, newDiskPass.value[configId] ?? '')
-  newDiskPass.value[configId] = ''
-  await afterDiskChange()
-  diskBusy.value = null
+  try {
+    const mb = clampDiskMb(newDiskMb.value[configId], 512)
+    await store.createDisk(configId, mb * 1024 * 1024, newDiskPass.value[configId] ?? '')
+    newDiskPass.value[configId] = ''
+  } finally {
+    diskBusy.value = null
+  }
 }
 
-async function afterDiskChange() {
-  await Promise.allSettled([store.fetchDisks(), store.fetchOsDf()])
-}
 
 function wizToConfig(): Omit<SyncConfig, 'id' | 'createdAt' | 'updatedAt'> {
   return {
+    ...syncConfigDefaults(),
     backendType: wiz.backendType,
-    enabled: true,
     name: wiz.name.trim() || undefined,
     basePath: wiz.basePath.trim() || undefined,
     repoName: wiz.repoName.trim() || undefined,
@@ -749,15 +722,6 @@ function wizToConfig(): Omit<SyncConfig, 'id' | 'createdAt' | 'updatedAt'> {
     folderId: wiz.folderId.trim() || undefined,
     albumId: wiz.albumId.trim() || undefined,
     chatId: wiz.chatId.trim() || undefined,
-    autoSync: false,
-    compressBeforeUpload: false,
-    createPreviews: false,
-    deleteRawAfterSync: false,
-    maxConcurrentUploads: 1,
-    encryptBeforeUpload: true,
-    conflictPolicy: 'skip',
-    placement: 'whole',
-    parity: 1,
   }
 }
 
@@ -938,6 +902,7 @@ onBeforeUnmount(() => {
 .url { word-break: break-all; color: #9aedfe; }
 .linklike { background: none; border: none; color: #9aedfe; cursor: pointer; font: inherit; text-decoration: underline; padding: 0; }
 .small { font-size: 11px; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .empty { margin: 0 0 8px; font-size: 12px; }
 .text-muted { color: rgba(255, 255, 255, 0.5) !important; }
 </style>

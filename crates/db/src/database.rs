@@ -72,6 +72,13 @@ const COMPUTE_TASKS_TABLE: TableDefinition<'static, &'static str, &'static str> 
     TableDefinition::new("compute_tasks");
 const SHELL_HISTORY_TABLE: TableDefinition<'static, &'static str, &'static str> =
     TableDefinition::new("shell_history");
+// <<< AI AGENT: configs (no key material — keys live in sync_secrets as
+// `agent:key:<config_id>`) and session transcripts. Values are JSON strings,
+// same convention as every other table here. >>>
+const AGENT_CONFIGS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("agent_configs");
+const AGENT_SESSIONS_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("agent_sessions");
 
 /// Rows kept in `sync_runs` — enough for a UI history page, few enough that
 /// the prune scan stays trivial.
@@ -117,6 +124,9 @@ impl Database {
             write_txn.open_table(PROVIDER_HEALTH_TABLE)?;
             write_txn.open_table(COMPUTE_TASKS_TABLE)?;
             write_txn.open_table(SHELL_HISTORY_TABLE)?;
+            // <<< AI AGENT tables >>>
+            write_txn.open_table(AGENT_CONFIGS_TABLE)?;
+            write_txn.open_table(AGENT_SESSIONS_TABLE)?;
             {
                 let mut schema = write_txn.open_table(SCHEMA_VERSION_TABLE)?;
                 if schema.get("schema")?.is_none() {
@@ -234,6 +244,15 @@ impl Database {
     /// AGENT-8 — `cybsh` command history.
     pub fn get_shell_history_table() -> TableDefinition<'static, &'static str, &'static str> {
         SHELL_HISTORY_TABLE
+    }
+    // <<< AI AGENT accessors >>>
+    /// Saved agent configs (keyless rows — provider keys are side-tabled).
+    pub fn get_agent_configs_table() -> TableDefinition<'static, &'static str, &'static str> {
+        AGENT_CONFIGS_TABLE
+    }
+    /// Agent session transcripts.
+    pub fn get_agent_sessions_table() -> TableDefinition<'static, &'static str, &'static str> {
+        AGENT_SESSIONS_TABLE
     }
 
     /// Row key for a synced copy: one local file × one config.

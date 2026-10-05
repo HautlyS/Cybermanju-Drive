@@ -3,6 +3,7 @@ pub mod crypto;
 pub mod db;
 pub mod opfs_backend;
 pub mod os;
+pub mod agent;
 
 use wasm_bindgen::prelude::*;
 

@@ -119,6 +119,7 @@ impl RequiredRole {
 const ROUTED_SEGMENTS: &[&str] = &[
     "accounts",
     "audit",
+    "agent",
     "auth",
     "batch",
     "collection-items",

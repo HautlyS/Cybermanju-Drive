@@ -218,7 +218,13 @@ export async function finishSupabaseReturn(): Promise<boolean> {
     return true
   }
   try {
-    const session = await supabaseSession()
+    // `detectSessionInUrl` auto-exchanges `?code=` during client creation,
+    // but the exchange races this read — one retry before giving up.
+    let session = await supabaseSession()
+    if (!session?.provider_token) {
+      await new Promise((r) => setTimeout(r, 1200))
+      session = await supabaseSession()
+    }
     const token = session?.provider_token
     if (token) {
       const provider = providerFromSession(session) ?? 'github'

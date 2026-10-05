@@ -1493,14 +1493,14 @@ pub fn detect_faces_in_file(file_node: &FileNode) -> Result<Vec<Vec<f32>>> {
                     embeddings.len(),
                     file_node.name
                 );
-                return Ok(embeddings);
+                Ok(embeddings)
             }
             Ok(_) => {
                 log::info!(
                     "ONNX detected no faces in {} — returning empty set",
                     file_node.name
                 );
-                return Ok(Vec::new());
+                Ok(Vec::new())
             }
             Err(e) => {
                 log::warn!(
@@ -1508,7 +1508,7 @@ pub fn detect_faces_in_file(file_node: &FileNode) -> Result<Vec<Vec<f32>>> {
                     file_node.name,
                     e
                 );
-                return Ok(Vec::new());
+                Ok(Vec::new())
             }
         }
     }

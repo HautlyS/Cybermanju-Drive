@@ -43,7 +43,7 @@
         <div v-for="entry in byType" :key="entry.label" class="type-row">
           <span class="type-label">{{ entry.label }}</span>
           <span class="type-bar"><span class="type-bar-fill" :style="{ width: entry.percent + '%' }" /></span>
-          <span class="type-size">{{ formatSize(entry.totalBytes) }}</span>
+          <span class="type-size">{{ humanBytes(entry.totalBytes) }}</span>
         </div>
       </div>
     </div>
@@ -65,9 +65,9 @@
         <div class="df-used" :style="{ width: usedPct + '%' }"></div>
       </div>
       <div class="df-figures">
-        <span>USED {{ df ? formatSize(df.usedBytes) : '—' }}</span>
-        <span>FREE {{ df ? formatSize(df.freeBytes) : '—' }}</span>
-        <span>TOTAL {{ df ? formatSize(df.totalBytes) : '—' }}</span>
+        <span>USED {{ df ? humanBytes(df.usedBytes) : '—' }}</span>
+        <span>FREE {{ df ? humanBytes(df.freeBytes) : '—' }}</span>
+        <span>TOTAL {{ df ? humanBytes(df.totalBytes) : '—' }}</span>
         <span class="text-muted">ROOT {{ df ? df.root : '—' }}</span>
       </div>
       <button class="open-disks" type="button" @click="wm.open('disks')">OPEN DISK MANAGER</button>
@@ -79,6 +79,7 @@
 import { computed, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { useWindowManager } from '@/composables/useWindowManager'
+import { humanBytes } from '@/utils/format'
 
 const store = useAppStore()
 const wm = useWindowManager()
@@ -101,17 +102,17 @@ const trashCount = computed(() => store.trashItems.length)
 
 const totalSize = computed(() => store.files.reduce((s, f) => s + f.sizeBytes, 0))
 
-const totalSizeFormatted = computed(() => formatSize(totalSize.value))
+const totalSizeFormatted = computed(() => humanBytes(totalSize.value))
 
 const largestFile = computed(() => {
   if (store.files.length === 0) return '--'
   const biggest = [...store.files].sort((a, b) => b.sizeBytes - a.sizeBytes)[0]
-  return `${biggest.name} (${formatSize(biggest.sizeBytes)})`
+  return `${biggest.name} (${humanBytes(biggest.sizeBytes)})`
 })
 
 const avgSizeFormatted = computed(() => {
   if (store.files.length === 0) return '--'
-  return formatSize(Math.round(totalSize.value / store.files.length))
+  return humanBytes(Math.round(totalSize.value / store.files.length))
 })
 
 const gpsCount = computed(() => store.files.filter(f => f.gpsLat).length)
@@ -136,13 +137,6 @@ const byType = computed(() => {
   return entries
 })
 
-function formatSize(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const k = 1024
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + units[i]
-}
 </script>
 
 <style scoped>

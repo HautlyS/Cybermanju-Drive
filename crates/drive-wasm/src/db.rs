@@ -903,7 +903,6 @@ pub fn db_restore(data: &[u8]) -> String {
         }
     };
     let reopened: Result<RedbDatabase, String> = (|| {
-        use redb::StorageBackend;
         backend
             .set_len(0)
             .map_err(|e| format!("network: restore truncate failed: {e}"))?;

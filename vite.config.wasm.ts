@@ -24,9 +24,18 @@ export default defineConfig({
       // --out-dir crates/drive-wasm/pkg`) — the integrated backend for the
       // static/GH-Pages bundle. Only aliased when the pkg exists; otherwise
       // the stub plugin below satisfies the import (Docker frontend stage).
-      ...(existsSync(resolve(__dirname, "crates/drive-wasm/pkg"))
-        ? { "cybermanju-drive-wasm": resolve(__dirname, "crates/drive-wasm/pkg") }
-        : {}),
+      // NOTE: the entry FILE (not the directory) is aliased — worker
+      // bundles don't apply package.json directory resolution, so a
+      // directory alias EISDIRs the db-worker chunk. Without pkg (Docker
+      // frontend stage) the stub file stands in, same guarantee.
+      ...(existsSync(resolve(__dirname, "crates/drive-wasm/pkg/cybermanju_drive_wasm.js"))
+        ? {
+            "cybermanju-drive-wasm": resolve(
+              __dirname,
+              "crates/drive-wasm/pkg/cybermanju_drive_wasm.js",
+            ),
+          }
+        : { "cybermanju-drive-wasm": resolve(__dirname, "src/wasm-stub.js") }),
     },
   },
   base,

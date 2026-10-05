@@ -10,7 +10,7 @@
         <span class="tt-name truncate">{{ file.name }}</span>
       </div>
       <div class="tt-meta">
-        <div class="tt-row"><span class="tt-label">SIZE</span><span>{{ formatSize(file.sizeBytes) }}</span></div>
+        <div class="tt-row"><span class="tt-label">SIZE</span><span>{{ humanBytes(file.sizeBytes) }}</span></div>
         <div class="tt-row"><span class="tt-label">TYPE</span><span>{{ file.mimeType || (file.fileType === 'folder' ? 'FOLDER' : 'FILE') }}</span></div>
         <div class="tt-row"><span class="tt-label">MODIFIED</span><span>{{ formatDate(file.modifiedAt) }}</span></div>
         <div class="tt-row" v-if="file.hashBlake3"><span class="tt-label">BLAKE3</span><span class="tt-hash">{{ file.hashBlake3.substring(0, 16) }}..</span></div>
@@ -27,6 +27,7 @@
 
 <script setup lang="ts">
 import type { FileNode } from '@/types'
+import { humanBytes } from '@/utils/format'
 
 defineProps<{
   file: FileNode | null
@@ -34,14 +35,6 @@ defineProps<{
   x: number
   y: number
 }>()
-
-function formatSize(bytes: number): string {
-  if (bytes === 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const k = 1024
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + units[i]
-}
 
 function formatDate(dateStr: string): string {
   if (!dateStr) return '--'

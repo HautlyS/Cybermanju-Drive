@@ -100,7 +100,7 @@
       <div class="progress-card">
         <div class="p-row"><span class="p-key text-muted">STATUS</span><span class="p-value">{{ syncProgress.status }}</span></div>
         <div class="p-row"><span class="p-key text-muted">FILES</span><span class="p-value">{{ syncProgress.processedFiles }}/{{ syncProgress.totalFiles }}</span></div>
-        <div class="p-row"><span class="p-key text-muted">BYTES</span><span class="p-value">{{ formatSize(syncProgress.bytesUploaded) }}</span></div>
+        <div class="p-row"><span class="p-key text-muted">BYTES</span><span class="p-value">{{ humanBytes(syncProgress.bytesUploaded) }}</span></div>
         <div v-if="syncProgress.errors.length" class="p-errors">
           <div v-for="(e, i) in syncProgress.errors.slice(0, 5)" :key="i" class="p-err" :title="hintFor(e)">{{ e }}</div>
         </div>
@@ -112,7 +112,7 @@
       <div v-for="r in syncRuns.slice(0, 5)" :key="r.runId" class="run-card">
         <span class="text-muted">{{ r.runId.slice(0, 18) }}</span>
         <span>{{ r.status }}</span>
-        <span class="text-muted">{{ r.filesSynced }} files / {{ formatSize(r.bytesUploaded) }}</span>
+        <span class="text-muted">{{ r.filesSynced }} files / {{ humanBytes(r.bytesUploaded) }}</span>
       </div>
     </div>
 
@@ -131,7 +131,7 @@
       </div>
       <div v-if="remoteFiles.length" class="remote-list">
         <div v-for="f in remoteFiles.slice(0, 20)" :key="f.path" class="remote-row">
-          <span>{{ f.name }}</span><span class="text-muted">{{ formatSize(f.sizeBytes) }}</span>
+          <span>{{ f.name }}</span><span class="text-muted">{{ humanBytes(f.sizeBytes) }}</span>
         </div>
       </div>
     </div>
@@ -143,6 +143,8 @@ import { computed, reactive, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { SYNC_BACKEND_INFO, describeSyncError, isOauthCapable } from '@/types'
 import type { SyncConfig } from '@/types'
+import { humanBytes } from '@/utils/format'
+import { needsRepo as backendNeedsRepo, syncConfigDefaults } from '@/utils/providers'
 
 const store = useAppStore()
 const syncConfigs = computed(() => store.syncConfigs)
@@ -177,7 +179,7 @@ const form = reactive({
 })
 
 const needsBasePath = computed(() => form.backendType === 'local')
-const needsRepo = computed(() => form.backendType === 'github' || form.backendType === 'gitlab')
+const needsRepo = computed(() => backendNeedsRepo(form.backendType))
 const needsFolder = computed(() => form.backendType === 'googleDrive')
 const needsAlbum = computed(() => form.backendType === 'googlePhotos')
 const needsChat = computed(() => form.backendType === 'telegram')
@@ -188,16 +190,9 @@ function hintFor(e: string) {
   return `${d.prefix}: ${d.hint}`
 }
 
-function formatSize(bytes: number): string {
-  if (!bytes) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const k = 1024
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + units[i]
-}
-
 function toConfig(): Omit<SyncConfig, 'id' | 'createdAt' | 'updatedAt'> {
   return {
+    ...syncConfigDefaults(),
     backendType: form.backendType,
     enabled: form.enabled,
     name: form.name || undefined,
@@ -208,15 +203,10 @@ function toConfig(): Omit<SyncConfig, 'id' | 'createdAt' | 'updatedAt'> {
     folderId: form.folderId || undefined,
     albumId: form.albumId || undefined,
     chatId: form.chatId || undefined,
-    autoSync: false,
     compressBeforeUpload: form.compressBeforeUpload,
-    createPreviews: false,
-    deleteRawAfterSync: false,
-    maxConcurrentUploads: 1,
     encryptBeforeUpload: form.encryptBeforeUpload,
     conflictPolicy: form.conflictPolicy,
     placement: form.placement,
-    parity: 1,
   }
 }
 

@@ -1,4 +1,5 @@
 pub mod accounts;
+pub mod agent;
 pub mod audit;
 pub mod batch;
 pub mod collections;

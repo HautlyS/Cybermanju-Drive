@@ -742,6 +742,109 @@ const REST_ROUTES: Record<string, RestMapping> = {
     transformResponse: (raw) => transformResponseKeys(raw),
   },
 
+  // ── AI agent (native core; keys never come back, only hasKey) ──
+  list_agent_providers: {
+    method: 'GET',
+    buildPath: () => '/api/agent/providers',
+    transformResponse: (raw) => transformResponseKeys(raw),
+  },
+
+  list_agent_configs: {
+    method: 'GET',
+    buildPath: () => '/api/agent/configs',
+    transformResponse: (raw) => transformResponseKeys(raw),
+  },
+
+  save_agent_config: {
+    method: 'POST',
+    buildPath: () => '/api/agent/configs',
+    transformRequest: (args) => ({ config: args.config }),
+    transformResponse: (raw) => transformResponseKeys(raw),
+  },
+
+  delete_agent_config: {
+    method: 'DELETE',
+    buildPath: (args) => `/api/agent/configs/${args.configId}`,
+  },
+
+  save_agent_key: {
+    method: 'PUT',
+    buildPath: (args) => `/api/agent/configs/${args.configId}/key`,
+    transformRequest: (args) => ({ apiKey: args.apiKey }),
+  },
+
+  list_agent_models: {
+    method: 'GET',
+    buildPath: (args) => `/api/agent/configs/${args.configId}/models`,
+    transformResponse: (raw) => transformResponseKeys(raw),
+  },
+
+  list_agent_sessions: {
+    method: 'GET',
+    buildPath: () => '/api/agent/sessions',
+    transformResponse: (raw) => transformResponseKeys(raw),
+  },
+
+  get_agent_session: {
+    method: 'GET',
+    buildPath: (args) => `/api/agent/sessions/${args.sessionId}`,
+    transformResponse: (raw) => transformResponseKeys(raw),
+  },
+
+  create_agent_session: {
+    method: 'POST',
+    buildPath: () => '/api/agent/sessions',
+    transformRequest: (args) => ({ configId: args.configId, title: args.title }),
+    transformResponse: (raw) => transformResponseKeys(raw),
+  },
+
+  delete_agent_session: {
+    method: 'DELETE',
+    buildPath: (args) => `/api/agent/sessions/${args.sessionId}`,
+  },
+
+  import_agent_session: {
+    method: 'POST',
+    buildPath: () => '/api/agent/sessions/import',
+    transformRequest: (args) => ({ session: args.session }),
+    transformResponse: (raw) => transformResponseKeys(raw),
+  },
+
+  start_agent_run: {
+    method: 'POST',
+    buildPath: () => '/api/agent/prompt',
+    transformRequest: (args) => ({
+      configId: args.configId,
+      sessionId: args.sessionId,
+      prompt: args.prompt,
+    }),
+    transformResponse: (raw) => transformResponseKeys(raw),
+  },
+
+  agent_job_status: {
+    method: 'GET',
+    buildPath: (args) => `/api/agent/jobs/${args.jobId}`,
+    transformResponse: (raw) => transformResponseKeys(raw),
+  },
+
+  list_agent_jobs: {
+    method: 'GET',
+    buildPath: () => '/api/agent/jobs',
+    transformResponse: (raw) => transformResponseKeys(raw),
+  },
+
+  abort_agent_job: {
+    method: 'POST',
+    buildPath: (args) => `/api/agent/jobs/${args.jobId}/abort`,
+    transformRequest: () => ({}),
+  },
+
+  approve_agent_job: {
+    method: 'POST',
+    buildPath: (args) => `/api/agent/jobs/${args.jobId}/approve`,
+    transformRequest: (args) => ({ approved: args.approved, answer: args.answer }),
+  },
+
   // ── Managed file text content (code editor) ──
   read_file_content: {
     method: 'GET',
@@ -866,6 +969,13 @@ const REST_FIRST = new Set([
   'repair_status', 'repair_tasks', 'repair_health', 'repair_run',
   'repair_rebuild', 'repair_gc', 'scrub_run', 'scrub_runs',
   'lease_acquire', 'lease_release', 'lease_status',
+  'parse_text', 'read_file_content', 'write_file_content',
+  'list_agent_providers', 'list_agent_configs', 'save_agent_config',
+  'delete_agent_config', 'save_agent_key', 'list_agent_models',
+  'list_agent_sessions', 'get_agent_session', 'create_agent_session',
+  'delete_agent_session', 'import_agent_session', 'start_agent_run',
+  'agent_job_status', 'list_agent_jobs', 'abort_agent_job',
+  'approve_agent_job',
 ])
 
 // Commands the `cybermanju-drive-wasm` crate serves on a static host.

@@ -17,6 +17,7 @@ cybermanju-sync = { path = "../sync" }
 cybermanju-disk = { path = "../disk" }
 cybermanju-os = { path = "../os" }
 cybermanju-types = { path = "../types" }
+cybermanju-agent = { path = "../agent", features = ["native"] }
 jsonwebtoken = "9"
 log = "0.4"
 rand_core = { version = "0.6", features = ["getrandom"] }

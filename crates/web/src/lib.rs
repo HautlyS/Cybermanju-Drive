@@ -864,6 +864,60 @@ fn route_request(
     }
     // <<< /AGENT-2 ROUTES >>>
 
+    // <<< AI AGENT JOBS (lockless) >>>
+    // Prompt/abort/approve must not hold the request lock: start_job takes
+    // its own short reads (and spawns the worker), so running it under the
+    // write lock would deadlock — same contract as `POST /api/sync/start`.
+    // Reads/writes below take no database at all (in-memory registry).
+    match path_segments.as_slice() {
+        ["api", "agent", "prompt"] if method == "POST" => {
+            #[derive(Deserialize)]
+            struct PromptBody {
+                #[serde(default)]
+                config_id: String,
+                #[serde(default)]
+                session_id: Option<String>,
+                #[serde(default)]
+                prompt: String,
+            }
+            let req: PromptBody = json_body!(body, origin);
+            return match api::agent_api::start_job(db, &req.config_id, req.session_id, req.prompt) {
+                Ok(job) => http_response(
+                    202,
+                    "application/json",
+                    &serde_json::to_string(&job).unwrap_or_else(|_| "{}".to_string()),
+                    origin,
+                ),
+                Err(e) => api_response::<()>(Err(e), origin),
+            };
+        }
+        ["api", "agent", "jobs"] if method == "GET" => {
+            return json_ok(&api::agent_api::list_jobs(), origin);
+        }
+        ["api", "agent", "jobs", job_id] if method == "GET" => {
+            return api_response(api::agent_api::job_status(job_id), origin);
+        }
+        ["api", "agent", "jobs", job_id, "abort"] if method == "POST" => {
+            return api_response(api::agent_api::abort_job(job_id), origin);
+        }
+        ["api", "agent", "jobs", job_id, "approve"] if method == "POST" => {
+            #[derive(Deserialize)]
+            struct ApproveBody {
+                #[serde(default)]
+                approved: bool,
+                #[serde(default)]
+                answer: Option<String>,
+            }
+            let req: ApproveBody = json_body!(body, origin);
+            return api_response(
+                api::agent_api::approve_job(job_id, req.approved, req.answer),
+                origin,
+            );
+        }
+        _ => {}
+    }
+    // <<< /AI AGENT JOBS >>>
+
     // <<< CYBSH SYNC START (real, lockless) >>>
     // `sync start …` typed into the terminal arrives as POST /api/os/exec,
     // whose normal handler runs under the request write lock — under which
@@ -880,6 +934,23 @@ fn route_request(
         return resp;
     }
     // <<< /CYBSH SYNC START >>>
+
+    // <<< CYBSH AI (real, lockless) >>>
+    // `ai ask …` typed into the terminal arrives as POST /api/os/exec. The
+    // agent registry lives here (not in `cybermanju-os`, which cannot depend
+    // back on this crate), so — like `sync start` above — the line is
+    // intercepted before any lock is taken and run as a detached agent job.
+    // `ai status/abort/sessions` are registry/database reads the normal
+    // locked path cannot serve either (the job map is process-global), so
+    // every `ai` line dispatches here; anything else falls through.
+    if let Some(resp) = (method == "POST"
+        && matches!(path_segments.as_slice(), ["api", "os", "exec"]))
+    .then(|| api::agent_api::try_ai_exec(db, body, origin))
+    .flatten()
+    {
+        return resp;
+    }
+    // <<< /CYBSH AI >>>
 
     // Take the database lock for the duration of the request. Readers share
     // the lock; writers (POST/PUT/DELETE) take it exclusively. A poisoned lock
@@ -1303,6 +1374,72 @@ fn route_request(
                 Some(resp) => resp,
                 None => json_error(404, "not found: /api/code/parse", origin),
             }
+        }
+
+        // ─── AI agent: providers, configs (keyless rows), sessions ──
+        // Secrets never serialize: keys live in `sync_secrets` as
+        // `agent:key:<config_id>`; rows report `hasKey` only.
+        ["api", "agent", "providers"] if method == "GET" => {
+            api_response(Ok::<_, String>(cybermanju_agent::providers::all_presets()), origin)
+        }
+        ["api", "agent", "configs"] if method == "GET" => {
+            api_response(api::agent_api::list_configs(db), origin)
+        }
+        ["api", "agent", "configs"] if method == "POST" => {
+            #[derive(Deserialize)]
+            struct ConfigBody {
+                config: cybermanju_types::agent::AgentConfig,
+            }
+            let req: ConfigBody = json_body!(body, origin);
+            api_response(api::agent_api::save_config(db, req.config), origin)
+        }
+        ["api", "agent", "configs", id] if method == "GET" => {
+            api_response(api::agent_api::get_config(db, id), origin)
+        }
+        ["api", "agent", "configs", id] if method == "DELETE" => {
+            api_response(api::agent_api::delete_config(db, id), origin)
+        }
+        ["api", "agent", "configs", id, "key"] if method == "PUT" => {
+            #[derive(Deserialize)]
+            struct KeyBody {
+                #[serde(default)]
+                api_key: String,
+            }
+            let req: KeyBody = json_body!(body, origin);
+            api_response(api::agent_api::save_key(db, id, &req.api_key), origin)
+        }
+        ["api", "agent", "configs", id, "models"] if method == "GET" => {
+            api_response(api::agent_api::list_models(db, id), origin)
+        }
+        ["api", "agent", "sessions"] if method == "GET" => {
+            api_response(api::agent_api::list_sessions(db), origin)
+        }
+        ["api", "agent", "sessions"] if method == "POST" => {
+            #[derive(Deserialize)]
+            struct NewSessionBody {
+                config_id: String,
+                #[serde(default)]
+                title: Option<String>,
+            }
+            let req: NewSessionBody = json_body!(body, origin);
+            api_response(
+                api::agent_api::create_session(db, &req.config_id, req.title),
+                origin,
+            )
+        }
+        ["api", "agent", "sessions", id] if method == "GET" => {
+            api_response(api::agent_api::get_session(db, id), origin)
+        }
+        ["api", "agent", "sessions", id] if method == "DELETE" => {
+            api_response(api::agent_api::delete_session(db, id), origin)
+        }
+        ["api", "agent", "sessions", "import"] if method == "POST" => {
+            #[derive(Deserialize)]
+            struct ImportBody {
+                session: cybermanju_types::agent::AgentSession,
+            }
+            let req: ImportBody = json_body!(body, origin);
+            api_response(api::agent_api::import_session(db, req.session), origin)
         }
 
         // ─── Location endpoints ───────────────────────────────────

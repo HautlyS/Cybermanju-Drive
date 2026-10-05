@@ -6,6 +6,7 @@
 // Disk rows come from AGENT-6's catalog; the merged bar from `/api/os/df`.
 import { computed, onMounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { humanBytes, diskPct } from '@/utils/format'
 
 const store = useAppStore()
 
@@ -27,23 +28,6 @@ const usedPct = computed(() => {
   if (!d || d.totalBytes === 0) return 0
   return Math.min(100, (d.usedBytes / d.totalBytes) * 100)
 })
-
-function human(bytes: number): string {
-  if (!bytes) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let value = bytes
-  let unit = 0
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024
-    unit += 1
-  }
-  return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`
-}
-
-function diskPct(used: number, capacity: number): number {
-  if (!capacity) return 0
-  return Math.min(100, (used / capacity) * 100)
-}
 
 async function refresh() {
   await Promise.all([store.fetchDisks(), store.fetchOsDf()])
@@ -112,10 +96,10 @@ onMounted(refresh)
         <div class="df-used" :style="{ width: `${usedPct}%` }"></div>
       </div>
       <div class="df-legend">
-        <span><i class="dot used"></i>USED {{ human(df?.usedBytes ?? 0) }}</span>
-        <span><i class="dot free"></i>FREE {{ human(df?.freeBytes ?? 0) }}</span>
-        <span>TOTAL {{ human(df?.totalBytes ?? 0) }}</span>
-        <span class="text-muted">ATTACHED {{ human(df?.attachedBytes ?? 0) }} · SCRATCH {{ human(df?.scratchBytes ?? 0) }}</span>
+        <span><i class="dot used"></i>USED {{ humanBytes(df?.usedBytes ?? 0) }}</span>
+        <span><i class="dot free"></i>FREE {{ humanBytes(df?.freeBytes ?? 0) }}</span>
+        <span>TOTAL {{ humanBytes(df?.totalBytes ?? 0) }}</span>
+        <span class="text-muted">ATTACHED {{ humanBytes(df?.attachedBytes ?? 0) }} · SCRATCH {{ humanBytes(df?.scratchBytes ?? 0) }}</span>
       </div>
       <p class="df-root text-muted">root {{ df?.root ?? '—' }}</p>
     </div>
@@ -172,7 +156,7 @@ onMounted(refresh)
             <div class="card-used" :style="{ width: `${diskPct(disk.usedBytes, disk.capacityBytes)}%` }"></div>
           </div>
           <div class="card-figures">
-            <span>{{ human(disk.usedBytes) }} / {{ human(disk.capacityBytes) }}</span>
+            <span>{{ humanBytes(disk.usedBytes) }} / {{ humanBytes(disk.capacityBytes) }}</span>
             <span class="text-muted">{{ diskPct(disk.usedBytes, disk.capacityBytes).toFixed(0) }}% used</span>
           </div>
 

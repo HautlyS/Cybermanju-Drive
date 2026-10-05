@@ -56,6 +56,13 @@
 - VS-like editor (Dock → Editor, `Ctrl+E`): tabbed editing with dirty tracking, live tree-sitter outline, find, Ln/Col status, syntax-highlighted overlay — managed files on desktop/web (version snapshotted on every save), browser-local volume on Pages
 - Structured AST output with symbol names, kinds, and line ranges
 
+### Native AI Agent
+- **Zero new runtimes**: pure-Rust core (`crates/agent`) runs on desktop, server, and WASM — tools execute against the Kernel/volume, never a sidecar
+- **10 provider presets** (Anthropic, OpenAI, OpenRouter, Ollama, Gemini, Groq, Mistral, DeepSeek, xAI, Cerebras) + custom endpoints: per-config endpoint URL, model/family, dialect (OpenAI/Anthropic), auth scheme, sealed API keys (`hasKey` only, never echoed)
+- **Permissions** à la opencode/omp: `allow|ask|deny` + wildcards, plan-agent read-only, `deny` beats auto-approve; approvals park as 202-style jobs with UI cards
+- **Hash-anchored edits** (BLAKE3): exact-once replacement, stale-anchor `integrity:` refusal, `conflict:` on ambiguity
+- Detached runs (`POST /api/agent/prompt` → poll), subagents (depth-guarded, read-only), sessions persisted + export/import, `cybsh ai` terminal surface, offline-capable Pages loop via local models gateways
+
 ### Multi-User Access Control
 - Role-based access control: `admin`, `user`, `viewer`
 - Per-file permissions: `read`, `write`, `admin`
@@ -292,6 +299,15 @@ When running as a Docker container or with the embedded web dashboard, all data 
 | `/api/permissions/{fileId}` | GET | Get file permissions |
 | `/api/permissions` | POST | Grant permission |
 | `/api/permissions/verify` | POST | Verify access |
+| `/api/agent/providers` | GET | LLM provider presets (no secrets) |
+| `/api/agent/configs` | GET/POST | List/save agent configs (keyless rows) |
+| `/api/agent/configs/{id}/key` | PUT | Seal a provider API key |
+| `/api/agent/configs/{id}/models` | GET | Refresh model list from provider |
+| `/api/agent/sessions` | GET/POST | List/create agent sessions |
+| `/api/agent/prompt` | POST | Start detached run (202 job) |
+| `/api/agent/jobs/{id}` | GET | Poll job (turns, usage, approvals) |
+| `/api/agent/jobs/{id}/abort` | POST | Cancel a run |
+| `/api/agent/jobs/{id}/approve` | POST | Answer an approval/question |
 
 Full REST API documentation with request/response schemas is in [ARCHITECTURE.md](./ARCHITECTURE.md#10-web-dashboard-rest-api).
 

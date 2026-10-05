@@ -429,6 +429,20 @@ function openEditor(event: KeyboardEvent) {
   wm.open('editor')
 }
 
+/**
+ * Ctrl+G opens the AI agent panel. Skipped inside inputs like the editor
+ * binding above so typing is never hijacked.
+ */
+function openAgent(event: KeyboardEvent) {
+  if (!event.ctrlKey && !event.metaKey) return
+  if (event.shiftKey || event.altKey) return
+  if (event.key.toLowerCase() !== 'g') return
+  const target = event.target as HTMLElement | null
+  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
+  event.preventDefault()
+  wm.open('agent')
+}
+
 onMounted(() => {
   store.currentPanel = 'landing'
   store.initialize()
@@ -440,11 +454,13 @@ onMounted(() => {
   window.addEventListener('cybermanju:upload', handleUpload)
   window.addEventListener('keydown', toggleTerminal)
   window.addEventListener('keydown', openEditor)
+  window.addEventListener('keydown', openAgent)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', toggleTerminal)
   window.removeEventListener('keydown', openEditor)
+  window.removeEventListener('keydown', openAgent)
 })
 </script>
 

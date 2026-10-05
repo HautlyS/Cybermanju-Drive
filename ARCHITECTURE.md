@@ -359,6 +359,30 @@ Backend sync configuration entries.
 | `deleteRawAfterSync` | `bool` | Delete original after successful sync |
 | `maxConcurrentUploads` | `u32` | Upload concurrency limit |
 
+### Table: `agent_configs`
+
+Native agent configurations. Rows are keyless — provider keys live in
+`sync_secrets` as `agent:key:<config_id>` and responses report `hasKey`.
+
+| JSON Field | Type | Description |
+|------------|------|-------------|
+| `id` | `string` | UUID v4 |
+| `name` | `string` | Display name |
+| `providerId` | `string` | Preset id or `"custom"` |
+| `model` | `string` | Model id (refreshable via provider) |
+| `baseUrlOverride` | `string?` | Custom endpoint |
+| `dialectOverride` | `string?` | `"openAi"` / `"anthropic"` (custom) |
+| `authSchemeOverride` | `string?` | `"bearer"` / `"header"` / `"query"` / `"none"` |
+| `workingDir` | `string` | Tool root, volume-relative |
+| `agentKind` | `string` | `"build"` or `"plan"` (read-only) |
+| `permission` | `object` | `{default, rules}` allow/ask/deny + wildcards |
+| `autoApprove` | `bool` | Auto-approve asks (never denies) |
+| `maxTurns` | `u32` | Turn budget (clamped 1–50) |
+
+### Table: `agent_sessions`
+
+Agent transcripts (full `messages[]` + usage), export/import-compatible.
+
 ### Table: `locations`
 
 Geographic and storage location metadata.
@@ -720,6 +744,21 @@ Login via `POST /api/users/login` with `{ "username": "...", "password": "..." }
 | `GET` | `/api/permissions/{fileId}` | Get permissions for a file |
 | `POST` | `/api/permissions` | Grant a file permission |
 | `POST` | `/api/permissions/verify` | Verify file access for a user |
+| **AI Agent** | | |
+| `GET` | `/api/agent/providers` | LLM presets (endpoints, families, models — no secrets) |
+| `GET`/`POST` | `/api/agent/configs` | List/save configs (keyless rows, `hasKey` only) |
+| `GET`/`DELETE` | `/api/agent/configs/{id}` | Get/delete a config |
+| `PUT` | `/api/agent/configs/{id}/key` | Seal a provider API key |
+| `GET` | `/api/agent/configs/{id}/models` | Refresh models from provider |
+| `GET`/`POST` | `/api/agent/sessions` | List/create transcripts |
+| `GET`/`DELETE` | `/api/agent/sessions/{id}` | Get/delete a transcript |
+| `POST` | `/api/agent/sessions/import` | Import a transcript (re-keyed) |
+| `POST` | `/api/agent/prompt` | Start a detached run (202 job) |
+| `GET` | `/api/agent/jobs`, `/api/agent/jobs/{id}` | List/poll jobs (turns, usage, approvals) |
+| `POST` | `/api/agent/jobs/{id}/abort` | Cancel a run |
+| `POST` | `/api/agent/jobs/{id}/approve` | Answer an approval/question |
+| `GET`/`PUT` | `/api/files/{id}/content` | Read/overwrite managed file text (1 MiB cap, versioned saves) |
+| `POST` | `/api/code/parse` | Parse source text (shared heuristic core) |
 | **Health** | | |
 | `GET` | `/api/health` | Health check (returns `{ service, status, timestamp }`) |
 

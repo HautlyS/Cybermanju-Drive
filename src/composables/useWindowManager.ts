@@ -27,6 +27,12 @@ const TerminalPanel = defineAsyncComponent(
   () => import('@/components/TerminalPanel.vue')
 )
 
+// The agent panel is as heavy as the terminal (thread + approvals), so it
+// is code-split the same way — fetched on first open, not on boot.
+const AgentPanel = defineAsyncComponent(
+  () => import('@/components/AgentPanel.vue')
+)
+
 // The code editor is a second heavy panel (highlight overlay + outline), so
 // it is code-split like the terminal — fetched on first open, not on boot.
 const CodeEditorPanel = defineAsyncComponent(
@@ -59,6 +65,7 @@ const defaultSizes: SizeMap = {
   map: { width: 720, height: 520 },
   code: { width: 650, height: 500 },
   editor: { width: 980, height: 620 },
+  agent: { width: 720, height: 600 },
   users: { width: 520, height: 460 },
   sync: { width: 580, height: 440 },
   settings: { width: 560, height: 520 },
@@ -93,6 +100,7 @@ const panelComponentMap: Record<string, Component> = {
   map: MapView,
   code: CodeIntelligencePanel,
   editor: CodeEditorPanel,
+  agent: AgentPanel,
   users: UserManagementPanel,
   dashboard: WebDashboardPanel,
   sync: SyncPanel,

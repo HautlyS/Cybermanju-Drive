@@ -8,6 +8,7 @@ import type {
   SearchResult, EncryptionStatus, EncryptionKeyInfo,
   CompressionStats, ParseResult, GeoMarker,
   FileContent, SavedContent,
+  ProviderPreset, AgentConfig, AgentSession, AgentJob,
   ViewMode, PanelType, SidebarSection,
   SyncConfig, SyncProgress, SyncResult, RemoteFile,
   SyncJob, SyncRunRecord, RestoreOutcome, QuotaUsage,
@@ -15,8 +16,9 @@ import type {
   AuthResult, ModuleInfo, TrashItem, AuditEntry, FileVersion, User,
   DashboardStatus,
   ShellResult, OsPs, OsTop, OsWorkers, OsJob, OsVolumeDf, DiskRow,
+  SyncBackendType,
 } from '@/types'
-import { MODULE_METADATA } from '@/types'
+import { MODULE_METADATA, oauthSlugForBackend } from '@/types'
 import { setAuthToken, getAuthToken, isWebMode } from '@/composables/useTauri'
 
 export const useAppStore = defineStore('cybermanju', () => {
@@ -875,8 +877,7 @@ export const useAppStore = defineStore('cybermanju', () => {
     try {
       // The backend route only knows google|github|gitlab slugs —
       // Google Drive and Google Photos share the `google` OAuth client.
-      const slug =
-        provider === 'googleDrive' || provider === 'googlePhotos' ? 'google' : provider
+      const slug = oauthSlugForBackend(provider as SyncBackendType) ?? provider
       const res = await invoke<{ authorizeUrl: string; state: string }>('oauth_start', { provider: slug, configId })
       if (res?.authorizeUrl && typeof window !== 'undefined') window.open(res.authorizeUrl, '_blank')
       return res
@@ -1326,6 +1327,145 @@ export const useAppStore = defineStore('cybermanju', () => {
     return result
   }
 
+  // ── Actions: AI agent ─────────────────────────────────────
+  const agentProviders = ref<ProviderPreset[]>([])
+  const agentConfigs = ref<AgentConfig[]>([])
+  const agentSessions = ref<AgentSession[]>([])
+  const agentJobs = ref<AgentJob[]>([])
+  const activeAgentJob = ref<AgentJob | null>(null)
+
+  async function fetchAgentProviders() {
+    try {
+      agentProviders.value = await invoke<ProviderPreset[]>('list_agent_providers')
+    } catch (e) {
+      notifyError('Failed to fetch providers', e)
+    }
+  }
+
+  async function fetchAgentConfigs() {
+    try {
+      agentConfigs.value = await invoke<AgentConfig[]>('list_agent_configs')
+    } catch (e) {
+      notifyError('Failed to fetch agent configs', e)
+    }
+  }
+
+  async function saveAgentConfig(config: Omit<AgentConfig, 'id' | 'hasKey' | 'createdAt' | 'updatedAt'> & { id?: string }) {
+    try {
+      const saved = await invoke<AgentConfig>('save_agent_config', {
+        config: { ...config, id: config.id ?? '', hasKey: false, createdAt: '', updatedAt: '' },
+      })
+      await fetchAgentConfigs()
+      notifySuccess(`Agent config '${saved.name}' saved`)
+      return saved
+    } catch (e) {
+      notifyError('Failed to save agent config', e)
+      return null
+    }
+  }
+
+  async function deleteAgentConfig(configId: string) {
+    try {
+      await invoke('delete_agent_config', { configId })
+      await fetchAgentConfigs()
+      notifySuccess('Agent config deleted')
+    } catch (e) {
+      notifyError('Failed to delete agent config', e)
+    }
+  }
+
+  async function saveAgentKey(configId: string, apiKey: string) {
+    try {
+      await invoke('save_agent_key', { configId, apiKey })
+      await fetchAgentConfigs()
+      notifySuccess('API key sealed')
+      return true
+    } catch (e) {
+      notifyError('Failed to save API key', e)
+      return false
+    }
+  }
+
+  async function refreshAgentModels(configId: string) {
+    try {
+      return await invoke<string[]>('list_agent_models', { configId })
+    } catch (e) {
+      notifyError('Model refresh failed', e)
+      return null
+    }
+  }
+
+  async function fetchAgentSessions() {
+    try {
+      agentSessions.value = await invoke<AgentSession[]>('list_agent_sessions')
+    } catch (e) {
+      notifyError('Failed to fetch agent sessions', e)
+    }
+  }
+
+  async function loadAgentSession(sessionId: string) {
+    try {
+      return await invoke<AgentSession>('get_agent_session', { sessionId })
+    } catch (e) {
+      notifyError('Failed to load agent session', e)
+      return null
+    }
+  }
+
+  async function deleteAgentSession(sessionId: string) {
+    try {
+      await invoke('delete_agent_session', { sessionId })
+      await fetchAgentSessions()
+    } catch (e) {
+      notifyError('Failed to delete agent session', e)
+    }
+  }
+
+  async function startAgentRun(configId: string, prompt: string, sessionId?: string) {
+    try {
+      const job = await invoke<AgentJob>('start_agent_run', { configId, sessionId, prompt })
+      activeAgentJob.value = job
+      await pollAgentJob(job.jobId)
+      return job
+    } catch (e) {
+      notifyError('Failed to start agent run', e)
+      return null
+    }
+  }
+
+  async function pollAgentJob(jobId: string) {
+    try {
+      const job = await invoke<AgentJob>('agent_job_status', { jobId })
+      activeAgentJob.value = job
+      const i = agentJobs.value.findIndex(j => j.jobId === jobId)
+      if (i >= 0) agentJobs.value[i] = job
+      else agentJobs.value.unshift(job)
+      if (job.status === 'running' || job.status === 'waiting_approval') {
+        setTimeout(() => pollAgentJob(jobId), 1500)
+      }
+    } catch (e) {
+      notifyError('Failed to poll agent job', e)
+    }
+  }
+
+  async function abortAgentJob(jobId: string) {
+    try {
+      await invoke('abort_agent_job', { jobId })
+      await pollAgentJob(jobId)
+    } catch (e) {
+      notifyError('Failed to abort agent job', e)
+    }
+  }
+
+  async function approveAgentJob(jobId: string, approved: boolean, answer?: string) {
+    try {
+      await invoke('approve_agent_job', { jobId, approved, answer })
+      await pollAgentJob(jobId)
+    } catch (e) {
+      notifyError('Failed to answer approval', e)
+    }
+  }
+
   async function fetchDisks() {
     try {
       disks.value = await invoke<DiskRow[]>('list_disks')
@@ -1430,6 +1570,10 @@ export const useAppStore = defineStore('cybermanju', () => {
     execShellLine, completeShellLine,
     fetchOsPs, fetchOsTop, fetchOsWorkers, fetchOsJobs, fetchOsDf,
     killOsTask, runComputeJob,
+    agentProviders, agentConfigs, agentSessions, agentJobs, activeAgentJob,
+    fetchAgentProviders, fetchAgentConfigs, saveAgentConfig, deleteAgentConfig,
+    saveAgentKey, refreshAgentModels, fetchAgentSessions, loadAgentSession, deleteAgentSession,
+    startAgentRun, pollAgentJob, abortAgentJob, approveAgentJob,
     fetchDisks, createDisk, attachDisk, detachDisk, resizeDisk, checkDisk,
     // User Management
     fetchUsers, createUser, deleteUser, updateUserRole,

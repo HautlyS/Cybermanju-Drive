@@ -18,6 +18,55 @@ interface WasmBackend {
 let wasmModule: WasmBackend | null = null
 let wasmLoad: Promise<WasmBackend> | null = null
 
+interface WasmAgent {
+  agent_catalog: () => string
+  agent_prompt: (reqJson: string) => Promise<string>
+}
+
+/** Provider catalog from the shared Rust core (no network, works offline). */
+export async function wasmAgentCatalog(): Promise<unknown[]> {
+  const mod = await loadWasm()
+  if (!mod) throw new Error('wasm backend unavailable')
+  const raw = ((mod as unknown as WasmAgent).agent_catalog() ?? '[]') as string
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+export interface WasmAgentTurn {
+  ok: boolean
+  turn?: {
+    content: string
+    tool_calls: Array<{ id: string; name: string; input: Record<string, unknown> }>
+    usage: { inputTokens: number; outputTokens: number }
+    finish: string
+  }
+  error?: string
+}
+
+/** One provider turn over browser fetch (see drive-wasm agent_prompt). */
+export async function wasmAgentPrompt(req: {
+  url: string
+  dialect: string
+  model: string
+  headers: Array<[string, string]>
+  system: string
+  messages: Array<Record<string, unknown>>
+  tools: boolean
+}): Promise<WasmAgentTurn> {
+  const mod = await loadWasm()
+  if (!mod) throw new Error('wasm backend unavailable')
+  const raw = (await (mod as unknown as WasmAgent).agent_prompt(JSON.stringify(req))) as string
+  try {
+    return JSON.parse(raw) as WasmAgentTurn
+  } catch {
+    return { ok: false, error: 'network: unreadable agent reply' }
+  }
+}
+
 /**
  * Load the wasm-pack bundle (`--target web` output). Vite sees the
  * virtual module via the resolved alias in `vite.config.wasm.ts`; when the
@@ -155,15 +204,32 @@ function dbRejectAll(err: Error) {
   dbPending.clear()
 }
 
+let mainDbOpen: Promise<unknown> | null = null
+
 async function mainThreadDbDispatch(op: string, args: Record<string, unknown>): Promise<unknown> {
   if (op === '_status') return { backend: 'memory', file: 'cybermanju.db' }
   const mod = await loadWasm()
   if (!mod || typeof (mod as unknown as { db_dispatch?: unknown }).db_dispatch !== 'function') {
     throw new Error('wasm database unavailable')
   }
-  const { db_dispatch } = mod as unknown as {
+  const { db_dispatch, db_open } = mod as unknown as {
     db_dispatch: (op: string, argsJson: string) => string
+    db_open: () => Promise<string>
   }
+  // The main-thread module needs the same open handshake as the worker —
+  // OPFS resolution fails here by design, so this always lands on memory.
+  if (!mainDbOpen) {
+    mainDbOpen = (async () => {
+      const raw = await db_open()
+      const env = JSON.parse(raw) as { ok: boolean; error?: string }
+      if (!env.ok) throw new Error(env.error || 'db_open failed')
+      return env
+    })()
+    mainDbOpen.catch(() => {
+      mainDbOpen = null
+    })
+  }
+  await mainDbOpen
   const raw = db_dispatch(
     op,
     JSON.stringify({ ...args, now: new Date().toISOString() }),
@@ -192,8 +258,11 @@ export async function wasmDbDispatch(
         if (ev.data.ok) pending.resolve(ev.data.data ?? null)
         else pending.reject(new Error(String(ev.data.error ?? 'unknown db error')))
       }
-      dbWorker.onerror = (ev) => {
-        dbRejectAll(new Error(`database worker error: ${ev.message || 'unknown'}`))
+      dbWorker.onerror = () => {
+        dbRejectAll(new Error('database worker error — recreating on next call'))
+        // A faulted worker may hold broken wasm state; drop it so the next
+        // call boots a fresh one instead of hanging until timeout.
+        dbWorker = null
       }
     } catch (e) {
       dbWorkerFailed = true
