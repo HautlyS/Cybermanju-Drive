@@ -124,6 +124,8 @@ pub fn run() {
             files::duplicate_file_context,
             files::move_file,
             files::get_preview,
+            files::read_file_content,
+            files::write_file_content,
             // Search
             search_cmd::search_files,
             search_cmd::search_files_paginated,

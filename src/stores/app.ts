@@ -7,6 +7,7 @@ import type {
   FileNode, Account, Collection, FaceGroup, LooseGroup,
   SearchResult, EncryptionStatus, EncryptionKeyInfo,
   CompressionStats, ParseResult, GeoMarker,
+  FileContent, SavedContent,
   ViewMode, PanelType, SidebarSection,
   SyncConfig, SyncProgress, SyncResult, RemoteFile,
   SyncJob, SyncRunRecord, RestoreOutcome, QuotaUsage,
@@ -608,6 +609,74 @@ export const useAppStore = defineStore('cybermanju', () => {
     } catch (e) {
       notifyError('Parse failed', e)
       return null
+    }
+  }
+
+  // ── Actions: Editor file content (transport-aware) ───────────
+  /** Managed file bytes (desktop Tauri command, REST on web). */
+  async function readManagedContent(fileId: string) {
+    try {
+      return await invoke<FileContent>('read_file_content', { fileId })
+    } catch (e) {
+      notifyError('Failed to read file content', e)
+      return null
+    }
+  }
+
+  /** Save managed file bytes (snapshots a version first, server-side). */
+  async function saveManagedContent(fileId: string, content: string) {
+    try {
+      const saved = await invoke<SavedContent>('write_file_content', { fileId, content })
+      notifySuccess(`Saved ${saved.name} (${saved.sizeBytes} bytes — version snapshotted)`)
+      await fetchFiles()
+      return saved
+    } catch (e) {
+      notifyError('Save failed', e)
+      return null
+    }
+  }
+
+  /** WASM-volume text (static host only): read via the shell. */
+  async function readWasmFile(path: string) {
+    try {
+      const res = await invoke<ShellResult>('os_exec', { line: `cat "${path}"` })
+      if (!res.ok) {
+        notifyError('Failed to read file', res.output)
+        return null
+      }
+      return res.output
+    } catch (e) {
+      notifyError('Failed to read file', e)
+      return null
+    }
+  }
+
+  /** WASM-volume save (static host only, 1 MiB cap enforced Rust-side). */
+  async function saveWasmFile(path: string, content: string) {
+    try {
+      const res = await invoke<{ ok: boolean; output: string }>('os_write', { path, content })
+      if (res && (res as { ok?: boolean }).ok === false) {
+        notifyError('Save failed', (res as { output?: string }).output ?? '')
+        return false
+      }
+      notifySuccess(`Saved ${path}`)
+      return true
+    } catch (e) {
+      notifyError('Save failed', e)
+      return false
+    }
+  }
+
+  /** WASM-volume directory listing (static host only). */
+  async function listWasmDir(path: string) {
+    try {
+      const res = await invoke<{ ok: boolean; output: string } | string[]>('os_ls', { path })
+      if (Array.isArray(res)) return res as string[]
+      const out = (res as { output?: string }).output ?? ''
+      return out.split('\n').map(s => s.trim()).filter(Boolean)
+    } catch (e) {
+      notifyError('Failed to list directory', e)
+      return []
     }
   }
 
@@ -1349,6 +1418,7 @@ export const useAppStore = defineStore('cybermanju', () => {
     renameFaceGroup, mergeFaceGroups, deleteFaceGroup, findSimilarFaces,
     fetchAccounts, createAccount, switchAccount, deleteAccount, fetchGeoFiles,
     parseFileCode, parseCodeText, fetchLooseGroups,
+    readManagedContent, saveManagedContent, readWasmFile, saveWasmFile, listWasmDir,
     fetchSyncConfigs, createSyncConfig, saveSyncConfig, probeSyncConnection, deleteSyncConfig, startSync,
     getSyncProgress, testSyncConnection, cancelSync, listRemoteFiles,
     getSyncJob, fetchSyncRuns, fetchSyncStatus, restoreSyncFile, deleteRemoteFile,

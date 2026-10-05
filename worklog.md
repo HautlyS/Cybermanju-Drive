@@ -65,3 +65,9 @@ Stage Summary:
 - R6-3 closed: `os-acceptance.sh:28` already carries the fixed counting pipeline; `AGENT-6.md` request marked resolved, Tier 0 box reworded to pending-CI.
 - Real tree-sitter (F8): `tree-sitter 0.24` + six 0.23 grammars (rust/python/js/ts/go/bash) behind default-on `real-treesitter`; query-free tree walk (node-kind sets + `name`/`type` fields, node/symbol caps, `"engine"` reported, heuristic fallback same shape); `parse_file`/`get_symbols` switched over; unit tests added; README/ARCHITECTURE/OPERATIONS updated. Grammar/runtime version pairing must be confirmed by `cargo check` in CI.
 - Not run here (no cargo on box): `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`, `scripts/os-acceptance.sh all`.
+## 2026-10-06 — VS-like cross-device code editor (no cargo on box; CI must prove)
+
+- New `editor` panel (`CodeEditorPanel.vue`, Dock entry, `Ctrl+E`, lazy-loaded): explorer + tabs with dirty dots, gutter + highlight overlay editing, Tab/Ctrl+S handling, find with cycling, Ln/Col status, live tree-sitter outline with click-to-jump, per-tab engine badges.
+- Cross-device saves: `GET|PUT /api/files/{id}/content` (shared `api::files` logic — version snapshot before overwrite, size/hash refresh, honest `encrypted:`/`binary:`/`too_large:`/`not_found:` refusals) with Tauri twins; Pages edits the WASM volume via a new `write` dispatcher op (1 MiB cap, round-trip tested).
+- Store actions (`read/saveManagedContent`, `read/saveWasmFile`, `listWasmDir`), invoke mappings, `FileContent`/`SavedContent` types, `os_write` wasm bridge; `crates/tests/src/editor.rs` pins auth gating, round-trip + versioning, refusals, and code-parse shape.
+- Not run here: `cargo test` (new `files.rs`, `code.rs`, wasm `os.rs`, integration tests), clippy, `os-acceptance.sh`.

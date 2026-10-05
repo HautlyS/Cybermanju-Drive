@@ -6,7 +6,13 @@ import wasmStub from "./vite-plugin-wasm-stub";
 const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig(async () => ({
-  plugins: [vue(), wasmStub],
+  plugins: [vue(), wasmStub()],
+  // Worker bundles don't inherit config plugins — the db worker imports
+  // 'cybermanju-drive-wasm', so the stub must apply there too.
+  worker: {
+    format: 'es',
+    plugins: () => [wasmStub()],
+  },
   resolve: {
     alias: {
       "@": resolve(__dirname, "src"),

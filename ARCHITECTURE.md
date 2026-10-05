@@ -796,6 +796,8 @@ providers → .cybermanju disks (CYBMJU1 sealed superblock, choosable capacity)
 - **Sync jobs:** `POST /api/sync/start → 202 {jobId}`, `GET /api/sync/jobs/{id}|runs|status|progress`, `POST /api/sync/cancel|restore`, `DELETE /api/sync/remote` (501 on `unsupported:`), `GET /api/sync/usage/{id}`.
 - **Durability:** `GET /api/repair/status|tasks|health`, `POST /api/repair/run|rebuild|gc`, `POST /api/scrub/run`, `GET /api/scrub/runs`, `POST /api/lease/acquire|release`, `GET /api/lease/status`.
 - **OS:** `POST /api/os/exec {line}` (incl. real `sync start …` → detached job), `GET /api/os/complete/{prefix}|stat|ls|du|df|ps|top|workers|jobs` (`ps`/`top` merge OS + repair rows); `GET /api/disk/*`, `GET|PUT /api/volume/block/{lba}` (base64, body range).
+- **Code:** `POST /api/code/parse {fileName, content}` (shared heuristic core, 1 MiB cap, 413 over); desktop Tauri `parse_text` runs the real grammars.
+- **Editor:** `GET|PUT /api/files/{id}/content` (1 MiB cap; version snapshot before overwrite; honest `encrypted:`/`binary:`/`too_large:` refusals); desktop Tauri twins; Pages edits the WASM volume (`write` op, localStorage).
 - **Auth:** fail-closed `Authenticated` default, `is_known_route` 404-before-401, `Claims{role}` RBAC, bootstrap-only register, sealed secrets.
 - **Known honest limits:** faces empty without ONNX; code parse heuristic for unbundled languages; Telegram/Photos delete `unsupported:`; WASM `sync` needs the dashboard.
 

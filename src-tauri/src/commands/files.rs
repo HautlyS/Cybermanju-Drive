@@ -134,6 +134,32 @@ pub fn get_preview(
     api::files::preview(&db, &file_id)
 }
 
+/// Read a file's text content for the code editor.
+/// Same refusals as REST (`encrypted:`, `binary:`, `too_large:`, `not_found:`).
+#[tauri::command]
+pub fn read_file_content(
+    file_id: String,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.read().map_err(|e| e.to_string())?;
+    api::files::read_content(&db, &file_id)
+}
+
+/// Overwrite a file's text content from the code editor.
+/// Snapshots a version first (best effort), then writes bytes and refreshes
+/// size/hash/modified metadata.
+#[tauri::command]
+pub fn write_file_content(
+    file_id: String,
+    content: String,
+    state: State<'_, AppState>,
+) -> Result<serde_json::Value, String> {
+    // Write guard like the version commands: the save snapshots a version
+    // and rewrites the row, which must not interleave with another writer.
+    let db = state.db.write().map_err(|e| e.to_string())?;
+    api::files::write_content(&db, &file_id, &content)
+}
+
 #[tauri::command]
 pub fn create_loose_group(
     name: String,

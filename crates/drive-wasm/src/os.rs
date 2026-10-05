@@ -29,6 +29,10 @@ thread_local! {
 
 const STORAGE_KEY: &str = "cybermanju.os.volume";
 const DEFAULT_CAPACITY: u64 = 64 * 1024 * 1024;
+/// Single-write cap: localStorage quotas (~5 MiB) are shared with everything
+/// else the browser stores — oversized writes refuse instead of silently
+/// dropping half a file on quota errors.
+const MAX_WRITE_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Debug)]
 struct TaskRow {
@@ -213,6 +217,7 @@ fn cybermanju_commands() -> &'static [&'static str] {
         "cd",
         "ls",
         "cat",
+        "write",
         "touch",
         "mkdir",
         "rm",
@@ -454,6 +459,27 @@ fn dispatch(cmd: &str, args: &[String]) -> String {
             save_volume(&volume);
             ok(String::new())
         }
+        "write" => {
+            // `write <path> <content>` — the editor's save path on static
+            // hosts. Both arrive as whole positional args (no tokenizing),
+            // so content keeps its whitespace intact.
+            let raw_path = args.first().map(String::as_str).unwrap_or_default();
+            if raw_path.is_empty() {
+                return err("usage: write <path> <content>".to_string());
+            }
+            let content = args.get(1).cloned().unwrap_or_default();
+            if content.len() > MAX_WRITE_BYTES {
+                return err(format!(
+                    "too_large: content is {} bytes, wasm write limit is {}",
+                    content.len(),
+                    MAX_WRITE_BYTES
+                ));
+            }
+            let path = join(&CWD.with(|c| c.borrow().clone()), raw_path);
+            volume.insert(path.clone(), content.clone());
+            save_volume(&volume);
+            ok(format!("wrote {} ({} bytes)", path, content.len()))
+        }
         "mkdir" => {
             // Directories are implied by paths in the map; record a marker so
             // `ls` and `cd` see an empty directory.
@@ -673,5 +699,19 @@ mod tests {
         let out = dispatch("definitely-not-a-command", &[]);
         assert!(out.contains("unknown command:"), "{out}");
         assert!(out.contains(r#""ok":false"#), "{out}");
+    }
+
+    #[test]
+    fn write_round_trips_through_cat() {
+        let out = dispatch(
+            "write",
+            &["/edit.txt".to_string(), "hello wasm".to_string()],
+        );
+        assert!(out.contains(r#""ok":true"#), "{out}");
+        let out = dispatch("cat", &["/edit.txt".to_string()]);
+        assert!(out.contains("hello wasm"), "{out}");
+        let big = "x".repeat(MAX_WRITE_BYTES + 1);
+        let out = dispatch("write", &["/big.txt".to_string(), big]);
+        assert!(out.contains("too_large:"), "{out}");
     }
 }

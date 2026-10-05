@@ -50,8 +50,10 @@
 
 ### Code Intelligence
 - **tree-sitter** integration with language detection for 50+ file extensions
-- Heuristic symbol extraction: functions, classes, structs, traits, interfaces
-- Language-aware keyword sets for Rust, Python, Go, TypeScript, Java, C/C++, Ruby, Swift, and more
+- Real grammars for Rust, Python, JavaScript, TypeScript, Go and Bash (default-on `real-treesitter` feature); heuristic fallback for the rest — every result reports `"engine"`
+- Symbol extraction: functions, classes, structs, traits, interfaces
+- Code panel: file / paste / path sources, engine badge, searchable outline with kind filters, click-to-jump source view with syntax highlighting (`POST /api/code/parse` serves all transports)
+- VS-like editor (Dock → Editor, `Ctrl+E`): tabbed editing with dirty tracking, live tree-sitter outline, find, Ln/Col status, syntax-highlighted overlay — managed files on desktop/web (version snapshotted on every save), browser-local volume on Pages
 - Structured AST output with symbol names, kinds, and line ranges
 
 ### Multi-User Access Control

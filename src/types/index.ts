@@ -1,5 +1,5 @@
 export type ViewMode = 'grid' | 'list' | 'masonry'
-export type PanelType = 'landing' | 'files' | 'preview' | 'encryption' | 'compression' | 'collections' | 'faces' | 'map' | 'code' | 'search' | 'style' | 'accounts' | 'loose-groups' | 'sync' | 'webdash' | 'users' | 'dashboard' | 'settings' | 'trash' | 'activity' | 'favorites' | 'recent' | 'storage' | 'terminal' | 'processes' | 'disks' | 'permissions'
+export type PanelType = 'landing' | 'files' | 'preview' | 'encryption' | 'compression' | 'collections' | 'faces' | 'map' | 'code' | 'editor' | 'search' | 'style' | 'accounts' | 'loose-groups' | 'sync' | 'webdash' | 'users' | 'dashboard' | 'settings' | 'trash' | 'activity' | 'favorites' | 'recent' | 'storage' | 'terminal' | 'processes' | 'disks' | 'permissions'
 export type SidebarSection = 'tree' | 'locations' | 'collections' | 'people' | 'styles' | 'loose' | 'users' | 'sync' | 'dashboard' | 'landing' | 'tools'
 
 export interface ModuleInfo {
@@ -181,6 +181,25 @@ export interface ParseResult {
   symbols: CodeSymbol[]
   totalLines: number
   parseTimeMs: number
+}
+
+/** Text content of a managed file for the code editor. */
+export interface FileContent {
+  fileId: string
+  name: string
+  content: string
+  sizeBytes: number
+  truncated: boolean
+  hashBlake3?: string | null
+}
+
+/** Summary returned after saving edited content. */
+export interface SavedContent {
+  fileId: string
+  name: string
+  sizeBytes: number
+  hashBlake3?: string | null
+  modifiedAt: string
 }
 
 export interface User {
@@ -555,6 +574,7 @@ export const MODULE_METADATA: Record<PanelType, ModuleInfo> = {
   faces: { id: 'faces', label: 'PEOPLE', icon: '[+]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #0d0008 50%, #000000 100%)', description: 'AI face detection and clustering', requiresAuth: true },
   map: { id: 'map', label: 'MAP', icon: '[@]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #000a0d 50%, #000000 100%)', description: 'GPS-tagged files on MapLibre GL', requiresAuth: true },
   code: { id: 'code', label: 'CODE', icon: '[T]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #000d08 50%, #000000 100%)', description: 'Tree-sitter code intelligence', requiresAuth: true },
+  editor: { id: 'editor', label: 'EDITOR', icon: '[E]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #000d08 50%, #000000 100%)', description: 'Cross-device code editor with outline and syntax view', requiresAuth: true },
   sync: { id: 'sync', label: 'SYNC', icon: '[~]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #00080d 50%, #000000 100%)', description: 'Multi-backend cloud sync', requiresAuth: true },
   accounts: { id: 'accounts', label: 'ACCOUNTS', icon: '[@]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #0a0a0d 50%, #000000 100%)', description: 'Manage local and cloud accounts', requiresAuth: true },
   'loose-groups': { id: 'loose-groups', label: 'LOOSE', icon: '[%]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #0d0d00 50%, #000000 100%)', description: 'Ad-hoc file grouping', requiresAuth: true },

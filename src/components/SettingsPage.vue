@@ -51,7 +51,63 @@
       </div>
       <div class="setting-row">
         <span class="setting-label text-muted">API URL</span>
-        <span class="info-value mono">HTTP://LOCALHOST:3456</span>
+        <span class="info-value mono">{{ effectiveApiUrl }}</span>
+      </div>
+      <div class="setting-row" style="align-items:flex-start;">
+        <span class="setting-label text-muted">REMOTE<br/>DASHBOARD</span>
+        <div style="flex:1;display:flex;flex-direction:column;gap:6px;">
+          <div style="display:flex;gap:6px;">
+            <input
+              v-model="serverUrlDraft"
+              class="bw-input"
+              style="flex:1;"
+              placeholder="https://my-server:3456 (empty = auto)"
+              aria-label="Remote dashboard URL"
+              @keyup.enter="saveServerUrl"
+            />
+            <button class="bw-btn" @click="saveServerUrl">[SET]</button>
+            <button v-if="serverUrlDraft || currentServerUrl" class="bw-btn" @click="clearServerUrl" title="Forget the remote dashboard">[X]</button>
+          </div>
+          <p class="text-muted" style="font-size:9px;margin:0;">STATIC BUILD + YOUR OWN SERVER = FULL OAUTH, SYNC + QUOTA HERE. PAGE RELOADS TO RECONNECT.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3 class="section-title">[OAUTH] SUPABASE BROKER</h3>
+      <div class="setting-row">
+        <span class="setting-label text-muted">STATUS</span>
+        <span class="info-value">{{ supabaseStatus }}</span>
+      </div>
+      <div class="setting-row" style="align-items:flex-start;">
+        <span class="setting-label text-muted">PROJECT<br/>URL</span>
+        <input
+          v-model="supabaseUrlDraft"
+          class="bw-input"
+          style="flex:1;"
+          placeholder="https://xyzcompany.supabase.co"
+          aria-label="Supabase project URL"
+          autocomplete="off"
+        />
+      </div>
+      <div class="setting-row" style="align-items:flex-start;">
+        <span class="setting-label text-muted">ANON/<br/>PUBLISHABLE<br/>KEY</span>
+        <div style="flex:1;display:flex;flex-direction:column;gap:6px;">
+          <div style="display:flex;gap:6px;">
+            <input
+              v-model="supabaseKeyDraft"
+              class="bw-input"
+              style="flex:1;"
+              type="password"
+              placeholder="sb_publishable_… or eyJ…"
+              aria-label="Supabase anon key"
+              autocomplete="off"
+            />
+            <button class="bw-btn" @click="saveSupabase">[SET]</button>
+            <button v-if="supabaseConfiguredNow" class="bw-btn" @click="clearSupabase" title="Forget Supabase config">[X]</button>
+          </div>
+          <p class="text-muted" style="font-size:9px;margin:0;">STATIC BUILD OAUTH BROKER: GITHUB / GOOGLE / GITLAB LOGIN WITHOUT YOUR OWN SERVER. ENABLE THE PROVIDERS IN SUPABASE → AUTHENTICATION → SIGN-IN, AND ADD THIS PAGE'S URL TO REDIRECT URLS.</p>
+        </div>
       </div>
     </div>
 
@@ -155,7 +211,14 @@
 <script setup lang="ts">
 import { ref, inject, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
-import { isWebMode, isTauri } from '@/composables/useTauri'
+import { isWebMode, isTauri, getServerUrl, setServerUrl } from '@/composables/useTauri'
+import {
+  getSupabaseConfig,
+  setSupabaseConfig,
+  clearSupabaseConfig,
+  supabaseConfigured,
+  supabaseSignOut,
+} from '@/composables/useSupabase'
 import { wasmBackendActive } from '@/composables/useWasmBackend'
 import { ShortcutsKey } from '@/composables/shortcutsKey'
 import { useTouchConfig, type GestureType, type TouchAction } from '@/composables/useTouchConfig'
@@ -172,6 +235,44 @@ const activeTransport = computed(() => {
 const store = useAppStore()
 const shortcuts = inject(ShortcutsKey, null)
 const touchConfig = useTouchConfig()
+
+const currentServerUrl = computed(() => getServerUrl())
+const serverUrlDraft = ref(getServerUrl())
+const effectiveApiUrl = computed(() => {
+  if (currentServerUrl.value) return currentServerUrl.value.toUpperCase()
+  if (isTauri()) return 'TAURI IPC + HTTP://LOCALHOST:3456'
+  return 'HTTP://LOCALHOST:3456'
+})
+
+function saveServerUrl() {
+  setServerUrl(serverUrlDraft.value.trim())
+  window.location.reload()
+}
+
+function clearServerUrl() {
+  serverUrlDraft.value = ''
+  setServerUrl('')
+  window.location.reload()
+}
+
+const supabaseUrlDraft = ref(getSupabaseConfig().url)
+const supabaseKeyDraft = ref('')
+const supabaseConfiguredNow = computed(() => supabaseConfigured())
+const supabaseStatus = computed(() =>
+  supabaseConfiguredNow.value ? `CONFIGURED (${getSupabaseConfig().url})` : 'NOT CONFIGURED',
+)
+
+function saveSupabase() {
+  if (!supabaseUrlDraft.value.trim() || !supabaseKeyDraft.value.trim()) return
+  setSupabaseConfig(supabaseUrlDraft.value, supabaseKeyDraft.value)
+  supabaseKeyDraft.value = ''
+}
+
+async function clearSupabase() {
+  await supabaseSignOut().catch(() => {})
+  clearSupabaseConfig()
+  supabaseUrlDraft.value = ''
+}
 
 const rebindInputs: Record<string, HTMLInputElement> = {}
 const rebindingAction = ref<string | null>(null)

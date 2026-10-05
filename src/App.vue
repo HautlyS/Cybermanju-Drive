@@ -8,6 +8,7 @@ import { useDrag } from '@/composables/useDrag'
 import { useSwipe } from '@/composables/useSwipe'
 import { useTouchConfig, type TouchAction } from '@/composables/useTouchConfig'
 import { useWindowManager } from '@/composables/useWindowManager'
+import { finishSupabaseReturn } from '@/composables/useSupabase'
 import { defaultKpl, defaultKpd } from '@/keymaps'
 import { ShortcutsKey } from '@/composables/shortcutsKey'
 import DesktopShell from '@/components/DesktopShell.vue'
@@ -414,15 +415,36 @@ function toggleTerminal(event: KeyboardEvent) {
   wm.open('terminal')
 }
 
+/**
+ * Ctrl+E opens the code editor next to the terminal binding above.
+ * The editor itself handles Ctrl+S (save); Escape stays global.
+ */
+function openEditor(event: KeyboardEvent) {
+  if (!event.ctrlKey && !event.metaKey) return
+  if (event.shiftKey || event.altKey) return
+  if (event.key.toLowerCase() !== 'e') return
+  const target = event.target as HTMLElement | null
+  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return
+  event.preventDefault()
+  wm.open('editor')
+}
+
 onMounted(() => {
   store.currentPanel = 'landing'
   store.initialize()
+  // OAuth return (Supabase PKCE popup or full-redirect): exchange ?code=,
+  // stash the provider token, close popup returns.
+  void finishSupabaseReturn().then((handled) => {
+    if (handled) store.notifySuccess('OAuth return processed — token captured')
+  })
   window.addEventListener('cybermanju:upload', handleUpload)
   window.addEventListener('keydown', toggleTerminal)
+  window.addEventListener('keydown', openEditor)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', toggleTerminal)
+  window.removeEventListener('keydown', openEditor)
 })
 </script>
 

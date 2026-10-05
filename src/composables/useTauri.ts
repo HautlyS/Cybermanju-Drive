@@ -10,8 +10,19 @@ import { wasmOsDispatch, wasmSearchFiles, wasmBackendActive, wasmDbDispatch } fr
 // ── Module-level connection state ─────────────────────────────
 
 const AUTH_TOKEN_KEY = 'cybermanju.authToken'
+const SERVER_URL_KEY = 'cybermanju.serverUrl'
 
 let _serverUrl = ''
+
+// Restore a previously configured dashboard URL so a static build keeps
+// pointing at its server across reloads (this is what makes OAuth work
+// from the Pages build: with a server set, this is a REST client, not a
+// static host).
+try {
+  _serverUrl = (typeof localStorage !== 'undefined' && localStorage.getItem(SERVER_URL_KEY)) || ''
+} catch {
+  _serverUrl = ''
+}
 
 // Restore a previously issued JWT so a page reload stays authenticated.
 let _authToken = ''
@@ -24,6 +35,12 @@ try {
 /** Configure the Web Dashboard REST API base URL. */
 export function setServerUrl(url: string): void {
   _serverUrl = url.replace(/\/+$/, '')
+  try {
+    if (_serverUrl) localStorage.setItem(SERVER_URL_KEY, _serverUrl)
+    else localStorage.removeItem(SERVER_URL_KEY)
+  } catch {
+    // Storage unavailable — URL still works for this session
+  }
 }
 
 /** Configure (and persist) the Bearer token for JWT auth. */
@@ -725,6 +742,20 @@ const REST_ROUTES: Record<string, RestMapping> = {
     transformResponse: (raw) => transformResponseKeys(raw),
   },
 
+  // ── Managed file text content (code editor) ──
+  read_file_content: {
+    method: 'GET',
+    buildPath: (args) => `/api/files/${args.fileId}/content`,
+    transformResponse: (raw) => transformResponseKeys(raw),
+  },
+
+  write_file_content: {
+    method: 'PUT',
+    buildPath: (args) => `/api/files/${args.fileId}/content`,
+    transformRequest: (args) => ({ content: args.content }),
+    transformResponse: (raw) => transformResponseKeys(raw),
+  },
+
   // ── OS layer — cybsh, task table, compute, merged volume ──
   os_exec: {
     method: 'POST',
@@ -840,7 +871,7 @@ const REST_FIRST = new Set([
 // Commands the `cybermanju-drive-wasm` crate serves on a static host.
 const OS_WASM_COMMANDS = new Set([
   'os_exec', 'os_complete', 'os_stat', 'os_ls', 'os_du', 'os_df',
-  'os_ps', 'os_top', 'os_workers', 'os_jobs',
+  'os_ps', 'os_top', 'os_workers', 'os_jobs', 'os_write',
 ])
 
 /** Named frontend args → (dispatcher cmd, positional args) for the wasm backend. */
@@ -859,6 +890,7 @@ function wasmArgsForCommand(
     case 'os_top': return { cmd: 'top', args: {} }
     case 'os_workers': return { cmd: 'workers', args: {} }
     case 'os_jobs': return { cmd: 'jobs', args: {} }
+    case 'os_write': return { cmd: 'write', args: { path: args.path, content: args.content } }
     default: return { cmd: cmd.replace(/^os_/, ''), args }
   }
 }
@@ -934,8 +966,9 @@ const DB_WASM_ROUTES: Record<string, DbWasmRoute> = {
 /**
  * Connectivity probe for the static build: the worker holds credentials,
  * but the network call itself runs here (Workers *can* fetch — this just
- * keeps tokens next to the form that pasted them). Quiet by design: any
- * failure is `false`, and the UI explains per backend.
+ * keeps tokens next to the form that pasted them). Returns `true`/`false`
+ * on HTTP answers; THROWS on transport failure (offline, CORS-blocked,
+ * timeout) so the UI can tell "unreachable" apart from "wrong token".
  */
 async function probeStaticConnection(args: Record<string, unknown>): Promise<boolean> {
   const cfg = (args.config ?? {}) as Record<string, unknown>
@@ -943,16 +976,25 @@ async function probeStaticConnection(args: Record<string, unknown>): Promise<boo
   const backend = String(cfg.backendType ?? '')
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), 10000)
+  const blocked = (who: string): Error =>
+    new Error(
+      `network: ${who} is not reachable from this browser (offline, or the provider sends no CORS headers) — the token is still saved locally; live sync needs the desktop app, Docker image or dashboard server`
+    )
   try {
     switch (backend) {
       case 'local':
         return true
       case 'github': {
         if (!token) return false
-        const res = await fetch('https://api.github.com/user', {
-          headers: { Authorization: `token ${token}`, Accept: 'application/vnd.github+json' },
-          signal: ctrl.signal,
-        })
+        let res: Response
+        try {
+          res = await fetch('https://api.github.com/user', {
+            headers: { Authorization: `token ${token}`, Accept: 'application/vnd.github+json' },
+            signal: ctrl.signal,
+          })
+        } catch {
+          throw blocked('api.github.com')
+        }
         return res.ok
       }
       case 'gitlab': {
@@ -962,32 +1004,39 @@ async function probeStaticConnection(args: Record<string, unknown>): Promise<boo
         const base = typeof cfg.basePath === 'string' && /^https?:\/\//.test(cfg.basePath)
           ? cfg.basePath.replace(/\/+$/, '')
           : 'https://gitlab.com'
-        const res = await fetch(
-          `${base}/api/v4/projects/${encodeURIComponent(project)}`,
-          { headers: { 'PRIVATE-TOKEN': token }, signal: ctrl.signal },
-        )
+        let res: Response
+        try {
+          res = await fetch(
+            `${base}/api/v4/projects/${encodeURIComponent(project)}`,
+            { headers: { 'PRIVATE-TOKEN': token }, signal: ctrl.signal },
+          )
+        } catch {
+          throw blocked(base)
+        }
         return res.ok
       }
       case 'telegram': {
-        if (!token) return false
-        const res = await fetch(`https://api.telegram.org/bot${token}/getMe`, {
-          signal: ctrl.signal,
-        })
-        return res.ok
+        // api.telegram.org sends no Access-Control-Allow-Origin, so no
+        // browser — worker or main thread — can read the answer. Fail fast
+        // with the reason instead of a misleading AUTH FAILED.
+        throw blocked('api.telegram.org (no CORS headers)')
       }
       case 'googleDrive': {
         if (!token) return false
-        const res = await fetch('https://www.googleapis.com/drive/v3/about?fields=user', {
-          headers: { Authorization: `Bearer ${token}` },
-          signal: ctrl.signal,
-        })
+        let res: Response
+        try {
+          res = await fetch('https://www.googleapis.com/drive/v3/about?fields=user', {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: ctrl.signal,
+          })
+        } catch {
+          throw blocked('www.googleapis.com')
+        }
         return res.ok
       }
       default:
         return false
     }
-  } catch {
-    return false
   } finally {
     clearTimeout(timer)
   }

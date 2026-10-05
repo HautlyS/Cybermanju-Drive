@@ -45,6 +45,9 @@ thread_local! {
 
 struct DbHandle {
     db: RedbDatabase,
+    /// Retained so `db_snapshot`/`db_restore` can read and rewrite the full
+    /// file image. `None` on the in-memory fallback (nothing to snapshot).
+    backend: Option<OpfsBackend>,
 }
 
 // ─── JS bridges ────────────────────────────────────────────────────────
@@ -202,20 +205,20 @@ fn open_all_tables(db: &RedbDatabase) -> Result<(), String> {
 /// falls back to a process-local in-memory database with zero persistence.
 #[wasm_bindgen]
 pub async fn db_open() -> Result<JsValue, JsValue> {
-    let (db, backend) = match open_opfs_handle(DB_FILE).await {
+    let (db, backend_name, backend) = match open_opfs_handle(DB_FILE).await {
         Ok(handle) => {
             let backend = OpfsBackend::new(handle, DB_FILE);
             let db = redb::Builder::new()
-                .create_with_backend(backend)
+                .create_with_backend(backend.clone())
                 .map_err(|e| format!("network: redb open failed: {e}"))?;
-            (db, "opfs")
+            (db, "opfs", Some(backend))
         }
         Err(detail) => {
             let db = redb::Builder::new()
                 .create_with_backend(redb::backends::InMemoryBackend::new())
                 .map_err(|e| format!("network: in-memory open failed: {e}"))?;
             let _ = detail;
-            (db, "memory")
+            (db, "memory", None)
         }
     };
     if let Err(e) = open_all_tables(&db) {
@@ -226,11 +229,11 @@ pub async fn db_open() -> Result<JsValue, JsValue> {
         )));
     }
     DB.with(|cell| {
-        *cell.borrow_mut() = Some(DbHandle { db });
+        *cell.borrow_mut() = Some(DbHandle { db, backend });
     });
     Ok(JsValue::from_str(&envelope_json(
         true,
-        &serde_json::json!({ "backend": backend, "file": DB_FILE }),
+        &serde_json::json!({ "backend": backend_name, "file": DB_FILE }),
         None,
     )))
 }
@@ -845,6 +848,91 @@ pub fn db_dispatch(op: &str, args_json: &str) -> String {
 
 fn err_envelope(error: &str) -> String {
     envelope_json(false, &serde_json::Value::Null, Some(error.to_string()))
+}
+
+/// Whole-file image of the open database, for crash-recovery snapshots.
+/// The worker writes it to `cybermanju.backup.db` (plain async OPFS) on a
+/// timer and restores it over a missing/empty main file at boot.
+#[wasm_bindgen]
+pub fn db_snapshot() -> Result<JsValue, JsValue> {
+    let bytes: Vec<u8> = DB
+        .with(|cell| {
+            let borrow = cell.borrow();
+            let handle = borrow.as_ref().ok_or_else(|| {
+                "unavailable: database is not open (call db_open first)".to_string()
+            })?;
+            let backend = handle.backend.as_ref().ok_or_else(|| {
+                "unsupported: snapshots need the OPFS backend (in-memory database)".to_string()
+            })?;
+            let len = backend
+                .len()
+                .map_err(|e| format!("network: snapshot size failed: {e}"))?;
+            if len > 256 * 1024 * 1024 {
+                return Err("unsupported: database image exceeds 256 MiB snapshot cap".to_string());
+            }
+            backend
+                .read(0, len as usize)
+                .map_err(|e| format!("network: snapshot read failed: {e}"))
+        })
+        .map_err(JsValue::from_str)?;
+    let view = js_sys::Uint8Array::new_with_length(bytes.len() as u32);
+    view.copy_from(&bytes);
+    Ok(view.into())
+}
+
+/// Replace the database file with a snapshot image and reopen. The open
+/// handle is reused (dropped redb state first), so no new OPFS acquisition
+/// — and no second sync handle on the same file — is needed.
+#[wasm_bindgen]
+pub fn db_restore(data: &[u8]) -> String {
+    if data.is_empty() {
+        return err_envelope("invalid: refusing to restore an empty image");
+    }
+    if data.len() > 256 * 1024 * 1024 {
+        return err_envelope("unsupported: image exceeds 256 MiB snapshot cap");
+    }
+    let backend = DB.with(|cell| cell.borrow_mut().take().map(|h| h.backend));
+    let backend = match backend {
+        Some(Some(b)) => b,
+        _ => {
+            return err_envelope(
+                "unsupported: restore needs an open OPFS database (call db_open first)",
+            )
+        }
+    };
+    let reopened: Result<RedbDatabase, String> = (|| {
+        use redb::StorageBackend;
+        backend
+            .set_len(0)
+            .map_err(|e| format!("network: restore truncate failed: {e}"))?;
+        backend
+            .write(0, data)
+            .map_err(|e| format!("network: restore write failed: {e}"))?;
+        backend
+            .sync_data(false)
+            .map_err(|e| format!("network: restore flush failed: {e}"))?;
+        let db = redb::Builder::new()
+            .create_with_backend(backend.clone())
+            .map_err(|e| format!("network: restored database failed to open: {e}"))?;
+        open_all_tables(&db)?;
+        Ok(db)
+    })();
+    match reopened {
+        Ok(db) => {
+            DB.with(|cell| {
+                *cell.borrow_mut() = Some(DbHandle {
+                    db,
+                    backend: Some(backend),
+                })
+            });
+            envelope_json(
+                true,
+                &serde_json::json!({ "restoredBytes": data.len() }),
+                None,
+            )
+        }
+        Err(e) => err_envelope(&e),
+    }
 }
 
 fn get_disk(id: &str) -> Result<serde_json::Value, String> {

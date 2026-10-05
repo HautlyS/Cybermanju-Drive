@@ -27,6 +27,12 @@ const TerminalPanel = defineAsyncComponent(
   () => import('@/components/TerminalPanel.vue')
 )
 
+// The code editor is a second heavy panel (highlight overlay + outline), so
+// it is code-split like the terminal — fetched on first open, not on boot.
+const CodeEditorPanel = defineAsyncComponent(
+  () => import('@/components/CodeEditorPanel.vue')
+)
+
 export interface WindowState {
   id: string
   panelType: PanelType
@@ -52,6 +58,7 @@ const defaultSizes: SizeMap = {
   faces: { width: 600, height: 460 },
   map: { width: 720, height: 520 },
   code: { width: 650, height: 500 },
+  editor: { width: 980, height: 620 },
   users: { width: 520, height: 460 },
   sync: { width: 580, height: 440 },
   settings: { width: 560, height: 520 },
@@ -85,6 +92,7 @@ const panelComponentMap: Record<string, Component> = {
   faces: FaceGroupingPanel,
   map: MapView,
   code: CodeIntelligencePanel,
+  editor: CodeEditorPanel,
   users: UserManagementPanel,
   dashboard: WebDashboardPanel,
   sync: SyncPanel,

@@ -77,6 +77,10 @@ function argsToArgList(cmd: string, args: Record<string, unknown>): string[] {
       if (args.job) list.push(String(args.job))
       if (args.path) list.push(String(args.path))
       break
+    case 'write':
+      if (args.path) list.push(String(args.path))
+      list.push(String(args.content ?? ''))
+      break
     case 'search':
       if (args.query) list.push(String(args.query))
       break

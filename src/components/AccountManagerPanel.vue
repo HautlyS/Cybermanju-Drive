@@ -111,7 +111,7 @@
         </div>
 
         <!-- PKCE OAuth -->
-        <div v-if="isOauthCapable(cfg.backendType)" class="oauth-block">
+        <div v-if="isOauthCapable(cfg.backendType) && !staticHost" class="oauth-block">
           <div class="row-between">
             <span class="small">PKCE OAUTH — BROWSER APPROVAL, NO PASSWORD TYPED HERE</span>
             <button
@@ -124,6 +124,22 @@
           <p v-if="oauthMsg[cfg.id]" class="note">{{ oauthMsg[cfg.id] }}</p>
           <p v-if="oauthBusy === cfg.id" class="note">Approve in the opened browser tab — this panel polls the provider until credentials land. <button class="linklike" type="button" @click="cancelOauth">cancel</button></p>
           <p v-if="oauthUrl[cfg.id]" class="note">Popup blocked? Open manually: <span class="mono url">{{ oauthUrl[cfg.id] }}</span></p>
+        </div>
+
+        <!-- Supabase-brokered OAuth (static/offline builds: no dashboard) -->
+        <div v-if="isOauthCapable(cfg.backendType) && staticHost" class="oauth-block">
+          <div class="row-between">
+            <span class="small">OAUTH VIA SUPABASE — APPROVE AT THE PROVIDER, TOKEN LANDS HERE</span>
+            <button
+              class="ghost-btn xs primary"
+              type="button"
+              :disabled="sbBusy === cfg.id"
+              @click="supabaseConnect(cfg)"
+            >{{ sbBusy === cfg.id ? 'WAITING…' : 'CONNECT WITH OAUTH' }}</button>
+          </div>
+          <p v-if="sbMsg[cfg.id]" class="note">{{ sbMsg[cfg.id] }}</p>
+          <p v-if="sbBusy === cfg.id" class="note">Approve in the popup — polling for the provider token… <button class="linklike" type="button" @click="cancelSupabase">cancel</button></p>
+          <p v-if="!sbConfigured" class="note">Set SUPABASE URL + KEY in Settings → OAUTH first (enable {{ cfg.backendType }} under Supabase → Authentication → Sign-in).</p>
         </div>
 
         <!-- credentials -->
@@ -262,6 +278,15 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { isStaticHost } from '@/composables/useTauri'
 import { wasmDbBackend } from '@/composables/useWasmBackend'
+import {
+  getPendingOAuthConfig,
+  setPendingOAuthConfig,
+  startSupabaseOAuth,
+  supabaseConfigured,
+  supabaseProviderFor,
+  supabaseSession,
+  takeProviderTokenStash,
+} from '@/composables/useSupabase'
 import { SYNC_BACKEND_INFO, describeSyncError, isOauthCapable } from '@/types'
 import type { DiskRow, SyncBackendType, SyncConfig } from '@/types'
 
@@ -288,6 +313,10 @@ const oauthMsg = ref<Record<string, string>>({})
 const oauthUrl = ref<Record<string, string>>({})
 const quotaMsg = ref<Record<string, string>>({})
 const authState = ref<Record<string, { ok: boolean | null; detail: string }>>({})
+const sbBusy = ref<string | null>(null)
+const sbTimer = ref(0)
+const sbMsg = ref<Record<string, string>>({})
+const sbConfigured = computed(() => supabaseConfigured())
 
 const newAcctName = ref('')
 const newAcctType = ref('local')
@@ -395,7 +424,7 @@ function authGuidance(b: SyncBackendType): string {
     case 'googlePhotos':
       return 'Google accepts OAUTH only — there is no password login. CONNECT WITH OAUTH above.'
     case 'telegram':
-      return 'Telegram uses a bot token from @BotFather plus the chat id — no OAuth, no password.'
+      return 'Telegram uses a bot token from @BotFather plus the chat id — no OAuth, no password. Browsers cannot verify it (Telegram sends no CORS headers), so the demo saves it UNREACHABLE and live sync runs on desktop/Docker.'
     default:
       return 'Local directory needs no login — just the path.'
   }
@@ -426,13 +455,21 @@ function disksFor(configId: string): DiskRow[] {
 function authLabel(id: string): string {
   const s = authState.value[id]
   if (!s || s.ok === null) return 'UNTESTED'
-  return s.ok ? 'CONNECTED' : 'AUTH FAILED'
+  if (s.ok) return 'CONNECTED'
+  return isUnreachable(s.detail) ? 'UNREACHABLE' : 'AUTH FAILED'
 }
 
 function authClass(id: string): string {
   const s = authState.value[id]
   if (!s || s.ok === null) return ''
-  return s.ok ? 'ok' : 'bad'
+  if (s.ok) return 'ok'
+  return isUnreachable(s.detail) ? 'warn' : 'bad'
+}
+
+/** Transport failure (offline / CORS-blocked / timeout) is not a verdict
+ * on the token — label it so users don't rotate good credentials. */
+function isUnreachable(detail: string): boolean {
+  return /(^network:|\bCORS\b|blocked|abort|timed? ?out|Failed to fetch|Load failed)/i.test(detail)
 }
 
 function authDetail(id: string): string {
@@ -541,9 +578,11 @@ async function quota(cfg: SyncConfig) {
 async function oauthConnect(cfg: SyncConfig) {
   // No dashboard behind the static build means no server-side callback to
   // land credentials in — say so immediately instead of polling for 2 min.
+  // (If Settings → Remote Dashboard points at a server, this build is a
+  // REST client and this branch never runs.)
   if (staticHost) {
     oauthMsg.value[cfg.id] =
-      'OAuth needs the dashboard (or desktop app) for the server callback — in this offline demo, paste a token below instead.'
+      'OAuth needs a dashboard for the server callback — set REMOTE DASHBOARD in Settings to your server for full OAuth here, or paste a token below for the offline vault.'
     return
   }
   cancelOauth()
@@ -582,6 +621,84 @@ function cancelOauth() {
   if (oauthTimer.value) window.clearInterval(oauthTimer.value)
   oauthTimer.value = 0
   oauthBusy.value = null
+}
+
+/**
+ * Supabase-brokered OAuth (static builds): Supabase's server does the
+ * secret-holding exchange; the provider token lands in our session, we save
+ * it into the provider config and probe — CONNECTED.
+ */
+async function supabaseConnect(cfg: SyncConfig) {
+  cancelSupabase()
+  if (!supabaseConfigured()) {
+    sbMsg.value[cfg.id] =
+      'Set SUPABASE URL + KEY in Settings → OAUTH first (and enable this provider under Supabase → Authentication → Sign-in).'
+    return
+  }
+  setPendingOAuthConfig(cfg.id)
+  let url = ''
+  try {
+    ;({ url } = await startSupabaseOAuth(cfg.backendType))
+  } catch (e) {
+    sbMsg.value[cfg.id] = e instanceof Error ? e.message : String(e)
+    return
+  }
+  const popup = window.open(url, 'cyb_sb_oauth', 'width=620,height=720')
+  sbBusy.value = cfg.id
+  if (!popup) {
+    sbMsg.value[cfg.id] = 'Popup blocked — approving in this tab…'
+    window.location.href = url
+    return
+  }
+  sbMsg.value[cfg.id] = 'Approve at the provider in the popup — waiting for the token…'
+  let attempts = 0
+  sbTimer.value = window.setInterval(async () => {
+    attempts += 1
+    if (popup.closed) {
+      cancelSupabase()
+      sbMsg.value[cfg.id] = 'Popup closed before approval — retry, or paste a token below.'
+      return
+    }
+    let token = ''
+    try {
+      const session = await supabaseSession()
+      token = session?.provider_token ?? ''
+    } catch {
+      token = ''
+    }
+    if (token) {
+      cancelSupabase()
+      try { popup.close() } catch { /* already gone */ }
+      await finalizeSupabaseToken(cfg, token)
+      return
+    }
+    if (attempts >= 90) {
+      cancelSupabase()
+      sbMsg.value[cfg.id] = 'Timed out waiting for approval (3 min). Retry, or paste a token below.'
+    } else if (attempts % 10 === 0) {
+      sbMsg.value[cfg.id] = `Approve at the provider in the popup — waiting… (${attempts * 2}s)`
+    }
+  }, 2000)
+}
+
+function cancelSupabase() {
+  if (sbTimer.value) window.clearInterval(sbTimer.value)
+  sbTimer.value = 0
+  sbBusy.value = null
+}
+
+async function finalizeSupabaseToken(cfg: SyncConfig, token: string) {
+  const updated = { ...cfg, token }
+  const saved = await store.saveSyncConfig(updated)
+  const r = await store.probeSyncConnection({ ...(saved ?? cfg), token })
+  authState.value[cfg.id] = { ok: r.ok, detail: r.detail }
+  if (r.ok) {
+    sbMsg.value[cfg.id] = 'Connected — provider token verified.'
+    store.notifySuccess(`${cfg.name || cfg.backendType}: OAuth connected via Supabase`)
+  } else {
+    sbMsg.value[cfg.id] = `Token saved, but verification failed: ${r.detail}`
+  }
+  setPendingOAuthConfig(null)
 }
 
 async function attachDisk(diskId: string) {
@@ -664,16 +781,31 @@ async function addProvider(verify: boolean) {
 }
 
 onMounted(() => {
-  void refresh()
-  if (staticHost) {
+  void (async () => {
+    await refresh()
+    if (!staticHost) return
     void wasmDbBackend().then((b) => {
       dbBackend.value = b
     })
-  }
+    // Full-redirect resume: the return already stashed the provider token
+    // (App boot exchanges ?code=) — finish the link now configs are loaded.
+    const stash = takeProviderTokenStash()
+    const pending = getPendingOAuthConfig()
+    if (stash && pending) {
+      const cfg = store.syncConfigs.find(c => c.id === pending)
+      if (cfg && supabaseProviderFor(cfg.backendType) === stash.backend) {
+        sbMsg.value[cfg.id] = 'Approval received — verifying…'
+        await finalizeSupabaseToken(cfg, stash.providerToken)
+      } else {
+        setPendingOAuthConfig(null)
+      }
+    }
+  })()
 })
 
 onBeforeUnmount(() => {
   cancelOauth()
+  cancelSupabase()
 })
 </script>
 
@@ -762,6 +894,7 @@ onBeforeUnmount(() => {
 .auth-badge { font-size: 10px; font-weight: 700; border: 1px solid rgba(255, 255, 255, 0.3); color: rgba(255, 255, 255, 0.6); padding: 1px 6px; }
 .auth-badge.ok { color: #5af78e; border-color: rgba(90, 247, 142, 0.6); }
 .auth-badge.bad { color: #ff5f56; border-color: rgba(255, 95, 86, 0.6); }
+.auth-badge.warn { color: #f3f99d; border-color: rgba(243, 249, 157, 0.6); }
 
 .oauth-block { border: 1px dashed rgba(255, 255, 255, 0.25); padding: 8px; margin: 8px 0; }
 

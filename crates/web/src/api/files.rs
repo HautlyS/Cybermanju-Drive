@@ -226,3 +226,198 @@ fn write_file(db: &Database, file_id: &str, node: &FileNode) -> Result<(), Strin
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
+
+// ─── Text content (code editor) ────────────────────────────────────────────
+
+/// Largest file the editor will read or write in one call. Editing is for
+/// source text, not media: oversized files get an honest `too_large:` and
+/// the panel offers read-only preview instead.
+pub const MAX_CONTENT_BYTES: usize = 1024 * 1024;
+
+/// Resolve where a file's bytes live on this machine.
+fn stored_path(node: &FileNode) -> Result<&str, String> {
+    node.context_data
+        .as_ref()
+        .and_then(|ctx| ctx.get("original_path"))
+        .and_then(|v| v.as_str())
+        .filter(|p| !p.is_empty())
+        .ok_or_else(|| {
+            format!(
+                "not_found: '{}' has no stored bytes on this machine",
+                node.name
+            )
+        })
+}
+
+/// Read a file's text content for the editor.
+///
+/// Refuses encrypted files (`encrypted:` — ciphertext is not editable text),
+/// missing bytes (`not_found:`), oversized files (`too_large:`) and
+/// non-UTF-8 bytes (`binary:`) — never a silent mojibake.
+pub fn read_content(db: &Database, file_id: &str) -> Result<serde_json::Value, String> {
+    let node = read_file(db, file_id)?;
+    if node.file_type == "folder" {
+        return Err(format!("invalid: '{}' is a folder", node.name));
+    }
+    if node.encrypted {
+        return Err(format!(
+            "encrypted: '{}' is encrypted — decrypt it before editing",
+            node.name
+        ));
+    }
+    let path = stored_path(&node)?;
+    let bytes =
+        std::fs::read(path).map_err(|e| format!("not_found: stored file is unreadable: {e}"))?;
+    if bytes.len() > MAX_CONTENT_BYTES {
+        return Err(format!(
+            "too_large: '{}' is {} bytes, editor limit is {}",
+            node.name,
+            bytes.len(),
+            MAX_CONTENT_BYTES
+        ));
+    }
+    let content = String::from_utf8(bytes)
+        .map_err(|_| format!("binary: '{}' is not valid UTF-8 text", node.name))?;
+    Ok(serde_json::json!({
+        "fileId": node.id,
+        "name": node.name,
+        "content": content,
+        "sizeBytes": node.size_bytes,
+        "truncated": false,
+        "hashBlake3": node.hash_blake3,
+    }))
+}
+
+/// Overwrite a file's text content from the editor.
+///
+/// Snapshots a version first (best effort — a failed snapshot never blocks
+/// the save), then writes the bytes, refreshes `size_bytes` / `hash_blake3`
+/// / `modified_at`, and returns the updated summary. Same refusals as
+/// `read_content`, plus empty-write protection is left to the caller.
+pub fn write_content(
+    db: &Database,
+    file_id: &str,
+    content: &str,
+) -> Result<serde_json::Value, String> {
+    if content.len() > MAX_CONTENT_BYTES {
+        return Err(format!(
+            "too_large: content is {} bytes, editor limit is {}",
+            content.len(),
+            MAX_CONTENT_BYTES
+        ));
+    }
+    let mut node = read_file(db, file_id)?;
+    if node.file_type == "folder" {
+        return Err(format!("invalid: '{}' is a folder", node.name));
+    }
+    if node.encrypted {
+        return Err(format!(
+            "encrypted: '{}' is encrypted — decrypt it before editing",
+            node.name
+        ));
+    }
+    let path = stored_path(&node)?.to_string();
+
+    // Snapshot first so every save is undoable from File Versions.
+    let _ = super::versions::create(db, file_id);
+
+    std::fs::write(&path, content.as_bytes())
+        .map_err(|e| format!("not_found: stored file is not writable: {e}"))?;
+    node.size_bytes = content.len() as u64;
+    node.hash_blake3 = Some(blake3::hash(content.as_bytes()).to_hex().to_string());
+    node.modified_at = chrono::Utc::now().to_rfc3339();
+    write_file(db, file_id, &node)?;
+
+    Ok(serde_json::json!({
+        "fileId": node.id,
+        "name": node.name,
+        "sizeBytes": node.size_bytes,
+        "hashBlake3": node.hash_blake3,
+        "modifiedAt": node.modified_at,
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node_with_bytes(id: &str, name: &str, dir: &std::path::Path, bytes: &[u8]) -> FileNode {
+        let path = dir.join(format!("{id}.txt"));
+        std::fs::write(&path, bytes).expect("fixture");
+        FileNode {
+            id: id.to_string(),
+            name: name.to_string(),
+            file_type: "file".to_string(),
+            parent_id: None,
+            size_bytes: bytes.len() as u64,
+            mime_type: Some("text/plain".to_string()),
+            hash_blake3: None,
+            encrypted: false,
+            encryption_algorithm: None,
+            compression_layers: Vec::new(),
+            thumbnail_path: None,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            modified_at: "2026-01-01T00:00:00Z".to_string(),
+            context_data: Some(serde_json::json!({
+                "original_path": path.to_string_lossy().to_string(),
+            })),
+            tags: Vec::new(),
+            collection_ids: Vec::new(),
+            face_group_ids: Vec::new(),
+            loose_group_ids: Vec::new(),
+            gps_lat: None,
+            gps_lon: None,
+        }
+    }
+
+    fn temp_db() -> (Database, tempfile::TempDir) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = Database::new(dir.path().join("t.redb").to_str().expect("utf8")).expect("db");
+        (db, dir)
+    }
+
+    #[test]
+    fn content_round_trips_and_rejects_non_text() {
+        let (db, dir) = temp_db();
+        let files_dir = dir.path().join("files");
+        std::fs::create_dir_all(&files_dir).expect("mkdir");
+        let node = node_with_bytes("f1", "a.rs", &files_dir, b"fn a() {}");
+        write_file(&db, "f1", &node).expect("seed");
+
+        let out = read_content(&db, "f1").expect("read");
+        assert_eq!(out["content"], "fn a() {}");
+
+        let saved = write_content(&db, "f1", "fn b() {}").expect("write");
+        assert_eq!(saved["sizeBytes"], 9);
+        let out = read_content(&db, "f1").expect("re-read");
+        assert_eq!(out["content"], "fn b() {}");
+
+        let bin = node_with_bytes("f2", "b.bin", &files_dir, &[0xff, 0xfe, 0x00]);
+        write_file(&db, "f2", &bin).expect("seed");
+        let err = read_content(&db, "f2").expect_err("binary");
+        assert!(err.starts_with("binary:"), "{err}");
+    }
+
+    #[test]
+    fn content_refuses_encrypted_and_missing_bytes() {
+        let (db, dir) = temp_db();
+        let files_dir = dir.path().join("files");
+        std::fs::create_dir_all(&files_dir).expect("mkdir");
+        let mut node = node_with_bytes("f1", "a.rs", &files_dir, b"hi");
+        node.encrypted = true;
+        write_file(&db, "f1", &node).expect("seed");
+        assert!(read_content(&db, "f1")
+            .expect_err("enc")
+            .starts_with("encrypted:"));
+        assert!(write_content(&db, "f1", "x")
+            .expect_err("enc")
+            .starts_with("encrypted:"));
+
+        node.encrypted = false;
+        node.context_data = None;
+        write_file(&db, "f1", &node).expect("seed");
+        assert!(read_content(&db, "f1")
+            .expect_err("gone")
+            .starts_with("not_found:"));
+    }
+}

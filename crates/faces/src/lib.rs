@@ -1512,6 +1512,7 @@ pub fn detect_faces_in_file(file_node: &FileNode) -> Result<Vec<Vec<f32>>> {
             }
         }
     }
+    #[cfg(not(feature = "onnx-face"))]
     // No ONNX feature: honest empty result. The legacy BLAKE3 pseudo-embedding
     // helper is retained for tests only (see `blake3_pseudo_embedding_for_tests`).
     Ok(Vec::new())

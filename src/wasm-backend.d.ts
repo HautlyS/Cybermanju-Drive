@@ -10,4 +10,6 @@ declare module 'cybermanju-drive-wasm' {
   export function os_dispatch(cmd: string, argsJson: string): string;
   export function db_open(): Promise<string>;
   export function db_dispatch(op: string, argsJson: string): string;
+  export function db_snapshot(): unknown;
+  export function db_restore(data: Uint8Array): string;
 }

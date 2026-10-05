@@ -983,6 +983,22 @@ fn route_request(
         ["api", "files", id, "preview"] if method == "GET" => {
             api_response(api::files::preview(db, id), origin)
         }
+        // ─── File text content (code editor) ────────────────────
+        // Reads/writes the bytes at `context_data.original_path`, with a
+        // version snapshot before every overwrite. Refusals carry prefixes
+        // (`encrypted:`, `binary:`, `too_large:`, `not_found:`).
+        ["api", "files", id, "content"] if method == "GET" => {
+            api_response(api::files::read_content(db, id), origin)
+        }
+        ["api", "files", id, "content"] if method == "PUT" => {
+            #[derive(Deserialize)]
+            struct ContentBody {
+                #[serde(default)]
+                content: String,
+            }
+            let req: ContentBody = json_body!(body, origin);
+            api_response(api::files::write_content(db, id, &req.content), origin)
+        }
         ["api", "files", id, "versions"] if method == "GET" => {
             api_response(api::versions::list(db, id), origin)
         }

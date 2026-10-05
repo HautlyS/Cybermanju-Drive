@@ -25,6 +25,8 @@ mod backends_contract;
 #[cfg(test)]
 mod disk;
 #[cfg(test)]
+mod editor;
+#[cfg(test)]
 mod os;
 #[cfg(test)]
 mod repair;

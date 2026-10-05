@@ -1,6 +1,8 @@
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import { resolve } from "path";
+import { existsSync } from "fs";
+import wasmStub from "./vite-plugin-wasm-stub";
 
 // Determine the base path:
 // - GitHub Pages: /cybermanju-drive/ (lowercase repo slug)
@@ -14,14 +16,17 @@ const base =
     : "/");
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue(), wasmStub()],
   resolve: {
     alias: {
       "@": resolve(__dirname, "src"),
       // wasm-pack output (`wasm-pack build crates/drive-wasm --target web
       // --out-dir crates/drive-wasm/pkg`) — the integrated backend for the
-      // static/GH-Pages bundle.
-      "cybermanju-drive-wasm": resolve(__dirname, "crates/drive-wasm/pkg"),
+      // static/GH-Pages bundle. Only aliased when the pkg exists; otherwise
+      // the stub plugin below satisfies the import (Docker frontend stage).
+      ...(existsSync(resolve(__dirname, "crates/drive-wasm/pkg"))
+        ? { "cybermanju-drive-wasm": resolve(__dirname, "crates/drive-wasm/pkg") }
+        : {}),
     },
   },
   base,
