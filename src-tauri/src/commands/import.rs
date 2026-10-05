@@ -531,9 +531,25 @@ pub fn import_from_url(
     let now = Utc::now().to_rfc3339();
     let file_id = uuid::Uuid::new_v4().to_string();
 
+    // Persist the downloaded bytes so the FileNode describes a file that
+    // actually exists (AUDIT F19). Layout: `./imports/{id}_{sanitized-name}`.
+    let safe_name: String = file_name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    let stored_path = std::path::Path::new("imports").join(format!("{}_{}", file_id, safe_name));
+    if let Some(parent) = stored_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create imports dir: {}", e))?;
+    }
+    std::fs::write(&stored_path, &bytes).map_err(|e| format!("Failed to store downloaded file: {}", e))?;
+
     let mut context = serde_json::Map::new();
     context.insert("source".to_string(), serde_json::json!("url_import"));
     context.insert("original_url".to_string(), serde_json::json!(url));
+    context.insert(
+        "original_path".to_string(),
+        serde_json::json!(stored_path.to_string_lossy().to_string()),
+    );
 
     let file_node = FileNode {
         id: file_id.clone(),

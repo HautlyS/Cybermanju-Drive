@@ -235,3 +235,23 @@ platform builds → deploy-pages), plus new route/unit tests added under
 
 2 → search/import · 3 → tree-sitter · 4 → WASM/GH Pages · 5 → faces/Telegram
 honesty · 6 → workspace-wide CI + stale `src-tauri/Cargo.lock` deletion · 7 → docs.
+
+### OS push — 2026-10-05 (no toolchain on box; static review, CI must prove)
+
+- Disk/volume (AGENT-6): done + verified in-brief; Tauri `commands::disk::*7` registered; `REST_FIRST` covers desktop.
+- Durability (AGENT-7): modules + 202 task routes existed; this pass added the missing client
+  surface (`repair_status/tasks/health/run/rebuild/gc`, `scrub_run/runs`, `lease_acquire/release/status`
+  in `REST_ROUTES` + `REST_FIRST` + Pinia + `src/types`), ticked brief `[x]`.
+- OS/terminal (AGENT-8): `cybsh`/Kernel/tasks/compute/os_api/WASM/dock/hotkey/statusbar existed;
+  this pass added sync-job + durability store surface, full `SyncPanel.vue` wizard
+  (create/test/start/cancel/quota/restore/remote-delete/browse, OAuth, striped placement,
+  `describeSyncError` hints), Settings active-transport display, `VITE_TRANSPORT` typing,
+  `user-scalable=no` removal, WASM base `/cybermanju-drive/`.
+- Honesty: F7 closed (no BLAKE3 pseudo-faces — empty set + log), F19 closed
+  (`import_from_url` persists bytes to `imports/{id}_{name}` + `original_path`),
+  tree-sitter claim corrected in README (heuristic regex, grammar integration pending),
+  `cybsh sync start` refusal now points at `POST /api/sync/start → 202` (R8-1 resolved as documented).
+- Docs: `docs/OPERATIONS.md` added; README + ARCHITECTURE §12 cover disks/volume/cybsh/tasks/compute;
+  version single-source verified (`package.json` truth; `/api` version uses `CARGO_PKG_VERSION`).
+- Left for CI (no `cargo`/`node_modules` on this box): workspace fmt/clippy/test,
+  `npm run typecheck/lint`, `scripts/os-acceptance.sh 0/1/2`, `scripts/check-version.sh`.

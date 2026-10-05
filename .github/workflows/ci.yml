@@ -168,7 +168,7 @@ jobs:
           tool: wasm-pack
 
       - name: wasm-pack build (assertion)
-        run: wasm-pack build crates/drive-wasm --target web
+        run: wasm-pack build crates/drive-wasm --target web --out-dir pkg
 
       - name: Setup Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -189,8 +189,11 @@ jobs:
       - name: Frontend unit tests
         run: npm test
 
+      # Keep the freshly built pkg in place so the vite step's alias to
+      # crates/drive-wasm/pkg resolves to the wasm backend (integrated
+      # into the dist-wasm bundle rather than fetched at runtime).
       - name: Build WASM bundle
-        run: npm run build:wasm
+        run: npm run build:wasm:frontend
 
       - name: Upload WASM artifacts
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

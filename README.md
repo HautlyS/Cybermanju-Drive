@@ -1,6 +1,6 @@
 # Cybermanju Drive
 
-> Quantum-resistant encrypted file manager with AI face grouping, triple-layer compression, code intelligence, GPS map view, web dashboard, and multi-user access control.
+> Quantum-resistant encrypted file manager with AI face grouping, triple-layer compression, code intelligence, GPS map view, web dashboard, and multi-user access control — plus a decentralized OS layer: sized `.cybermanju` disks merged into one volume, Reed–Solomon durability, and a real `cybsh` system terminal.
 
 **Version:** 0.1.0  
 **Identifier:** `com.cybermanju.drive`  
@@ -79,6 +79,16 @@
 - Works in Docker containers and ZimaOS NAS devices
 - Browser access from any device on the network
 
+### Decentralized OS (cybsh + disks + durability)
+- **`.cybermanju` disks** — per-provider virtual disks with choosable size (`CYBMJU1` sealed superblock); `create/attach/detach/resize/check/destroy`
+- **One merged volume** — spanned placement, `df` grows on attach, `disk full:` admission before any upload, HTTP block API `GET/PUT /api/volume/block/{lba}` (FUSE on Linux desktop only)
+- **`cybsh` terminal** — real server-side shell (`help/ls/cd/cat/cp/mv/rm/mkdir/stat/du/df/disk/providers/quota/sync/scrub/repair/gc/lease/ps/top/kill/jobs/compute/workers/keygen/search`, pipes, `&&/||/;`, `--json`, history, tab-completion); Terminal panel + `Ctrl+\``, same shell on desktop/web/Pages (WASM)
+- **Tasks & compute** — `ps/top/kill`, local rayon + per-provider `Capabilities.compute` slots; more providers = more parallelism
+- **Durability** — BLAKE3 scrub, replica/RS repair, `rebuild-from-remote` (survives laptop loss), refcount GC (never deletes referenced chunk), single-writer leases (`conflict:`)
+- Sync runs are async: `POST /api/sync/start → 202 {jobId}`, poll `GET /api/sync/jobs/{jobId}`; error prefixes `auth:/rate_limited:/not_found:/unsupported:/too_large:/integrity:/network:` mapped to UI hints
+- Honest limits: ONNX faces return empty (never fabricated); code parsing is heuristic regex (tree-sitter grammar integration pending); Telegram/Photos delete return `unsupported:`; `sync start` in `cybsh` points at the 202 job API
+- Ops: see `docs/OPERATIONS.md` (env, backup, TLS proxy, health/readyz) and `docs/SECURITY.md`
+
 ---
 
 ## Tech Stack
@@ -101,8 +111,10 @@
 | Hashing | BLAKE3 | 1 |
 | Content ID | UUID v4 | 1 |
 | ML Inference | ort (ONNX Runtime) | 2.0.0-rc.12 |
-| Code Parsing | tree-sitter | 0.24 |
+| Code Parsing | heuristic regex (tree-sitter-shaped JSON; grammar integration pending) | — |
 | EXIF | kamadak-exif | 0.5 |
+| OS shell | cybsh (server-side) + WASM dispatcher | — |
+| Erasure coding | reed-solomon-erasure (k+m) | — |
 | Image Processing | image | 0.25 |
 | MIME Detection | infer + mime_guess | 0.16 / 2 |
 

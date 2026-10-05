@@ -5,6 +5,7 @@
 // In Web mode: calls the Web Dashboard REST API (port 3456 by default)
 
 import type { FileNode } from '@/types'
+import { wasmOsDispatch, wasmSearchFiles, wasmBackendActive } from './useWasmBackend'
 
 // ── Module-level connection state ─────────────────────────────
 
@@ -57,6 +58,18 @@ export function isWebMode(): boolean {
 }
 
 // ── REST helpers ─────────────────────────────────────────────
+
+/**
+ * True when the app is served from a static host (GitHub Pages / WASM pack)
+ * with no dashboard behind it. On those origins every REST call would hit
+ * `localhost:3456` and die with ERR_CONNECTION_REFUSED, so the OS layer is
+ * routed through the `cybermanju-drive-wasm` crate instead.
+ */
+export function isStaticHost(): boolean {
+  if (typeof window === 'undefined') return false
+  if (window.location.port === '3456' || _serverUrl) return false
+  return true
+}
 
 /** Resolve the base URL for REST calls. */
 function getBaseUrl(): string {
@@ -582,6 +595,110 @@ const REST_ROUTES: Record<string, RestMapping> = {
     transformRequest: (args) => ({ config: args.config, prefix: args.prefix ?? '' }),
   },
 
+  get_sync_job: {
+    method: 'GET',
+    buildPath: (args) => `/api/sync/jobs/${args.jobId}`,
+  },
+
+  list_sync_runs: {
+    method: 'GET',
+    buildPath: () => '/api/sync/runs',
+  },
+
+  get_sync_status: {
+    method: 'GET',
+    buildPath: () => '/api/sync/status',
+  },
+
+  restore_sync_file: {
+    method: 'POST',
+    buildPath: () => '/api/sync/restore',
+    transformRequest: (args) => ({
+      configId: args.configId,
+      fileId: args.fileId,
+      remotePath: args.remotePath,
+      destPath: args.destPath,
+    }),
+  },
+
+  delete_remote_file: {
+    method: 'DELETE',
+    buildPath: () => '/api/sync/remote',
+    transformRequest: (args) => ({ configId: args.configId, remotePath: args.remotePath }),
+  },
+
+  get_sync_usage: {
+    method: 'GET',
+    buildPath: (args) => `/api/sync/usage/${args.configId}`,
+  },
+
+  oauth_start: {
+    method: 'GET',
+    buildPath: (args) => `/api/sync/oauth/${args.provider}/start?configId=${encodeURIComponent(String(args.configId ?? ''))}`,
+  },
+
+  // ── Durability (AGENT-7): scrub / repair / gc / leases ──
+  repair_status: {
+    method: 'GET',
+    buildPath: () => '/api/repair/status',
+  },
+
+  repair_tasks: {
+    method: 'GET',
+    buildPath: () => '/api/repair/tasks',
+  },
+
+  repair_health: {
+    method: 'GET',
+    buildPath: () => '/api/repair/health',
+  },
+
+  repair_run: {
+    method: 'POST',
+    buildPath: () => '/api/repair/run',
+    transformRequest: (args) => ({ findings: args.findings ?? [] }),
+  },
+
+  repair_rebuild: {
+    method: 'POST',
+    buildPath: () => '/api/repair/rebuild',
+    transformRequest: () => ({}),
+  },
+
+  repair_gc: {
+    method: 'POST',
+    buildPath: () => '/api/repair/gc',
+    transformRequest: (args) => ({ dryRun: args.dryRun ?? false, graceSecs: args.graceSecs }),
+  },
+
+  scrub_run: {
+    method: 'POST',
+    buildPath: () => '/api/scrub/run',
+    transformRequest: () => ({}),
+  },
+
+  scrub_runs: {
+    method: 'GET',
+    buildPath: () => '/api/scrub/runs',
+  },
+
+  lease_acquire: {
+    method: 'POST',
+    buildPath: () => '/api/lease/acquire',
+    transformRequest: (args) => ({ holder: args.holder, scope: args.scope ?? 'volume', ttlSecs: args.ttlSecs ?? 60 }),
+  },
+
+  lease_release: {
+    method: 'POST',
+    buildPath: () => '/api/lease/release',
+    transformRequest: (args) => ({ holder: args.holder, scope: args.scope ?? 'volume' }),
+  },
+
+  lease_status: {
+    method: 'GET',
+    buildPath: (args) => (args.scope ? `/api/lease/status/${encodeURIComponent(String(args.scope))}` : '/api/lease/status'),
+  },
+
   // ── Search (paginated) ───────────────────────────────────
   search_files_paginated: {
     method: 'GET',
@@ -700,7 +817,38 @@ const REST_FIRST = new Set([
   'os_top', 'os_workers', 'os_jobs',
   'list_disks', 'get_disk', 'create_disk', 'attach_disk', 'detach_disk',
   'resize_disk', 'destroy_disk', 'check_disk', 'volume_df',
+  'get_sync_job', 'list_sync_runs', 'get_sync_status', 'restore_sync_file',
+  'delete_remote_file', 'get_sync_usage', 'oauth_start',
+  'repair_status', 'repair_tasks', 'repair_health', 'repair_run',
+  'repair_rebuild', 'repair_gc', 'scrub_run', 'scrub_runs',
+  'lease_acquire', 'lease_release', 'lease_status',
 ])
+
+// Commands the `cybermanju-drive-wasm` crate serves on a static host.
+const OS_WASM_COMMANDS = new Set([
+  'os_exec', 'os_complete', 'os_stat', 'os_ls', 'os_du', 'os_df',
+  'os_ps', 'os_top', 'os_workers', 'os_jobs',
+])
+
+/** Named frontend args → (dispatcher cmd, positional args) for the wasm backend. */
+function wasmArgsForCommand(
+  cmd: string,
+  args: Record<string, unknown>
+): { cmd: string; args: Record<string, unknown> } {
+  switch (cmd) {
+    case 'os_exec': return { cmd: 'exec', args: { line: args.line } }
+    case 'os_complete': return { cmd: 'complete', args: { prefix: args.prefix } }
+    case 'os_stat': return { cmd: 'stat', args: { path: args.path } }
+    case 'os_ls': return { cmd: 'ls', args: { path: args.path } }
+    case 'os_du': return { cmd: 'du', args: { path: args.path } }
+    case 'os_df': return { cmd: 'df', args: {} }
+    case 'os_ps': return { cmd: 'ps', args: {} }
+    case 'os_top': return { cmd: 'top', args: {} }
+    case 'os_workers': return { cmd: 'workers', args: {} }
+    case 'os_jobs': return { cmd: 'jobs', args: {} }
+    default: return { cmd: cmd.replace(/^os_/, ''), args }
+  }
+}
 
 /** The core invoke — works in both Tauri and Web modes. */
 export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -709,6 +857,33 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
     // ── Tauri IPC path ────────────────────────────────────
     const core = await import('@tauri-apps/api/core')
     return core.invoke<T>(cmd, args)
+  }
+
+  // ── Static host (GitHub Pages / WASM pack) path ─────────
+  // No dashboard exists behind the page, so anything the wasm backend
+  // serves goes there; anything else refuses fast with one clear error
+  // instead of a volley of ERR_CONNECTION_REFUSED fetches.
+  if (isStaticHost() && (OS_WASM_COMMANDS.has(cmd) || mapping)) {
+    if (OS_WASM_COMMANDS.has(cmd)) {
+      const wasmArgs = wasmArgsForCommand(cmd, args ?? {})
+      const raw = await wasmOsDispatch(wasmArgs.cmd, wasmArgs.args)
+      return raw as T
+    }
+    if (cmd === 'search_files') {
+      const hits = await wasmSearchFiles(String(args?.query ?? ''))
+      return hits.map(h => ({
+        fileId: h.path,
+        fileName: h.path.split('/').pop() ?? h.path,
+        score: h.score,
+        snippet: '',
+      })) as unknown as T
+    }
+    // Everything else (files, accounts, collections, sync, …) is
+    // database-backed and has no wasm implementation.
+    throw new Error(
+      `[WASM Mode] "${cmd}" needs the Cybermanju dashboard (REST API on port 3456). ` +
+      'This static build runs the browser sandbox — the OS shell, task table and volume tools work, but file storage requires the desktop app, Docker image or dashboard server.'
+    )
   }
 
   // ── Web / REST path ────────────────────────────────────

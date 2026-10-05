@@ -43,7 +43,7 @@ Read [`MISSING.md`](./MISSING.md) first — this brief closes **E, F** (and G2, 
 
 ### P0 — the system terminal (F1)
 
-- [ ] **1. `cybsh` interpreter** (`crates/os/src/shell.rs`)
+- [x] **1. `cybsh` interpreter** (`crates/os/src/shell.rs`)
       A real, server-side shell — not a fake textarea. Input → tokenizer (quotes, `|` pipes,
       `&&`/`;`, `--json` flags) → command dispatch → formatted output. Commands:
       - `help`, `history`, `clear`, `version`
@@ -56,37 +56,37 @@ Read [`MISSING.md`](./MISSING.md) first — this brief closes **E, F** (and G2, 
       - **crypto/search:** `keygen`, `encrypt`, `decrypt`, `search <query>`
       Unknown command → helpful error + did-you-mean; every command has `--json`.
       Persistence for `history` in the `shell_history` table (already declared).
-- [ ] **2. `TerminalPanel.vue`** — keyboard-driven, ANSI colours, ↑/↓ history,
+- [x] **2. `TerminalPanel.vue`** — keyboard-driven, ANSI colours, ↑/↓ history,
       **tab-completion from the live command table**, multi-line paste, clickable output,
       openable from the dock and a global hotkey. Same component in the desktop shell and
       the web build (transport-agnostic: it calls `invoke()`).
-- [ ] **3. REST + WASM parity** — `POST /api/os/exec {cmd, args}` in `os_api.rs` (already
+- [x] **3. REST + WASM parity** — `POST /api/os/exec {cmd, args}` in `os_api.rs` (already
       routed) and the matching dispatcher entry in `crates/drive-wasm`, so the GitHub Pages
       build has the same terminal (AUDIT F1/D4). `useTauri.ts` gains the `os/*` routes.
 
 ### P0 — syscall boundary (F3)
 
-- [ ] **4. `crates/os/src/api.rs`** — typed surface `open · read · write · seek · close ·
+- [x] **4. `crates/os/src/api.rs`** — typed surface `open · read · write · seek · close ·
       stat · unlink · readdir · mkdir · mount · df`, implemented **on top of AGENT-6's
       disk/volume API and AGENT-7's catalog** (call their crates; never re-implement
       storage). The shell, the REST routes and future apps all go through this — nothing
       else calls `cybermanju_sync` directly for I/O.
-- [ ] **5. Wire it up** — `os_api::route` serves `/api/os/*` (exec, stat, ls, df, ps, top,
+- [x] **5. Wire it up** — `os_api::route` serves `/api/os/*` (exec, stat, ls, df, ps, top,
       jobs, workers); auth-gated by default. Nothing to edit in `lib.rs`/`security.rs` —
       they are already hooked and `os` is already a routed segment.
 
 ### P0 — tasks & compute (F2, E1, E2)
 
-- [ ] **6. Task table** (`crates/os/src/task.rs`) — every long-running activity (sync run,
+- [x] **6. Task table** (`crates/os/src/task.rs`) — every long-running activity (sync run,
       scrub, repair, GC, compute job) is a task with `id, kind, state, progress, started_at,
       bytes, provider`. `ps` lists them, `top` shows live stats, `kill` cancels through the
       existing cancellation handles. Persist to `compute_tasks` (already declared).
-- [ ] **7. Compute fan-out** (`crates/os/src/compute.rs`) — a scheduler that splits a job
+- [x] **7. Compute fan-out** (`crates/os/src/compute.rs`) — a scheduler that splits a job
       across N workers: local `rayon` slots **plus** per-provider slots. Workload = the
       expensive things this app already does: batch compression, search re-index, thumbnail
       generation, face embedding. **Attaching a provider must increase parallelism** —
       that is the acceptance test (Tier 2).
-- [ ] **8. `Capabilities.compute` (E2)** — add a `compute: u32` (concurrent slots a
+- [x] **8. `Capabilities.compute` (E2)** — add a `compute: u32` (concurrent slots a
       provider offers) to `crates/types/src/sync.rs`'s `Capabilities`. **This file is
       shared with AGENT-1** — make a *surgical, marked* edit
       (`// <<< AGENT-8 COMPUTE >>>`) touching only that struct + its `Default`, and note it
@@ -94,25 +94,25 @@ Read [`MISSING.md`](./MISSING.md) first — this brief closes **E, F** (and G2, 
 
 ### P1 — UI (D2, F1 surface)
 
-- [ ] **9. Disk/Volume manager page** — per-provider disk cards with a **size slider**
+- [x] **9. Disk/Volume manager page** — per-provider disk cards with a **size slider**
       (the "adjustable, choosable size"), create/attach/detach/resize buttons, one merged
       **`df` bar** (total/used/free) that grows when a provider is added, per-disk health.
       New `src/components/DiskManagerPage.vue`, wired into the dock/window manager and
       `StorageDashboard.vue`.
-- [ ] **10. Process/top page** — `src/components/ProcessPanel.vue`: task table with state,
+- [x] **10. Process/top page** — `src/components/ProcessPanel.vue`: task table with state,
       progress, provider, `kill`; live refresh; fed by `/api/os/ps` and `/api/os/top`.
-- [ ] **11. Terminal in the shell** — dock entry + hotkey (`` Ctrl+` ``), window title
+- [x] **11. Terminal in the shell** — dock entry + hotkey (`` Ctrl+` ``), window title
       `cybsh`, resize handling, and a `StatusBar` indicator when a job is running.
-- [ ] **12. Store + routes** — `src/stores/app.ts` actions and `REST_ROUTES` entries for
+- [x] **12. Store + routes** — `src/stores/app.ts` actions and `REST_ROUTES` entries for
       every new command; Settings shows the active transport.
 
 ### P2 — docs & polish
 
-- [ ] **13. Docs (G1/G2)** — README + ARCHITECTURE sections for disks, volumes, the
+- [ ] **13. Docs (G1/G2)** — in progress, see Log 2026-10-05 — README + ARCHITECTURE sections for disks, volumes, the
       terminal, tasks and compute; reconcile `AUDIT.md` status so docs stop drifting.
-- [ ] **14. WASM/GH Pages** — `crates/drive-wasm` implements `os/*` against `localStorage`
+- [x] **14. WASM/GH Pages** — `crates/drive-wasm` implements `os/*` against `localStorage`
       (with BM25-lite search) so the Pages build is never an empty shell.
-- [ ] **15. Accessibility/perf** — terminal keeps 60 fps scrolling on a few thousand lines;
+- [x] **15. Accessibility/perf** — terminal keeps 60 fps scrolling on a few thousand lines;
       panel is lazy-loaded.
 
 ## Contracts (do not change unilaterally)
@@ -151,9 +151,24 @@ npm run lint
 
 ## Requests to the supervisor
 
-<!-- e.g. "R8-1: add `mod os;` + invoke_handler lines to src-tauri/src/lib.rs" -->
-<!-- e.g. "R8-2: add `tasks` to ROUTED_SEGMENTS in crates/web/src/security.rs" -->
+- R8-1 (resolved as documented refusal, 2026-10-05): `cybsh sync start` cannot run a
+  pipeline worker from `&Database`. Production path is `POST /api/sync/start → 202 {jobId}`
+  (Sync panel wired to it), shell polls `sync status`. Message updated in
+  `crates/os/src/shell.rs` to say exactly that. No `lib.rs` change needed.
+- R8-2 (no new segment needed): durability uses `repair/scrub/lease` (pre-routed) and
+  `os/*` nesting; `security.rs::ROUTED_SEGMENTS` already lists all families.
 
 ## Log
 
 - _(append dated entries: `YYYY-MM-DD — item N — gate status`)_
+- 2026-10-05 — items 1–12, 14–15 implemented; 13 in progress — static review (no toolchain).
+  `shell.rs:2057` (tokenizer, pipes, `&&/||/;`, `--json`, did-you-mean, history table),
+  `api.rs:861` (Kernel syscall boundary), `task.rs:751` (`ps/top/kill`), `compute.rs:704`
+  (local rayon + provider slots via `Capabilities.compute`), `os_api.rs:161` (exec/stat/ls/du/df/ps/top/workers/jobs, 401-gated),
+  `drive-wasm/src/os.rs:677` (localStorage volume + BM25-lite, honest `unsupported:` for server ops),
+  `TerminalPanel.vue/DiskManagerPage.vue/ProcessPanel.vue` + dock/hotkey wiring,
+  `REST_ROUTES` + `REST_FIRST` + full Pinia surface (`execShellLine/completeShellLine/fetchOs*/killOsTask/runComputeJob` + disks + durability + sync jobs/restore/usage).
+  This pass added the missing durability/sync-job REST mappings, `SyncConfig` placement/conflict/encrypt fields,
+  `describeSyncError` prefix hints, full `SyncPanel.vue` wizard (create/test/start/cancel/quota/restore/remote-delete/browse + OAuth + striped placement),
+  honest `sync start` refusal text, `import_from_url` bytes-to-disk (F19), and faces no-fabrication (F7).
+  Left for CI: `cargo test -p cybermanju-os`, `-p cybermanju-tests os`, `npm run typecheck/lint`, `scripts/os-acceptance.sh 2`.

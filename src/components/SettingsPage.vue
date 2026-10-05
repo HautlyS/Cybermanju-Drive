@@ -47,7 +47,7 @@
       <h3 class="section-title">[SERVER] CONNECTION</h3>
       <div class="setting-row">
         <span class="setting-label text-muted">MODE</span>
-        <span class="info-value">{{ isWebMode() ? 'WEB / REST' : 'TAURI DESKTOP' }}</span>
+        <span class="info-value">{{ activeTransport }}</span>
       </div>
       <div class="setting-row">
         <span class="setting-label text-muted">API URL</span>
@@ -153,11 +153,21 @@
 </template>
 
 <script setup lang="ts">
-import { ref, inject } from 'vue'
+import { ref, inject, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
-import { isWebMode } from '@/composables/useTauri'
+import { isWebMode, isTauri } from '@/composables/useTauri'
+import { wasmBackendActive } from '@/composables/useWasmBackend'
 import { ShortcutsKey } from '@/composables/shortcutsKey'
 import { useTouchConfig, type GestureType, type TouchAction } from '@/composables/useTouchConfig'
+
+/** Active transport: tauri IPC, REST dashboard, or local WASM (GitHub Pages). */
+const activeTransport = computed(() => {
+  if (import.meta.env.VITE_TRANSPORT) return String(import.meta.env.VITE_TRANSPORT).toUpperCase()
+  if (isTauri()) return 'TAURI DESKTOP (REST_FIRST: os/disk via :3456)'
+  if (wasmBackendActive()) return 'WASM LOCAL (PAGES)'
+  if (isWebMode()) return 'WEB / REST (:3456)'
+  return 'UNKNOWN'
+})
 
 const store = useAppStore()
 const shortcuts = inject(ShortcutsKey, null)

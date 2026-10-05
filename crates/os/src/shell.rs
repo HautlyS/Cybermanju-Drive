@@ -1318,9 +1318,14 @@ fn sync_cmd(args: &[String], db: Option<&Database>, json: bool) -> Result<String
             })
         }
         "start" => {
-            // A real sync run needs `&Arc<RwLock<Database>>`; `os_api::route`
-            // only receives `&Database` (redb has one handle, so we cannot
-            // open a second). See Request R8-1.
+            // R8-1 resolved as documented refusal: a real sync run needs
+            // `&Arc<RwLock<Database>>` plus a worker thread, while
+            // `os_api::route` only holds `&Database` for its own request
+            // lifetime. The production path is async by design:
+            // `POST /api/sync/start -> 202 {jobId}`, then poll
+            // `GET /api/sync/jobs/{jobId}` (or `sync status` here).
+            // Returning `unsupported:` keeps the shell honest instead of
+            // blocking the request thread past the 5s write timeout.
             let config_id = rest
                 .first()
                 .cloned()
@@ -1330,13 +1335,13 @@ fn sync_cmd(args: &[String], db: Option<&Database>, json: bool) -> Result<String
                 return serde_json::to_string(&serde_json::json!({
                     "started": false,
                     "configId": config_id,
-                    "error": "unsupported: sync runs need the shared database handle (R8-1)",
+                    "error": "unsupported: `sync start` runs via POST /api/sync/start (202 job). Use the Sync panel or curl, then `sync status` here.",
                 }))
                 .map_err(|e| e.to_string());
             }
             Err(format!(
-                "unsupported: `sync start` needs the shared database handle — \
-                 POST /api/sync/run for a real run, or apply Request R8-1 (config {config_id})"
+                "unsupported: `sync start` runs via POST /api/sync/start (202 job, config {config_id}) — \
+                 the shell polls with `sync status`; see docs/OPERATIONS.md"
             ))
         }
         other => Err(did_you_mean(

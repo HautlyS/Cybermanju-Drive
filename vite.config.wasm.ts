@@ -3,14 +3,14 @@ import vue from "@vitejs/plugin-vue";
 import { resolve } from "path";
 
 // Determine the base path:
-// - GitHub Pages: /cybermanju-drive/ (repo name prefix)
+// - GitHub Pages: /cybermanju-drive/ (lowercase repo slug)
 // - Docker / standalone: / (served from root)
 // Override with VITE_BASE env var if needed
 const base =
   process.env.VITE_BASE ||
   (process.env.NODE_ENV === "production" &&
   process.env.DOCKER_BUILD !== "true"
-    ? "/Cybermanju-Drive/"
+    ? "/cybermanju-drive/"
     : "/");
 
 export default defineConfig({
@@ -18,6 +18,10 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": resolve(__dirname, "src"),
+      // wasm-pack output (`wasm-pack build crates/drive-wasm --target web
+      // --out-dir crates/drive-wasm/pkg`) — the integrated backend for the
+      // static/GH-Pages bundle.
+      "cybermanju-drive-wasm": resolve(__dirname, "crates/drive-wasm/pkg"),
     },
   },
   base,

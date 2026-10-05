@@ -162,7 +162,7 @@ mod fs {
                     flags: 0,
                 }),
                 FILE_INO => {
-                    let usage = self.with_db(|db| Ok(volume::df(db)?))?;
+                    let usage = self.with_db(|db| volume::df(db))?;
                     Ok(FileAttr {
                         ino,
                         size: usage.total_bytes,

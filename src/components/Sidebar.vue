@@ -26,8 +26,10 @@
       <div v-if="store.sidebarSection === 'landing'" class="sidebar-section">
         <div class="section-header">QUICK LINKS</div>
         <div class="quick-links">
-          <button class="ql-item" @click="store.currentPanel = 'landing'">[IN] LAUNCH APP</button>
-          <button class="ql-item" @click="store.currentPanel = 'sync'">[CL] CLOUD SYNC</button>
+          <button class="ql-item" @click="wm.open('files')">[IN] FILE BROWSER</button>
+          <button class="ql-item" @click="wm.open('sync')">[CL] CLOUD SYNC</button>
+          <button class="ql-item" @click="wm.open('terminal')">[&gt;] TERMINAL (cybsh)</button>
+          <button class="ql-item" @click="wm.open('disks')">[=] DISKS &amp; VOLUME</button>
           <a href="https://github.com/hautlythird211/Cybermanju-Drive" target="_blank" class="ql-item">[GH] SOURCE CODE</a>
           <a href="https://github.com/hautlythird211/Cybermanju-Drive/blob/main/README.md" target="_blank" class="ql-item">[DOC] DOCS</a>
         </div>
@@ -110,7 +112,7 @@
             v-for="tag in allTags"
             :key="tag"
             class="tag-item"
-            @click="store.searchQuery = tag; store.currentPanel = 'search'; store.searchFiles(tag)"
+            @click="store.searchQuery = tag; wm.open('search'); store.searchFiles(tag)"
           >
             {{ tag }}
           </span>
@@ -135,49 +137,53 @@
       </div>
 
       <div v-if="store.sidebarSection === 'users'" class="sidebar-section">
-        <div class="section-header" @click="store.currentPanel = 'users'">USER ACCESS &gt;</div>
+        <div class="section-header" @click="wm.open('users')">USER ACCESS &gt;</div>
         <div class="section-body">
           <p class="text-muted" style="font-size:10px;padding:8px 0;">PER-FILE USERNAME + PASSWORD AUTH WITH ARGON2</p>
-          <button class="bw-btn" style="width:100%;font-size:10px;" @click="store.currentPanel = 'users'">[OPEN] USER MGMT</button>
+          <button class="bw-btn" style="width:100%;font-size:10px;" @click="wm.open('users')">[OPEN] USER MGMT</button>
         </div>
       </div>
 
       <div v-if="store.sidebarSection === 'sync'" class="sidebar-section">
-        <div class="section-header" @click="store.currentPanel = 'sync'">STORAGE SYNC &gt;</div>
+        <div class="section-header" @click="wm.open('sync')">STORAGE SYNC &gt;</div>
         <div class="section-body">
           <p class="text-muted" style="font-size:10px;padding:8px 0;">SYNC TO LOCAL, GITHUB, GDRIVE, GPHOTOS</p>
           <div class="sync-backend-list">
-            <div v-for="config in store.syncConfigs" :key="config.id" class="sidebar-item" style="margin-bottom:2px;">
+            <div v-for="config in store.syncConfigs" :key="config.id" class="sidebar-item" style="margin-bottom:2px;" @click="wm.open('sync')">
               <div class="bw-dot" :class="{ 'bw-dot-on': config.enabled }" />
               <div class="item-info">
                 <span class="item-name truncate">{{ config.backendType }}</span>
               </div>
             </div>
           </div>
-          <button class="bw-btn" style="width:100%;font-size:10px;margin-top:6px;" @click="store.currentPanel = 'sync'">[OPEN] SYNC PANEL</button>
+          <button class="bw-btn" style="width:100%;font-size:10px;margin-top:6px;" @click="wm.open('sync')">[OPEN] SYNC PANEL</button>
+          <button class="bw-btn" style="width:100%;font-size:10px;margin-top:4px;" @click="wm.open('accounts')">[OPEN] ACCOUNTS + OAUTH</button>
         </div>
       </div>
 
       <div v-if="store.sidebarSection === 'dashboard'" class="sidebar-section">
-        <div class="section-header" @click="store.currentPanel = 'dashboard'">REMOTE ACCESS &gt;</div>
+        <div class="section-header" @click="wm.open('dashboard')">REMOTE ACCESS &gt;</div>
         <div class="section-body">
           <p class="text-muted" style="font-size:10px;padding:8px 0;">WEB DASHBOARD ON PORT 3456</p>
           <div class="bw-card" style="padding:6px;margin-bottom:6px;">
             <code style="font-size:10px;color:#000;">{{ dashboardUrl }}</code>
           </div>
-          <button class="bw-btn" style="width:100%;font-size:10px;" @click="store.currentPanel = 'dashboard'">[OPEN] DASHBOARD</button>
+          <button class="bw-btn" style="width:100%;font-size:10px;" @click="wm.open('dashboard')">[OPEN] DASHBOARD</button>
         </div>
       </div>
 
       <div v-if="store.sidebarSection === 'tools'" class="sidebar-section">
         <div class="section-header">TOOLS</div>
         <div class="tools-list">
-          <button class="ql-item" @click="store.currentPanel = 'favorites'" aria-label="OPEN FAVORITES">[*] FAVORITES ({{ store.starredFiles.length }})</button>
-          <button class="ql-item" @click="store.currentPanel = 'recent'" aria-label="OPEN RECENT FILES">[T] RECENT FILES</button>
-          <button class="ql-item" @click="store.currentPanel = 'activity'" aria-label="OPEN ACTIVITY LOG">[~] ACTIVITY LOG</button>
-          <button class="ql-item" @click="store.currentPanel = 'storage'" aria-label="OPEN STORAGE DASHBOARD">[$] STORAGE</button>
-          <button class="ql-item" @click="store.currentPanel = 'settings'" aria-label="OPEN SETTINGS">[@] SETTINGS</button>
-          <button class="ql-item" @click="store.currentPanel = 'trash'" aria-label="OPEN TRASH">[%] TRASH</button>
+          <button class="ql-item" @click="wm.open('terminal')" aria-label="OPEN TERMINAL">[&gt;] TERMINAL (cybsh)</button>
+          <button class="ql-item" @click="wm.open('processes')" aria-label="OPEN TASKS">[%] TASKS (ps/top)</button>
+          <button class="ql-item" @click="wm.open('disks')" aria-label="OPEN DISKS">[=] DISKS &amp; VOLUME</button>
+          <button class="ql-item" @click="wm.open('favorites')" aria-label="OPEN FAVORITES">[*] FAVORITES ({{ store.starredFiles.length }})</button>
+          <button class="ql-item" @click="wm.open('recent')" aria-label="OPEN RECENT FILES">[T] RECENT FILES</button>
+          <button class="ql-item" @click="wm.open('activity'); store.fetchAuditLog()" aria-label="OPEN ACTIVITY LOG">[~] ACTIVITY LOG</button>
+          <button class="ql-item" @click="wm.open('storage')" aria-label="OPEN STORAGE DASHBOARD">[$] STORAGE</button>
+          <button class="ql-item" @click="wm.open('settings')" aria-label="OPEN SETTINGS">[@] SETTINGS</button>
+          <button class="ql-item" @click="wm.open('trash'); store.fetchTrashItems()" aria-label="OPEN TRASH">[%] TRASH</button>
         </div>
       </div>
     </div>
@@ -199,6 +205,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { useWindowManager } from '@/composables/useWindowManager'
 import { useContextMenu } from '@/composables/useContextMenu'
 import { isWebMode } from '@/composables/useTauri'
 import type { SidebarSection } from '@/types'
@@ -207,6 +214,7 @@ import TreeNode from './TreeNode.vue'
 const ctx = useContextMenu()
 
 const store = useAppStore()
+const wm = useWindowManager()
 
 const dashboardUrl = computed(() => {
   if (typeof window !== 'undefined' && window.location?.port === '3456') {

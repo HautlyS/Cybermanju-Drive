@@ -1480,7 +1480,9 @@ fn collect_clusters_from_labels(
 /// Detect faces in a file and return one embedding per face.
 ///
 /// ONNX path: SCRFD detection → ArcFace 512-d embedding (requires ort + model files).
-/// Fallback: BLAKE3-based deterministic pseudo-embeddings (512-d).
+/// Honest fallback: when ONNX is unavailable, fails, or finds zero faces,
+/// return an empty set — never fabricate pseudo-faces. Fabricated embeddings
+/// cluster as if they were real detections and corrupt person groups (AUDIT F7).
 pub fn detect_faces_in_file(file_node: &FileNode) -> Result<Vec<Vec<f32>>> {
     #[cfg(feature = "onnx-face")]
     {
@@ -1494,33 +1496,39 @@ pub fn detect_faces_in_file(file_node: &FileNode) -> Result<Vec<Vec<f32>>> {
                 return Ok(embeddings);
             }
             Ok(_) => {
-                log::warn!(
-                    "ONNX detected no faces in {}, falling back to BLAKE3",
+                log::info!(
+                    "ONNX detected no faces in {} — returning empty set",
                     file_node.name
                 );
+                return Ok(Vec::new());
             }
             Err(e) => {
                 log::warn!(
-                    "ONNX face detection failed for {}: {}. Using BLAKE3 fallback.",
+                    "ONNX face detection failed for {}: {}. Returning empty set (no fabrication).",
                     file_node.name,
                     e
                 );
+                return Ok(Vec::new());
             }
         }
     }
-    Ok(detect_faces_blake3_fallback(file_node))
+    // No ONNX feature: honest empty result. The legacy BLAKE3 pseudo-embedding
+    // helper is retained for tests only (see `blake3_pseudo_embedding_for_tests`).
+    Ok(Vec::new())
 }
 
 /// BLAKE3-based deterministic pseudo-embedding generator.
 ///
+/// Retained for clustering unit tests only — NOT used by `detect_faces_in_file`
+/// (which returns an empty set when ONNX is unavailable, AUDIT F7).
 /// Same seed always produces same embedding → reproducible clustering.
-/// Embedding dimensions are derived from BLAKE3 hash bytes with position mixing.
 ///
 /// QUALITY NOTE: These embeddings are NOT semantically meaningful for face identity.
 /// They serve as a development/testing pipeline that validates the clustering logic.
 /// For real face detection, integrate ONNX Runtime with SCRFD + ArcFace models.
 ///
 /// COMPLEXITY: O(face_count * EMBEDDING_DIM) where face_count ∈ {0, 1, 2, 3}
+#[allow(dead_code)]
 fn detect_faces_blake3_fallback(file_node: &FileNode) -> Vec<Vec<f32>> {
     let seed = file_node.hash_blake3.as_deref().unwrap_or(&file_node.id);
 

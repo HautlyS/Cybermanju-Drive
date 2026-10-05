@@ -780,7 +780,24 @@ npm run build:wasm
 
 **Output:** `dist-wasm/` directory served via GitHub Actions to GitHub Pages.
 
-**Limitations:** No Tauri IPC — only REST API commands with a mapped route. Write operations are unavailable.
+**Transports:** `tauri` IPC (desktop; `os_*/disk/*` are `REST_FIRST` → `:3456`), `rest` (Docker/web), `wasm` (Pages: `drive-wasm` localStorage volume + BM25-lite; server ops answer `unsupported:`). Settings shows the active transport (`VITE_TRANSPORT` override).
+
+## 12. Decentralized OS layer (disks, durability, cybsh)
+
+```
+providers → .cybermanju disks (CYBMJU1 sealed superblock, choosable capacity)
+  → merged volume (spanned placement, df, admit→place→upload→commit)
+  → durability (scrub→repair queue, RS k+m, rebuild-from-remote, refcount GC, leases)
+  → cybsh (Kernel syscall boundary → os_api → REST / Tauri-REST_FIRST / WASM)
+```
+
+- **Crates:** `disk` (superblock/disk/allocator/catalog/volume/mount), `erasure` (RS codec), `os` (shell/task/compute/api), `sync/{scrub,repair,gc,health,lease,manifest}`.
+- **Tables (17+):** files, accounts, collections, collection_items, face_groups, loose_groups, encryption_keys, users, user_file_perms, sync_configs (+`sync_files/sync_runs/sync_secrets/schema_version`), `disks/volumes/block_map`, `scrub_runs/repairs/chunk_refs/leases/provider_health`, `compute_tasks/shell_history`.
+- **Sync jobs:** `POST /api/sync/start → 202 {jobId}`, `GET /api/sync/jobs/{id}|runs|status|progress`, `POST /api/sync/cancel|restore`, `DELETE /api/sync/remote` (501 on `unsupported:`), `GET /api/sync/usage/{id}`.
+- **Durability:** `GET /api/repair/status|tasks|health`, `POST /api/repair/run|rebuild|gc`, `POST /api/scrub/run`, `GET /api/scrub/runs`, `POST /api/lease/acquire|release`, `GET /api/lease/status`.
+- **OS:** `POST /api/os/exec {line}`, `GET /api/os/complete/{prefix}|stat|ls|du|df|ps|top|workers|jobs`; `GET /api/disk/*`, `GET|PUT /api/volume/block/{lba}` (base64, body range).
+- **Auth:** fail-closed `Authenticated` default, `is_known_route` 404-before-401, `Claims{role}` RBAC, bootstrap-only register, sealed secrets.
+- **Known honest limits:** `cybsh sync start` → `unsupported:` + 202 pointer (needs worker + shared handle); faces empty without ONNX; code parse heuristic; Telegram/Photos delete `unsupported:`.
 
 ### CI/CD Pipeline
 

@@ -360,6 +360,10 @@ export interface SyncConfig {
   createPreviews: boolean
   deleteRawAfterSync: boolean
   maxConcurrentUploads: number
+  encryptBeforeUpload?: boolean
+  conflictPolicy?: 'skip' | 'overwrite' | 'keepBoth'
+  placement?: 'whole' | 'striped'
+  parity?: number
   createdAt?: string
   updatedAt?: string
 }
@@ -404,6 +408,141 @@ export interface RemoteFile {
   sizeBytes: number
   modifiedAt: string
   url: string
+}
+
+// ── Sync jobs / runs / restore / quota (AGENT-2 REST contract) ──
+
+export interface SyncJob {
+  jobId: string
+  configId: string
+  startedAt: string
+  finishedAt?: string | null
+  status: SyncStatusType
+  progress: SyncProgress
+  result?: SyncResult | null
+}
+
+export interface SyncRunRecord {
+  runId: string
+  configId: string
+  startedAt: string
+  finishedAt?: string | null
+  status: SyncStatusType
+  filesSynced: number
+  bytesUploaded: number
+  errors: string[]
+  progress?: SyncProgress | null
+  result?: SyncResult | null
+}
+
+export interface RestoreOutcome {
+  path: string
+  bytes: number
+  verified: boolean
+}
+
+export interface QuotaUsage {
+  backendType?: string
+  totalBytes?: number | null
+  usedBytes?: number | null
+  remainingRequests?: number | null
+  requestLimit?: number | null
+  resetAt?: string | null
+  detail?: string
+  [key: string]: unknown
+}
+
+export interface ChunkManifestEntry {
+  index: number
+  hashBlake3: string
+  sizeBytes: number
+  providers: string[]
+}
+
+export interface ChunkManifest {
+  version: number
+  fileId: string
+  chunkSize: number
+  totalSize: number
+  chunks: ChunkManifestEntry[]
+}
+
+// ── Durability (AGENT-7): scrub / repair / gc / leases ──
+
+export interface ScrubRun {
+  runId: string
+  status: string
+  checked: number
+  ok: number
+  corrupt: number
+  missing: number
+  durationMs: number
+  findings?: unknown[]
+  [key: string]: unknown
+}
+
+export interface RepairStatus {
+  queuedFindings: number
+  repairs: unknown[]
+  repaired: number
+  unrecoverable: number
+  skipped: number
+  tasks: unknown[]
+  [key: string]: unknown
+}
+
+export interface RepairTask {
+  taskId: string
+  kind: string
+  detail?: unknown
+  [key: string]: unknown
+}
+
+export interface GcReport {
+  checked: number
+  kept: number
+  deleted: number
+  bytesFreed: number
+  dryRun?: boolean
+  warnings: string[]
+  [key: string]: unknown
+}
+
+export interface LeaseInfo {
+  scope: string
+  holder: string
+  acquiredAt: string
+  expiresAt: string
+  stolenFrom?: string | null
+  [key: string]: unknown
+}
+
+/** Map AGENT-1 error prefixes to user-facing hints. Never throws. */
+export function describeSyncError(err: string): { prefix: string; hint: string } {
+  const prefix = (err.split(':')[0] || '').trim()
+  switch (prefix) {
+    case 'auth':
+      return { prefix, hint: 'Check the provider token / OAuth connection, then retry.' }
+    case 'rate_limited':
+      return { prefix, hint: 'Provider throttled the request. Wait and retry with backoff.' }
+    case 'not_found':
+      return { prefix, hint: 'Remote object is gone. Re-run sync or restore from another provider.' }
+    case 'unsupported':
+      return { prefix, hint: 'This provider cannot do that operation. See docs for per-backend limits.' }
+    case 'too_large':
+      return { prefix, hint: 'File exceeds the provider limit. Enable striped placement or pick another provider.' }
+    case 'integrity':
+      return { prefix, hint: 'Checksum mismatch — bytes were not trusted. Run scrub + repair.' }
+    case 'network':
+      return { prefix, hint: 'Network failure. Retry; the operation is idempotent.' }
+    case 'disk_full':
+    case 'disk full':
+      return { prefix: 'disk_full', hint: 'Volume is full. Attach or resize a disk, then retry.' }
+    case 'conflict':
+      return { prefix, hint: 'Another writer holds the volume. Resolve the lease or change conflict policy.' }
+    default:
+      return { prefix: 'unknown', hint: 'See logs for detail.' }
+  }
 }
 
 export const MODULE_METADATA: Record<PanelType, ModuleInfo> = {

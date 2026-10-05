@@ -9,6 +9,8 @@ import type {
   CompressionStats, ParseResult, GeoMarker,
   ViewMode, PanelType, SidebarSection,
   SyncConfig, SyncProgress, SyncResult, RemoteFile,
+  SyncJob, SyncRunRecord, RestoreOutcome, QuotaUsage,
+  ScrubRun, RepairStatus, RepairTask, GcReport, LeaseInfo,
   AuthResult, ModuleInfo, TrashItem, AuditEntry, FileVersion, User,
   DashboardStatus,
   ShellResult, OsPs, OsTop, OsWorkers, OsJob, OsVolumeDf, DiskRow,
@@ -66,6 +68,15 @@ export const useAppStore = defineStore('cybermanju', () => {
   // ── Sync State ────────────────────────────────────────────
   const syncConfigs = ref<SyncConfig[]>([])
   const syncProgress = ref<SyncProgress | null>(null)
+  const syncJobs = ref<SyncJob[]>([])
+  const syncRuns = ref<SyncRunRecord[]>([])
+  const syncStatus = ref<{ syncEnabled: boolean; status: string; lastSync?: string | null; provider?: string | null } | null>(null)
+
+  // ── Durability State (AGENT-7) ──────────────────────────────
+  const repairStatus = ref<RepairStatus | null>(null)
+  const scrubRuns = ref<ScrubRun[]>([])
+  const leaseInfo = ref<LeaseInfo | null>(null)
+  const lastGc = ref<GcReport | null>(null)
 
   // ── OS layer (AGENT-8): cybsh, tasks, compute, volume ───
   const osPs = ref<OsPs | null>(null)
@@ -162,6 +173,12 @@ export const useAppStore = defineStore('cybermanju', () => {
 
   function notifyError(msg: string, error: unknown) {
     const detail = error instanceof Error ? error.message : String(error)
+    // On the static WASM pack the absence of the dashboard is expected —
+    // don't spam a toast per failed fetch on startup.
+    if (detail.startsWith('[WASM Mode]')) {
+      lastError.value = null
+      return
+    }
     lastError.value = `${msg}: ${detail}`
     notify('error', lastError.value)
     console.error(lastError.value)
@@ -666,6 +683,169 @@ export const useAppStore = defineStore('cybermanju', () => {
     }
   }
 
+  async function getSyncJob(jobId: string) {
+    try {
+      const job = await invoke<SyncJob>('get_sync_job', { jobId })
+      const i = syncJobs.value.findIndex(j => j.jobId === jobId)
+      if (i >= 0) syncJobs.value[i] = job
+      else syncJobs.value.push(job)
+      return job
+    } catch (e) {
+      notifyError('Failed to get sync job', e)
+      return null
+    }
+  }
+
+  async function fetchSyncRuns() {
+    try {
+      syncRuns.value = await invoke<SyncRunRecord[]>('list_sync_runs')
+    } catch (e) {
+      notifyError('Failed to fetch sync runs', e)
+    }
+  }
+
+  async function fetchSyncStatus() {
+    try {
+      syncStatus.value = await invoke<{ syncEnabled: boolean; status: string; lastSync?: string | null; provider?: string | null }>('get_sync_status')
+    } catch (e) {
+      notifyError('Failed to fetch sync status', e)
+    }
+  }
+
+  async function restoreSyncFile(configId: string, fileId?: string, remotePath?: string, destPath?: string) {
+    try {
+      const out = await invoke<RestoreOutcome>('restore_sync_file', { configId, fileId, remotePath, destPath })
+      notifySuccess(`Restored ${out.bytes} bytes to ${out.path}${out.verified ? ' (verified)' : ''}`)
+      return out
+    } catch (e) {
+      notifyError('Restore failed', e)
+      return null
+    }
+  }
+
+  async function deleteRemoteFile(configId: string, remotePath: string) {
+    try {
+      await invoke<boolean>('delete_remote_file', { configId, remotePath })
+      notifySuccess('Remote file deleted')
+      return true
+    } catch (e) {
+      notifyError('Remote delete failed', e)
+      return false
+    }
+  }
+
+  async function fetchSyncUsage(configId: string) {
+    try {
+      return await invoke<QuotaUsage>('get_sync_usage', { configId })
+    } catch (e) {
+      notifyError('Failed to fetch provider quota', e)
+      return null
+    }
+  }
+
+  async function oauthStart(provider: string, configId: string) {
+    try {
+      const res = await invoke<{ authorizeUrl: string; state: string }>('oauth_start', { provider, configId })
+      if (res?.authorizeUrl && typeof window !== 'undefined') window.open(res.authorizeUrl, '_blank')
+      return res
+    } catch (e) {
+      notifyError('OAuth start failed (fall back to manual token paste)', e)
+      return null
+    }
+  }
+
+  // ── Actions: Durability (AGENT-7) ─────────────────────────
+  async function fetchRepairStatus() {
+    try {
+      repairStatus.value = await invoke<RepairStatus>('repair_status')
+    } catch (e) {
+      notifyError('Failed to fetch repair status', e)
+    }
+  }
+
+  async function runRepair(findings?: unknown[]) {
+    try {
+      const task = await invoke<RepairTask>('repair_run', { findings: findings ?? [] })
+      notifySuccess(`Repair started (${task.taskId})`)
+      await fetchRepairStatus()
+      return task
+    } catch (e) {
+      notifyError('Repair failed to start', e)
+      return null
+    }
+  }
+
+  async function runRebuild() {
+    try {
+      const task = await invoke<RepairTask>('repair_rebuild')
+      notifySuccess(`Catalog rebuild started (${task.taskId})`)
+      return task
+    } catch (e) {
+      notifyError('Rebuild failed to start', e)
+      return null
+    }
+  }
+
+  async function runGc(dryRun = true) {
+    try {
+      const report = await invoke<GcReport>('repair_gc', { dryRun })
+      lastGc.value = report
+      notifySuccess(dryRun ? `GC dry run: ${report.deleted} would be freed` : `GC freed ${report.bytesFreed} bytes`)
+      return report
+    } catch (e) {
+      notifyError('GC failed', e)
+      return null
+    }
+  }
+
+  async function runScrub() {
+    try {
+      const task = await invoke<RepairTask>('scrub_run')
+      notifySuccess(`Scrub started (${task.taskId})`)
+      return task
+    } catch (e) {
+      notifyError('Scrub failed to start', e)
+      return null
+    }
+  }
+
+  async function fetchScrubRuns() {
+    try {
+      scrubRuns.value = await invoke<ScrubRun[]>('scrub_runs')
+    } catch (e) {
+      notifyError('Failed to fetch scrub runs', e)
+    }
+  }
+
+  async function acquireLease(holder: string, scope = 'volume', ttlSecs = 60) {
+    try {
+      leaseInfo.value = await invoke<LeaseInfo>('lease_acquire', { holder, scope, ttlSecs })
+      return leaseInfo.value
+    } catch (e) {
+      notifyError('Lease acquire failed', e)
+      return null
+    }
+  }
+
+  async function releaseLease(holder: string, scope = 'volume') {
+    try {
+      await invoke<boolean>('lease_release', { holder, scope })
+      leaseInfo.value = null
+      return true
+    } catch (e) {
+      notifyError('Lease release failed', e)
+      return false
+    }
+  }
+
+  async function fetchLeaseStatus(scope?: string) {
+    try {
+      leaseInfo.value = await invoke<LeaseInfo>('lease_status', { scope })
+    } catch (e) {
+      notifyError('Failed to fetch lease status', e)
+    }
+  }
+
   // ── Actions: Trash ─────────────────────────────────────────
   async function fetchTrashItems() {
     try {
@@ -1063,6 +1243,7 @@ export const useAppStore = defineStore('cybermanju', () => {
     files, accounts, activeAccountId, collections, faceGroups, looseGroups,
     searchResults, geoMarkers, encryptionStatus, encryptionKeys,
     compressionStats, parseResult, syncConfigs, syncProgress,
+    syncJobs, syncRuns, syncStatus, repairStatus, scrubRuns, leaseInfo, lastGc,
     osPs, osTop, osWorkers, osJobs, osDf, disks, shellBusy,
     trashItems, showTrashPanel, auditLog, fileVersions, dashboardStatus, shareLinks,
     searchQuery, searchTotalResults, isSearching, isLoading, lastError, matrixRainEnabled,
@@ -1083,6 +1264,10 @@ export const useAppStore = defineStore('cybermanju', () => {
     parseFileCode, fetchLooseGroups,
     fetchSyncConfigs, createSyncConfig, deleteSyncConfig, startSync,
     getSyncProgress, testSyncConnection, cancelSync, listRemoteFiles,
+    getSyncJob, fetchSyncRuns, fetchSyncStatus, restoreSyncFile, deleteRemoteFile,
+    fetchSyncUsage, oauthStart,
+    fetchRepairStatus, runRepair, runRebuild, runGc, runScrub, fetchScrubRuns,
+    acquireLease, releaseLease, fetchLeaseStatus,
     // OS layer (cybsh, tasks, compute, disks, volume)
     execShellLine, completeShellLine,
     fetchOsPs, fetchOsTop, fetchOsWorkers, fetchOsJobs, fetchOsDf,
