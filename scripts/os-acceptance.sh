@@ -25,7 +25,7 @@ want_tests() { # want_tests <label> <expected-min> <cargo-test-args...>
   local out count
   out=$(cargo test "$@" 2>&1)
   local st=$?
-  count=$(grep -Eo '^[[:space:]]*[0-9]+ passed' <<<"$out" | grep -Eo '[0-9]+' | head -1)
+  count=$(grep -Eo '[0-9]+ passed' <<<"$out" | grep -Eo '[0-9]+' | awk '{s+=$1} END {print s+0}')
   count=${count:-0}
   if [ "$st" -ne 0 ]; then
     fail "$label: cargo test exited $st (see output below)"

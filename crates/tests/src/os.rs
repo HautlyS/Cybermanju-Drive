@@ -81,14 +81,23 @@ fn cybsh_command_table_covers_the_brief() {
         "decrypt",
         "search",
     ] {
-        assert!(table.contains(&command), "`{command}` missing from the command table");
+        assert!(
+            table.contains(&command),
+            "`{command}` missing from the command table"
+        );
     }
 
     // Tab-completion is fed from this table: prefixes resolve to the real
     // commands, and unknown prefixes return nothing rather than guessing.
     let d_hits = cybermanju_os::completions("d");
-    assert!(d_hits.contains(&"df".to_string()), "completions(d) = {d_hits:?}");
-    assert!(d_hits.contains(&"disk".to_string()), "completions(d) = {d_hits:?}");
+    assert!(
+        d_hits.contains(&"df".to_string()),
+        "completions(d) = {d_hits:?}"
+    );
+    assert!(
+        d_hits.contains(&"disk".to_string()),
+        "completions(d) = {d_hits:?}"
+    );
     let k_hits = cybermanju_os::completions("k");
     assert!(k_hits.contains(&"kill".to_string()) && k_hits.contains(&"keygen".to_string()));
     assert!(cybermanju_os::completions("zzz").is_empty());
@@ -110,7 +119,13 @@ fn os_routes_are_gated_and_the_terminal_executes() {
 
     let token = auth(&d);
 
-    let resp = call(&d, "POST", "/api/os/exec", r#"{"line":"echo hello cybsh"}"#, Some(&token));
+    let resp = call(
+        &d,
+        "POST",
+        "/api/os/exec",
+        r#"{"line":"echo hello cybsh"}"#,
+        Some(&token),
+    );
     assert_eq!(status_of(&resp), 200, "exec: {resp}");
     let body = json_of(&resp);
     assert_eq!(body["ok"], true, "exec body: {body}");
@@ -118,7 +133,13 @@ fn os_routes_are_gated_and_the_terminal_executes() {
     assert_eq!(body["prompt"], "cybsh> ");
 
     // Pipelines and `&&` are parsed by the interpreter, not by the client.
-    let resp = call(&d, "POST", "/api/os/exec", r#"{"line":"echo a && echo b"}"#, Some(&token));
+    let resp = call(
+        &d,
+        "POST",
+        "/api/os/exec",
+        r#"{"line":"echo a && echo b"}"#,
+        Some(&token),
+    );
     let body = json_of(&resp);
     assert_eq!(body["output"], "a\nb", "resp: {body}");
 
@@ -129,16 +150,29 @@ fn os_routes_are_gated_and_the_terminal_executes() {
         r#"{"line":"definitely-not-a-command"}"#,
         Some(&token),
     );
-    assert_eq!(status_of(&resp), 200, "a failing command is still a 200: {resp}");
+    assert_eq!(
+        status_of(&resp),
+        200,
+        "a failing command is still a 200: {resp}"
+    );
     let body = json_of(&resp);
     assert_eq!(body["ok"], false, "body: {body}");
     assert!(
-        body["output"].as_str().unwrap_or_default().starts_with("unknown command:"),
+        body["output"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("unknown command:"),
         "body: {body}"
     );
 
     // `--json` switches a command to machine-readable output.
-    let resp = call(&d, "POST", "/api/os/exec", r#"{"line":"ps --json"}"#, Some(&token));
+    let resp = call(
+        &d,
+        "POST",
+        "/api/os/exec",
+        r#"{"line":"ps --json"}"#,
+        Some(&token),
+    );
     let body = json_of(&resp);
     let inner: serde_json::Value =
         serde_json::from_str(body["output"].as_str().unwrap_or_default())
@@ -149,7 +183,10 @@ fn os_routes_are_gated_and_the_terminal_executes() {
     let resp = call(&d, "GET", "/api/os/ps", "", Some(&token));
     assert_eq!(status_of(&resp), 200, "ps: {resp}");
     let ps = json_of(&resp);
-    assert!(ps.get("counts").is_some() && ps.get("tasks").is_some(), "ps: {ps}");
+    assert!(
+        ps.get("counts").is_some() && ps.get("tasks").is_some(),
+        "ps: {ps}"
+    );
 
     let resp = call(&d, "GET", "/api/os/workers", "", Some(&token));
     let workers = json_of(&resp);
@@ -171,8 +208,7 @@ fn file_commands_act_on_a_real_volume() {
     let listed = cybermanju_os::execute("ls /os-suite", None).expect("ls");
     assert!(listed.contains("nested"), "ls: {listed}");
 
-    let stat = cybermanju_os::execute("stat /os-suite/nested/file.txt --json", None)
-        .expect("stat");
+    let stat = cybermanju_os::execute("stat /os-suite/nested/file.txt --json", None).expect("stat");
     let stat: serde_json::Value = serde_json::from_str(&stat).expect("stat json");
     assert_eq!(stat["kind"], "file", "stat: {stat}");
 

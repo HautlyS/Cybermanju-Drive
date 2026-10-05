@@ -120,7 +120,9 @@ mod fs {
     /// byte offset `n` is block `n / block_size`, unwritten blocks read as
     /// holes.
     pub struct VolumeFs {
-        db: Arc<RwLock<Database>>,
+        // `pub(super)`: the literal is constructed in `mount()` above, one
+        // module up — E0451 otherwise (CI, run 37303836853).
+        pub(super) db: Arc<RwLock<Database>>,
     }
 
     impl VolumeFs {

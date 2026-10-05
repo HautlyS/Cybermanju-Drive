@@ -227,6 +227,14 @@ pub fn run() {
             versions::snapshot_all_versions,
             // Parent index rebuild
             files::rebuild_parent_index,
+            // Disks & volumes (AGENT-6)
+            commands::disk::create_disk,
+            commands::disk::attach_disk,
+            commands::disk::detach_disk,
+            commands::disk::resize_disk,
+            commands::disk::list_disks,
+            commands::disk::volume_df,
+            commands::disk::check_disk,
         ])
         .run(tauri::generate_context!())
         .expect("Fatal error while running Cybermanju Drive — see logs above");
