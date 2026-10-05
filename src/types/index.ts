@@ -825,8 +825,19 @@ export interface AgentConfig {
   autoApprove: boolean
   maxTurns: number
   hasKey: boolean
+  mcpServers?: Record<string, McpServerConfig>
   createdAt: string
   updatedAt: string
+}
+
+export interface McpServerConfig {
+  transport: string
+  command?: string | null
+  args: string[]
+  env: Record<string, string>
+  url?: string | null
+  headers: Array<[string, string]>
+  enabled: boolean
 }
 
 export interface ChatMessage {

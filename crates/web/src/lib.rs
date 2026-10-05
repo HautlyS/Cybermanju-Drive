@@ -914,6 +914,31 @@ fn route_request(
                 origin,
             );
         }
+        ["api", "agent", "sessions", session_id, "compact"] if method == "POST" => {
+            // Lockless: compaction is a full provider round trip — it must
+            // never hold the request lock. Reads/writes inside are brief.
+            #[derive(Deserialize)]
+            struct CompactBody {
+                config_id: String,
+            }
+            let req: CompactBody = json_body!(body, origin);
+            return api_response(
+                api::agent_api::compact_session(db, &req.config_id, session_id),
+                origin,
+            );
+        }
+        ["api", "agent", "configs", config_id, "mcp", "tools"] if method == "GET" => {
+            // Lockless: discovery spawns processes with 15s budgets each.
+            // Config load is one brief read; the rest holds no lock.
+            let config = match db.read() {
+                Ok(guard) => api::agent_api::get_config(&guard, config_id),
+                Err(e) => Err(e.to_string()),
+            };
+            return match config {
+                Ok(config) => api_response(api::agent_api::mcp_tools_for(&config), origin),
+                Err(e) => api_response::<Vec<api::agent_api::McpToolView>>(Err(e), origin),
+            };
+        }
         _ => {}
     }
     // <<< /AI AGENT JOBS >>>
@@ -1410,6 +1435,20 @@ fn route_request(
         }
         ["api", "agent", "configs", id, "models"] if method == "GET" => {
             api_response(api::agent_api::list_models(db, id), origin)
+        }
+        // MCP servers spawn processes — attaching/detaching is admin-gated
+        // (see `security::required_role`); reads stay authenticated-only.
+        ["api", "agent", "configs", id, "mcp"] if method == "POST" => {
+            #[derive(Deserialize)]
+            struct McpAddBody {
+                name: String,
+                server: cybermanju_types::agent::McpServerConfig,
+            }
+            let req: McpAddBody = json_body!(body, origin);
+            api_response(api::agent_api::mcp_add(db, id, req.name, req.server), origin)
+        }
+        ["api", "agent", "configs", id, "mcp", name] if method == "DELETE" => {
+            api_response(api::agent_api::mcp_remove(db, id, name), origin)
         }
         ["api", "agent", "sessions"] if method == "GET" => {
             api_response(api::agent_api::list_sessions(db), origin)

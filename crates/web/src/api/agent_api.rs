@@ -8,7 +8,7 @@
 // edits) lives in `cybermanju-agent`; this module owns threads, locks and
 // the database.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
@@ -17,7 +17,8 @@ use std::time::{Duration, Instant};
 use cybermanju_agent::{agent_loop, config as agent_config, edit as agent_edit, protocol, providers};
 use cybermanju_db::Database;
 use cybermanju_types::agent::{
-    AgentConfig, AgentKind, AgentSession, ChatMessage, TokenUsage, ToolCall,
+    AgentConfig, AgentKind, AgentSession, ChatMessage, LlmDialect, McpServerConfig, TokenUsage,
+    ToolCall,
 };
 use redb::ReadableTable;
 use serde::{Deserialize, Serialize};
@@ -137,6 +138,12 @@ fn validate_config(config: &AgentConfig) -> Result<(), String> {
     }
     if config.working_dir.contains("..") {
         return Err("invalid: working_dir must not contain '..'".to_string());
+    }
+    for (name, server) in &config.mcp_servers {
+        if !mcp_proto::valid_server_name(name) {
+            return Err(format!("invalid: bad MCP server name '{name}'"));
+        }
+        server.validate()?;
     }
     // Merges endpoint + dialect; fails on unknown providers and keyless
     // custom configs alike.
@@ -775,7 +782,353 @@ fn exec_tool(
     }
 }
 
-// ─── jobs (detached runs) ─────────────────────────────────────────────────
+// ─── MCP servers (admin-managed tools) ───────────────────────────────────
+///
+/// Configs carry `mcp_servers` (validated on save). Discovery (`tools/list`)
+/// and calls run here, natively: stdio children for local servers,
+/// Streamable HTTP for remote ones. Every tool surfaces namespaced as
+/// `mcp__<server>__<tool>` so permission rules match it like any tool.
+/// Servers that fail to connect fail the run loudly — a silently missing
+/// tool would be worse than no run at all.
+
+use cybermanju_agent::mcp as mcp_proto;
+
+/// One live MCP connection for the duration of a run.
+struct McpConnection {
+    server: String,
+    transport: String,
+    /// stdio: child stdin for requests.
+    stdin: Option<std::sync::Mutex<std::process::ChildStdin>>,
+    /// stdio: lines harvested by the reader thread.
+    lines: Option<Arc<Mutex<VecDeque<String>>>>,
+    /// stdio: the child (killed on close).
+    child: Option<std::sync::Mutex<std::process::Child>>,
+    next_id: std::sync::Mutex<u64>,
+    /// http: endpoint + headers + negotiated session.
+    http_url: Option<String>,
+    http_headers: Vec<(String, String)>,
+    http_session: std::sync::Mutex<Option<String>>,
+}
+
+impl McpConnection {
+    fn close(&self) {
+        if let Some(child) = self.child.as_ref() {
+            if let Ok(mut child) = child.lock() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
+}
+
+impl Drop for McpConnection {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
+/// A set of connections with RAII teardown — every exit path (return,
+/// cancel, panic-unwind) closes children.
+struct McpSet {
+    conns: Vec<McpConnection>,
+}
+
+impl Drop for McpSet {
+    fn drop(&mut self) {
+        for conn in &self.conns {
+            conn.close();
+        }
+    }
+}
+
+impl McpSet {
+    fn find(&self, server: &str) -> Option<&McpConnection> {
+        self.conns.iter().find(|c| c.server == server)
+    }
+}
+
+/// Discovered tool with its origin server, in canonical
+/// (`name/description/input_schema`) shape.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpToolView {
+    pub server: String,
+    pub name: String,
+    pub description: String,
+}
+
+/// Connect one server (15s handshake budget) and list its tools.
+fn mcp_connect(
+    name: &str,
+    cfg: &McpServerConfig,
+) -> Result<(McpConnection, Vec<cybermanju_agent::mcp::McpToolDef>), String> {
+    if !mcp_proto::valid_server_name(name) {
+        return Err(format!("invalid: bad MCP server name '{name}'"));
+    }
+    match cfg.transport.as_str() {
+        "stdio" => mcp_connect_stdio(name, cfg),
+        "http" => mcp_connect_http(name, cfg),
+        other => Err(format!("invalid: unknown MCP transport '{other}'")),
+    }
+}
+
+fn mcp_connect_stdio(
+    name: &str,
+    cfg: &McpServerConfig,
+) -> Result<(McpConnection, Vec<cybermanju_agent::mcp::McpToolDef>), String> {
+    use std::io::{BufRead, BufReader, Write};
+    use std::process::{Command, Stdio};
+    let command = cfg.command.clone().unwrap_or_default();
+    let mut child = Command::new(&command)
+        .args(&cfg.args)
+        .envs(cfg.env.iter().map(|(k, v)| (k, v)))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("network: cannot spawn MCP server '{name}' ({command}): {e}"))?;
+    let stdin = child.stdin.take().ok_or_else(|| {
+        format!("network: MCP server '{name}' gave no stdin pipe")
+    })?;
+    let stdout = child.stdout.take().ok_or_else(|| {
+        format!("network: MCP server '{name}' gave no stdout pipe")
+    })?;
+    let lines: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));
+    let feed = Arc::clone(&lines);
+    std::thread::Builder::new()
+        .name(format!("mcp-{name}-reader"))
+        .spawn(move || {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines().map_while(Result::ok) {
+                if let Ok(mut queue) = feed.lock() {
+                    queue.push_back(line);
+                    while queue.len() > 256 {
+                        queue.pop_front();
+                    }
+                }
+            }
+        })
+        .map_err(|e| format!("network: cannot start MCP reader for '{name}': {e}"))?;
+
+    let conn = McpConnection {
+        server: name.to_string(),
+        transport: "stdio".to_string(),
+        stdin: Some(Mutex::new(stdin)),
+        lines: Some(lines),
+        child: Some(Mutex::new(child)),
+        next_id: Mutex::new(1),
+        http_url: None,
+        http_headers: Vec::new(),
+        http_session: Mutex::new(None),
+    };
+    // Handshake: initialize → notifications/initialized → tools/list.
+    let init = mcp_request(&conn, "initialize", mcp_proto::initialize_params("cybermanju"), 15)?;
+    let server_version = init
+        .get("protocolVersion")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+    log::debug!("MCP '{name}' speaks protocol {server_version}");
+    mcp_notify(&conn, "notifications/initialized", serde_json::json!({}))?;
+    let listed = mcp_request(&conn, "tools/list", serde_json::json!({}), 15)?;
+    Ok((conn, mcp_proto::parse_tools_list(&listed)))
+}
+
+use std::collections::VecDeque;
+
+/// One JSON-RPC round trip over a stdio connection.
+fn mcp_request(
+    conn: &McpConnection,
+    method: &str,
+    params: serde_json::Value,
+    timeout_secs: u64,
+) -> Result<serde_json::Value, String> {
+    use std::io::Write;
+    let id = {
+        let mut next = conn.next_id.lock().unwrap_or_else(|p| p.into_inner());
+        *next += 1;
+        *next
+    };
+    let line = mcp_proto::request(id, method, params).to_string() + "\n";
+    {
+        let stdin = conn.stdin.as_ref().ok_or_else(|| {
+            "network: MCP stdio pipe is gone".to_string()
+        })?;
+        let mut stdin = stdin.lock().unwrap_or_else(|p| p.into_inner());
+        use std::io::Write as _;
+        stdin
+            .write_all(line.as_bytes())
+            .map_err(|e| format!("network: MCP write failed: {e}"))?;
+        stdin.flush().map_err(|e| format!("network: MCP flush failed: {e}"))?;
+    }
+    let lines = conn.lines.as_ref().ok_or_else(|| {
+        "network: MCP stdio reader is gone".to_string()
+    })?;
+    let deadline = Instant::now() + Duration::from_secs(timeout_secs);
+    loop {
+        if let Ok(mut queue) = lines.lock() {
+            if let Some(pos) = queue.iter().position(|line| {
+                serde_json::from_str::<serde_json::Value>(line)
+                    .ok()
+                    .and_then(|v| v.get("id").and_then(|i| i.as_u64()))
+                    == Some(id)
+            }) {
+                let line = queue.remove(pos).unwrap_or_default();
+                let value: serde_json::Value = serde_json::from_str(&line)
+                    .map_err(|_| "integrity: MCP server sent unparseable JSON".to_string())?;
+                return mcp_proto::unwrap_response(&value);
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err(format!("network: MCP '{method}' timed out after {timeout_secs}s"));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Fire-and-forget notification (never waits for a reply).
+fn mcp_notify(
+    conn: &McpConnection,
+    method: &str,
+    params: serde_json::Value,
+) -> Result<(), String> {
+    use std::io::Write;
+    let line = mcp_proto::notification(method, params).to_string() + "\n";
+    let stdin = conn.stdin.as_ref().ok_or_else(|| {
+        "network: MCP stdio pipe is gone".to_string()
+    })?;
+    let mut stdin = stdin.lock().unwrap_or_else(|p| p.into_inner());
+    stdin
+        .write_all(line.as_bytes())
+        .map_err(|e| format!("network: MCP notify failed: {e}"))?;
+    stdin.flush().map_err(|e| format!("network: MCP flush failed: {e}"))?;
+    Ok(())
+}
+
+fn mcp_connect_http(
+    name: &str,
+    cfg: &McpServerConfig,
+) -> Result<(McpConnection, Vec<cybermanju_agent::mcp::McpToolDef>), String> {
+    let url = cfg.url.clone().unwrap_or_default();
+    let conn = McpConnection {
+        server: name.to_string(),
+        transport: "http".to_string(),
+        stdin: None,
+        lines: None,
+        child: None,
+        next_id: Mutex::new(1),
+        http_url: Some(url),
+        http_headers: cfg.headers.clone(),
+        http_session: Mutex::new(None),
+    };
+    let init = mcp_http_roundtrip(&conn, "initialize", mcp_proto::initialize_params("cybermanju"), 15)?;
+    let server_version = init
+        .get("protocolVersion")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+    log::debug!("MCP '{name}' (http) speaks protocol {server_version}");
+    let listed = mcp_http_roundtrip(&conn, "tools/list", serde_json::json!({}), 15)?;
+    Ok((conn, mcp_proto::parse_tools_list(&listed)))
+}
+
+/// One Streamable-HTTP round trip: POST JSON-RPC, accept SSE-or-JSON,
+/// harvest the `Mcp-Session-Id` when the server deals one.
+fn mcp_http_roundtrip(
+    conn: &McpConnection,
+    method: &str,
+    params: serde_json::Value,
+    timeout_secs: u64,
+) -> Result<serde_json::Value, String> {
+    let url = conn.http_url.clone().unwrap_or_default();
+    let id = {
+        let mut next = conn.next_id.lock().unwrap_or_else(|p| p.into_inner());
+        *next += 1;
+        *next
+    };
+    let mut headers = conn.http_headers.clone();
+    headers.push(("Content-Type".into(), "application/json".into()));
+    headers.push(("Accept".into(), "application/json, text/event-stream".into()));
+    if let Ok(session) = conn.http_session.lock() {
+        if let Some(session) = session.as_ref() {
+            headers.push(("Mcp-Session-Id".into(), session.clone()));
+        }
+    }
+    let body = mcp_proto::request(id, method, params);
+    let (status, resp_headers, text) = http_post_raw(&url, &headers, &body, timeout_secs)?;
+    if status == 202 {
+        // Accepted with no body (typical for notifications over HTTP).
+        return Ok(serde_json::json!({}));
+    }
+    if !(200..300).contains(&status) {
+        return Err(protocol::classify_provider_error(
+            Some(status),
+            &format!("MCP {method} failed"),
+            "",
+        ));
+    }
+    if let Some(session) = resp_headers
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("mcp-session-id"))
+        .map(|(_, value)| value.clone())
+    {
+        if let Ok(mut slot) = conn.http_session.lock() {
+            if slot.is_none() {
+                *slot = Some(session);
+            }
+        }
+    }
+    // Either a bare JSON-RPC message or an SSE stream carrying one.
+    let trimmed = text.trim_start();
+    if trimmed.starts_with('{') {
+        let value: serde_json::Value = serde_json::from_str(trimmed)
+            .map_err(|_| "integrity: MCP HTTP reply was not JSON".to_string())?;
+        return mcp_proto::unwrap_response(&value);
+    }
+    for data in mcp_proto::parse_sse_data_lines(&text) {
+        if data
+            .get("id")
+            .and_then(|i| i.as_u64())
+            .map(|i| i == id)
+            .unwrap_or(false)
+            || data.get("result").is_some()
+        {
+            return mcp_proto::unwrap_response(&data);
+        }
+    }
+    Err("integrity: MCP HTTP stream carried no matching response".to_string())
+}
+
+/// Raw HTTP POST returning status + headers + body (timeouts finite).
+fn http_post_raw(
+    url: &str,
+    headers: &[(String, String)],
+    body: &serde_json::Value,
+    timeout_secs: u64,
+) -> Result<(u16, Vec<(String, String)>, String), String> {
+    protocol::post_raw(url, headers, body, timeout_secs)
+}
+
+/// Call one namespaced tool on a live set.
+fn mcp_call(
+    set: &McpSet,
+    full_name: &str,
+    input: &serde_json::Value,
+    cancel: &AtomicBool,
+) -> Result<String, String> {
+    let (server, tool) = mcp_proto::split_tool_name(full_name)
+        .ok_or_else(|| format!("unsupported: '{full_name}' is not an MCP tool"))?;
+    let conn = set
+        .find(server)
+        .ok_or_else(|| format!("not_found: MCP server '{server}' is not connected"))?;
+    if cancel.load(Ordering::SeqCst) {
+        return Err("cancelled".to_string());
+    }
+    let params = serde_json::json!({ "name": tool, "arguments": input });
+    let result = match conn.transport.as_str() {
+        "stdio" => mcp_request(conn, "tools/call", params, 120)?,
+        _ => mcp_http_roundtrip(conn, "tools/call", params, 120)?,
+    };
+    Ok(mcp_proto::render_call_result(&result))
+}
 
 /// Start an agent run on a worker thread; returns immediately with a job
 /// snapshot (the REST `202`-style path — the request thread never waits on
@@ -950,6 +1303,79 @@ fn wait_approval(job: &AgentJob) -> Option<ApprovalAnswer> {
     }
 }
 
+/// POST with backoff on `rate_limited:` (3 retries: 2s/4s/8s). Sleeps in
+/// slices so abort stays responsive. Anything else fails immediately —
+/// auth errors must never be retried into a lockout.
+fn post_with_retry(
+    cancel: &AtomicBool,
+    url: &str,
+    headers: &[(String, String)],
+    body: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let mut wait = Duration::from_secs(2);
+    for attempt in 0..4 {
+        match protocol::post_json(url, headers, body) {
+            Ok(reply) => return Ok(reply),
+            Err(e) if e.starts_with("rate_limited:") && attempt < 3 => {
+                let deadline = Instant::now() + wait;
+                while Instant::now() < deadline {
+                    if cancel.load(Ordering::SeqCst) {
+                        return Err("cancelled".to_string());
+                    }
+                    std::thread::sleep(Duration::from_millis(200));
+                }
+                wait *= 2;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err("rate_limited: provider still throttling after 3 backoffs".to_string())
+}
+
+/// Merge discovered MCP tools into a built request body (both dialects keep
+/// their envelope shape; the canonical defs are Anthropic-shaped).
+fn merge_mcp_tools(
+    body: &mut serde_json::Value,
+    dialect: LlmDialect,
+    defs: &[serde_json::Value],
+) {
+    if defs.is_empty() {
+        return;
+    }
+    let tools = match body.get_mut("tools").and_then(|t| t.as_array_mut()) {
+        Some(tools) => tools,
+        None => return,
+    };
+    for def in defs {
+        match dialect {
+            LlmDialect::OpenAi => tools.push(protocol::as_openai_tool(def)),
+            LlmDialect::Anthropic => tools.push(def.clone()),
+        }
+    }
+}
+
+/// Anthropic prompt-caching markers: cache the system block and set the
+/// cache breakpoint on the last tool (Anthropic allows up to 4; one is the
+/// honest, portable choice). Repeated turns then stop re-paying the full
+/// system + tool-schema prefix.
+fn anthropic_cache(body: &mut serde_json::Value) {
+    if let Some(text) = body.get("system").and_then(|s| s.as_str()).map(str::to_string) {
+        body["system"] = serde_json::json!([{
+            "type": "text",
+            "text": text,
+            "cache_control": { "type": "ephemeral" },
+        }]);
+    }
+    if let Some(tools) = body.get_mut("tools").and_then(|t| t.as_array_mut()) {
+        if let Some(last) = tools.last_mut().and_then(|t| t.as_object_mut()) {
+            last.insert(
+                "cache_control".to_string(),
+                serde_json::json!({ "type": "ephemeral" }),
+            );
+        }
+    }
+}
+
 // ─── worker ────────────────────────────────────────────────────────────────
 
 /// Repo overview for the system prompt: top-level working-root listing.
@@ -1035,6 +1461,37 @@ fn run_agent_job(
     let headers = endpoint_headers(&endpoint, &api_key);
     let model = config.model.clone();
 
+    // Connect MCP servers up front: a run with a dead tool server fails
+    // loudly here instead of hallucinating around missing tools mid-run.
+    // `McpSet` drops (kills children) on every exit path below.
+    let mut mcp_defs: Vec<serde_json::Value> = Vec::new();
+    let mut mcp_conns: Vec<McpConnection> = Vec::new();
+    for (name, server_cfg) in &config.mcp_servers {
+        if !server_cfg.enabled {
+            continue;
+        }
+        match mcp_connect(name, server_cfg) {
+            Ok((conn, tools)) => {
+                for tool in tools {
+                    mcp_defs.push(serde_json::json!({
+                        "name": mcp_proto::tool_name(name, &tool.name),
+                        "description": tool.description,
+                        "input_schema": tool.input_schema,
+                    }));
+                }
+                mcp_conns.push(conn);
+            }
+            Err(e) => {
+                fail(job, format!("MCP server '{name}' failed to connect: {e}"));
+                return;
+            }
+        }
+    }
+    if mcp_defs.len() > 256 {
+        mcp_defs.truncate(256);
+    }
+    let mcp_set = McpSet { conns: mcp_conns };
+
     loop {
         if job.cancel.load(Ordering::SeqCst) {
             set_state(job, |s| {
@@ -1043,19 +1500,38 @@ fn run_agent_job(
             });
             break;
         }
-        let (mut url, headers, body) =
+        let (mut url, headers, mut body) =
             turn.build_request(&endpoint.base_url, endpoint.dialect, &model, &system, headers.clone(), true);
+        merge_mcp_tools(&mut body, endpoint.dialect, &mcp_defs);
+        if endpoint.dialect == LlmDialect::Anthropic {
+            anthropic_cache(&mut body);
+        }
         if endpoint.auth == cybermanju_types::agent::AuthScheme::Query {
             let name = endpoint.auth_name.as_deref().unwrap_or("key");
             url = protocol::with_query_key(&url, name, &api_key);
         }
-        let reply = match protocol::post_json(&url, &headers, &body) {
+        let reply = match post_with_retry(&job.cancel, &url, &headers, &body) {
             Ok(reply) => reply,
+            Err(e) if e == "cancelled" => {
+                set_state(job, |s| {
+                    s.status = "cancelled".to_string();
+                    s.pending = None;
+                });
+                break;
+            }
             Err(e) => {
                 fail(job, e);
                 break;
             }
         };
+        if job.cancel.load(Ordering::SeqCst) {
+            // The abort landed while the provider call was in flight.
+            set_state(job, |s| {
+                s.status = "cancelled".to_string();
+                s.pending = None;
+            });
+            break;
+        }
         let event = match turn.ingest_reply(endpoint.dialect, &reply) {
             Ok(event) => event,
             Err(e) => {
@@ -1081,9 +1557,16 @@ fn run_agent_job(
                     .map(|m| m.content.clone())
                     .unwrap_or_default();
                 let short: String = text.chars().take(4000).collect();
+                // A `length` finish means the model was cut off mid-thought,
+                // not that it concluded — say so instead of stopping silently.
+                let result = if turn.last_finish == "length" {
+                    format!("truncated: model hit max tokens; last partial output:\n{short}")
+                } else {
+                    short
+                };
                 set_state(job, |s| {
                     s.status = "done".to_string();
-                    s.result = Some(short);
+                    s.result = Some(result);
                 });
                 break;
             }
@@ -1099,12 +1582,29 @@ fn run_agent_job(
             }
             agent_loop::LoopEvent::ToolCalls(calls) => {
                 let mut stop = false;
+                // Doom-loop guard (omp calls it `doom_loop`): the same call
+                // with byte-identical input three times in a row is denied
+                // instead of burning the turn budget.
+                let mut last_sig: Option<(String, String)> = None;
+                let mut repeats = 0u32;
                 for call in &calls {
                     if job.cancel.load(Ordering::SeqCst) {
                         stop = true;
                         break;
                     }
-                    match run_one_tool(db, job, &config, &root, &vol, &turn, call) {
+                    let input_json =
+                        serde_json::to_string(&call.input).unwrap_or_default();
+                    if last_sig.as_ref().map(|sig| sig.0 == call.name && sig.1 == input_json).unwrap_or(false) {
+                        repeats += 1;
+                    } else {
+                        last_sig = Some((call.name.clone(), input_json));
+                        repeats = 1;
+                    }
+                    if repeats >= 3 {
+                        turn.append_tool_result(call, "denied: identical tool call repeated 3 times (doom-loop guard) — vary the input or explain".to_string());
+                        continue;
+                    }
+                    match run_one_tool(db, job, &config, &root, &vol, &mcp_set, call) {
                         ToolOutcome::Continue(output) => {
                             turn.append_tool_result(call, output);
                         }
@@ -1154,7 +1654,7 @@ fn run_one_tool(
     config: &AgentConfig,
     root: &Path,
     vol: &Path,
-    _turn: &agent_loop::AgentTurn,
+    mcp: &McpSet,
     call: &ToolCall,
 ) -> ToolOutcome {
     // Nested subagents run a bounded inline loop — no registry, no parking.
@@ -1238,6 +1738,27 @@ fn run_one_tool(
     if call.name == "question" {
         // Auto mode cannot answer questions — say so honestly.
         return ToolOutcome::Continue("declined: auto-approve cannot answer questions".to_string());
+    }
+
+    // Namespaced MCP tools run on the live per-run connection set.
+    if mcp_proto::split_tool_name(&call.name).is_some() {
+        match mcp_call(mcp, &call.name, &call.input, &job.cancel) {
+            Ok(mut output) => {
+                if output.len() > TOOL_OUTPUT_CAP {
+                    output.truncate(TOOL_OUTPUT_CAP);
+                    output.push_str("\n… truncated at 64 KiB");
+                }
+                return ToolOutcome::Continue(output);
+            }
+            Err(e) if e == "cancelled" => {
+                set_state(job, |s| {
+                    s.status = "cancelled".to_string();
+                    s.pending = None;
+                });
+                return ToolOutcome::Stop;
+            }
+            Err(e) => return ToolOutcome::Continue(format!("error: {e}")),
+        }
     }
 
     let guard = match db.read() {
@@ -1359,14 +1880,13 @@ fn run_subagent(
         if job.cancel.load(Ordering::SeqCst) {
             return ToolOutcome::Continue("subagent cancelled with the parent run".to_string());
         }
-        let (mut url, headers, body) =
+        let (mut url, headers, mut body) =
             sub.build_request(&endpoint.base_url, endpoint.dialect, &model, &system, headers.clone(), true);
         if endpoint.auth == cybermanju_types::agent::AuthScheme::Query {
             let name = endpoint.auth_name.as_deref().unwrap_or("key");
             url = protocol::with_query_key(&url, name, &api_key);
         }
         // Strip mutating tools: subagents read and report.
-        let mut body = body;
         if let Some(tools) = body.get_mut("tools").and_then(|t| t.as_array_mut()) {
             let keep = |name: &str| matches!(name, "read" | "list" | "grep");
             tools.retain(|t| {
@@ -1378,19 +1898,33 @@ fn run_subagent(
                     .unwrap_or(false)
             });
         }
-        let reply = match protocol::post_json(&url, &headers, &body) {
+        if endpoint.dialect == LlmDialect::Anthropic {
+            anthropic_cache(&mut body);
+        }
+        let reply = match post_with_retry(&job.cancel, &url, &headers, &body) {
             Ok(reply) => reply,
+            Err(e) if e == "cancelled" => {
+                return ToolOutcome::Continue("subagent cancelled with the parent run".to_string())
+            }
             Err(e) => return ToolOutcome::Continue(format!("subagent transport failed: {e}")),
         };
+        if job.cancel.load(Ordering::SeqCst) {
+            return ToolOutcome::Continue("subagent cancelled with the parent run".to_string());
+        }
         match sub.ingest_reply(endpoint.dialect, &reply) {
             Ok(agent_loop::LoopEvent::TextDone) => {
-                summary = sub
+                let text = sub
                     .messages
                     .iter()
                     .rev()
                     .find(|m| m.role == "assistant")
                     .map(|m| m.content.clone())
                     .unwrap_or(summary);
+                summary = if sub.last_finish == "length" {
+                    format!("{text}\n(truncated: subagent hit max tokens)")
+                } else {
+                    text
+                };
                 break;
             }
             Ok(agent_loop::LoopEvent::ToolCalls(calls)) => {
@@ -1583,4 +2117,203 @@ pub fn try_ai_exec(
             }
         }
     }
+}
+
+// ─── session compaction ────────────────────────────────────────────────────
+
+/// Render a transcript slice for a handoff summary: `ROLE: excerpt` lines,
+/// newest kept preferentially under an 80 KiB cap.
+fn render_handoff(messages: &[ChatMessage]) -> String {
+    const PER_MESSAGE_CAP: usize = 1000;
+    const TOTAL_CAP: usize = 80_000;
+    let mut lines: Vec<String> = Vec::new();
+    let mut bytes = 0usize;
+    for message in messages.iter().rev() {
+        let role = message.role.to_uppercase();
+        let excerpt: String = message.content.chars().take(PER_MESSAGE_CAP).collect();
+        let mut line = if let Some(name) = message.tool_name.as_deref() {
+            format!("{role}({name}): {excerpt}")
+        } else {
+            format!("{role}: {excerpt}")
+        };
+        if message.role == "assistant_tool" {
+            if let Some(input) = message.tool_input.as_ref() {
+                let calls: String = serde_json::to_string(input)
+                    .unwrap_or_default()
+                    .chars()
+                    .take(500)
+                    .collect();
+                line.push_str(&format!(" [calls {calls}]"));
+            }
+        }
+        if bytes + line.len() > TOTAL_CAP {
+            break;
+        }
+        bytes += line.len();
+        lines.push(line);
+        if lines.len() >= 400 {
+            break;
+        }
+    }
+    lines.reverse();
+    lines.join("\n")
+}
+
+/// Compact a session: one no-tools turn summarizes the transcript into a
+/// fresh session. The old session is kept untouched (reopen it to revert).
+/// Lock-free by construction — only brief reads and one terminal write, so
+/// the ROUTES call this from the lockless block like `prompt`.
+pub fn compact_session(
+    db: &Arc<RwLock<Database>>,
+    config_id: &str,
+    session_id: &str,
+) -> Result<AgentSession, String> {
+    let (config, key, session) = {
+        let guard = db.read().map_err(|e| e.to_string())?;
+        let config = get_config(&guard, config_id)?;
+        let key = load_key(&guard, config_id)?;
+        let session = get_session(&guard, session_id)?;
+        (config, key, session)
+    };
+    if session.messages.is_empty() {
+        return Err("invalid: session has no messages to compact".to_string());
+    }
+    let endpoint = providers::resolve(&config)?;
+    if !endpoint.keyless && key.is_empty() {
+        return Err("auth: no API key saved for this config — add one first".to_string());
+    }
+    let handoff = render_handoff(&session.messages);
+    let mut turn = agent_loop::AgentTurn::new(
+        vec![ChatMessage {
+            role: "user".into(),
+            content: format!(
+                "Summarize this coding session into a handoff for a fresh agent: \
+                 decisions made, files changed, errors seen, and the next concrete step. \
+                 Be specific with file paths and tool results.\n\nTRANSCRIPT:\n{handoff}"
+            ),
+            tool_call_id: None,
+            tool_name: None,
+            tool_input: None,
+        }],
+        1,
+        0,
+    );
+    let system = "You compress session transcripts into actionable handoffs. Output the summary only.";
+    let headers = endpoint_headers(&endpoint, &key);
+    let (mut url, headers, mut body) =
+        turn.build_request(&endpoint.base_url, endpoint.dialect, &config.model, system, headers, false);
+    if endpoint.dialect == LlmDialect::Anthropic {
+        anthropic_cache(&mut body);
+    }
+    if endpoint.auth == cybermanju_types::agent::AuthScheme::Query {
+        let name = endpoint.auth_name.as_deref().unwrap_or("key");
+        url = protocol::with_query_key(&url, name, &key);
+    }
+    let cancel = AtomicBool::new(false);
+    let reply = post_with_retry(&cancel, &url, &headers, &body)?;
+    match turn.ingest_reply(endpoint.dialect, &reply)? {
+        agent_loop::LoopEvent::TextDone => {}
+        other => {
+            return Err(format!("integrity: compaction turn ended unexpectedly: {other:?}"));
+        }
+    }
+    let summary = turn
+        .messages
+        .iter()
+        .rev()
+        .find(|m| m.role == "assistant")
+        .map(|m| m.content.clone())
+        .unwrap_or_default();
+    if summary.trim().is_empty() {
+        return Err("integrity: compaction produced an empty summary".to_string());
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    let compacted = AgentSession {
+        id: uuid::Uuid::new_v4().to_string(),
+        title: format!("{} (compacted)", session.title.chars().take(48).collect::<String>()),
+        config_id: session.config_id.clone(),
+        provider_id: session.provider_id.clone(),
+        model: session.model.clone(),
+        agent_kind: session.agent_kind,
+        working_dir: session.working_dir.clone(),
+        messages: vec![ChatMessage {
+            role: "user".into(),
+            content: format!("Previous session summary (compacted at {now}):\n{summary}"),
+            tool_call_id: None,
+            tool_name: None,
+            tool_input: None,
+        }],
+        usage: TokenUsage {
+            input_tokens: session.usage.input_tokens + turn.usage.input_tokens,
+            output_tokens: session.usage.output_tokens + turn.usage.output_tokens,
+        },
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    {
+        let guard = db.read().map_err(|e| e.to_string())?;
+        save_session_row(&guard, &compacted)?;
+    }
+    Ok(compacted)
+}
+
+// ─── MCP management ────────────────────────────────────────────────────────
+
+/// Attach an MCP server to a config (validated, not connected yet).
+/// Admin-gated at the route: stdio entries spawn processes.
+pub fn mcp_add(
+    db: &Database,
+    config_id: &str,
+    name: String,
+    server: McpServerConfig,
+) -> Result<AgentConfig, String> {
+    let name = name.trim();
+    if !mcp_proto::valid_server_name(name) {
+        return Err(format!("invalid: bad MCP server name '{name}'"));
+    }
+    server.validate()?;
+    let mut config = get_config(db, config_id)?;
+    config.mcp_servers.insert(name.to_string(), server);
+    save_config(db, config)
+}
+
+/// Detach an MCP server from a config.
+pub fn mcp_remove(db: &Database, config_id: &str, name: &str) -> Result<AgentConfig, String> {
+    let mut config = get_config(db, config_id)?;
+    if config.mcp_servers.remove(name).is_none() {
+        return Err(format!("not_found: MCP server '{name}' is not attached"));
+    }
+    save_config(db, config)
+}
+
+/// Connect every enabled server on a config and list their tools.
+/// Short-lived connections: connected, listed, dropped.
+pub fn mcp_tools(db: &Database, config_id: &str) -> Result<Vec<McpToolView>, String> {
+    let config = get_config(db, config_id)?;
+    mcp_tools_for(&config)
+}
+
+/// Same as `mcp_tools` but from an already-loaded config — the lockless
+/// routes use this so process spawns never hold the request lock.
+pub fn mcp_tools_for(config: &AgentConfig) -> Result<Vec<McpToolView>, String> {
+    let mut out = Vec::new();
+    for (name, server) in &config.mcp_servers {
+        if !server.enabled {
+            continue;
+        }
+        let (_conn, tools) = mcp_connect(name, server)
+            .map_err(|e| format!("MCP server '{name}' failed: {e}"))?;
+        for tool in tools {
+            out.push(McpToolView {
+                server: name.clone(),
+                name: mcp_proto::tool_name(name, &tool.name),
+                description: tool.description,
+            });
+        }
+        if out.len() >= 256 {
+            break;
+        }
+    }
+    out.sort_by(|a, b| (&a.server, &a.name).cmp(&(&b.server, &b.name)));
+    Ok(out)
 }

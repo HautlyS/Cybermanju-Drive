@@ -66,6 +66,14 @@ the same lock-free intercept), `ai status [job]`, `ai abort [job]`,
 (`agent:key:<config_id>`); configs/sessions are plain JSON rows. Transcripts
 sync like any file via export → striped placement.
 
+Agent loop hardening (all on by default): rate-limit backoff (3 retries),
+doom-loop guard (identical tool call ×3 denied), `length`-finish truncation
+notes, abort-checked retries and post-call polling, Anthropic prompt-caching
+markers, read-only depth-1 subagents. `POST …/compact` summarizes a session
+into a fresh one (old kept for revert). MCP servers (`stdio` local commands,
+`http` Streamable) attach per config behind admin role; tools appear as
+`mcp__server__tool` under the same permission rules.
+
 ## 5. Durability: scrub / repair / gc / leases
 
 | Task | Route | Notes |

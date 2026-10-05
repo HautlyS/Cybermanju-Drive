@@ -199,6 +199,9 @@ pub fn required_role(method: &str, segments: &[&str]) -> RequiredRole {
         ["api", "share-links"] if method == "GET" => RequiredRole::Admin,
         ["api", "share-links", _] if method == "DELETE" => RequiredRole::Admin,
         ["api", "sync", "configs", _] if method == "DELETE" => RequiredRole::Admin,
+        // MCP servers spawn processes — attaching/detaching is privileged.
+        ["api", "agent", "configs", _, "mcp"] if method == "POST" => RequiredRole::Admin,
+        ["api", "agent", "configs", _, "mcp", _] if method == "DELETE" => RequiredRole::Admin,
 
         // ── Everything else: any authenticated session ───────────
         _ => RequiredRole::Authenticated,

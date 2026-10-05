@@ -153,3 +153,46 @@ pub fn approve_agent_job(
 ) -> Result<bool, String> {
     cybermanju_web::api::agent_api::approve_job(&job_id, approved, answer)
 }
+
+/// Compact a session transcript into a fresh session (old kept for revert).
+#[tauri::command]
+pub fn compact_agent_session(
+    config_id: String,
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<cybermanju_types::agent::AgentSession, String> {
+    cybermanju_web::api::agent_api::compact_session(&state.db, &config_id, &session_id)
+}
+
+/// Attach an MCP server to a config (validated, not yet connected).
+#[tauri::command]
+pub fn mcp_add_server(
+    config_id: String,
+    name: String,
+    server: cybermanju_types::agent::McpServerConfig,
+    state: State<'_, AppState>,
+) -> Result<cybermanju_types::agent::AgentConfig, String> {
+    let db = state.db.read().map_err(|e| e.to_string())?;
+    cybermanju_web::api::agent_api::mcp_add(&db, &config_id, name, server)
+}
+
+/// Detach an MCP server from a config.
+#[tauri::command]
+pub fn mcp_remove_server(
+    config_id: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<cybermanju_types::agent::AgentConfig, String> {
+    let db = state.db.read().map_err(|e| e.to_string())?;
+    cybermanju_web::api::agent_api::mcp_remove(&db, &config_id, &name)
+}
+
+/// Connect a config's MCP servers and list their tools.
+#[tauri::command]
+pub fn mcp_list_tools(
+    config_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<cybermanju_web::api::agent_api::McpToolView>, String> {
+    let db = state.db.read().map_err(|e| e.to_string())?;
+    cybermanju_web::api::agent_api::mcp_tools(&db, &config_id)
+}

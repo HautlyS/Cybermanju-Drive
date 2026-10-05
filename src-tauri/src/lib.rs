@@ -219,6 +219,10 @@ pub fn run() {
             commands::agent::list_agent_jobs,
             commands::agent::abort_agent_job,
             commands::agent::approve_agent_job,
+            commands::agent::compact_agent_session,
+            commands::agent::mcp_add_server,
+            commands::agent::mcp_remove_server,
+            commands::agent::mcp_list_tools,
             // File import / upload
             import_cmd::import_file,
             import_cmd::import_from_url,

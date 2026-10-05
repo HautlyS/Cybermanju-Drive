@@ -15,6 +15,7 @@
 pub mod config;
 pub mod edit;
 pub mod agent_loop;
+pub mod mcp;
 pub mod protocol;
 pub mod providers;
 

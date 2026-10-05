@@ -40,6 +40,9 @@ pub struct AgentTurn {
     pub max_turns: u32,
     pub usage: TokenUsage,
     pub task_depth: u32,
+    /// Raw finish reason of the last reply (`stop`, `tool_calls`,
+    /// `length`, …) — the driver uses it to notice truncation.
+    pub last_finish: String,
 }
 
 impl AgentTurn {
@@ -50,6 +53,7 @@ impl AgentTurn {
             max_turns: max_turns.min(MAX_TURNS_HARD_CAP).max(1),
             usage: TokenUsage::default(),
             task_depth,
+            last_finish: String::new(),
         }
     }
 
@@ -93,6 +97,7 @@ impl AgentTurn {
         };
         self.usage.input_tokens += turn.usage.input_tokens;
         self.usage.output_tokens += turn.usage.output_tokens;
+        self.last_finish = turn.finish.clone();
         if !turn.tool_calls.is_empty() {
             let wire = assistant_tool_wire(&turn.tool_calls);
             self.messages.push(ChatMessage {

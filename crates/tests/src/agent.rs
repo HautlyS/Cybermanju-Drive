@@ -1,7 +1,7 @@
 // Native agent REST contract: providers, keyless configs, sessions,
 // detached jobs with approvals, and the `cybsh ai` intercept.
 
-use crate::web::{bearer, body_of, bootstrap_session, call, mk_dashboard, status_of};
+use crate::web::{bearer, body_of, bootstrap_session, call, mint, mk_dashboard, now_secs, status_of};
 
 fn authed() -> (tempfile::TempDir, std::sync::Arc<cybermanju_web::WebDashboard>, String) {
     let (dir, d) = mk_dashboard(3456);
@@ -212,4 +212,127 @@ fn code_parse_still_serves_alongside_agent_routes() {
         Some(&auth),
     );
     assert_eq!(status_of(&resp), 200, "{resp}");
+}
+
+#[test]
+fn mcp_management_is_admin_gated_and_validated() {
+    let (_dir, d) = mk_dashboard(3456);
+    let admin = bearer(&mint(&d, "admin", now_secs() + 3_600, "jti-agent-mcp-admin"));
+    let member = bearer(&mint(&d, "user", now_secs() + 3_600, "jti-agent-mcp-user"));
+
+    // Any authenticated user may create a config; seed one as member.
+    let body = r#"{"config":{
+        "id":"","name":"MCP","providerId":"ollama","model":"llama3.1:8b",
+        "workingDir":"","agentKind":"build","permission":{"default":"ask","rules":{}},
+        "autoApprove":false,"maxTurns":5}}"#;
+    let resp = call(&d, "POST", "/api/agent/configs", body, Some(&member));
+    assert_eq!(status_of(&resp), 200, "{resp}");
+    let id: String = serde_json::from_str::<serde_json::Value>(body_of(&resp))
+        .expect("json")["id"]
+        .as_str()
+        .expect("id")
+        .to_string();
+
+    let attach = |auth: &str, payload: &str| {
+        call(
+            &d,
+            "POST",
+            &format!("/api/agent/configs/{id}/mcp"),
+            payload,
+            Some(auth),
+        )
+    };
+    // Member attach → 403 (stdio spawns processes).
+    let resp = attach(
+        &member,
+        r#"{"name":"fs","server":{"transport":"stdio","command":"npx","args":[]}}"#,
+    );
+    assert_eq!(status_of(&resp), 403, "{resp}");
+
+    // Unknown transport → 400 even for admins.
+    let resp = attach(
+        &admin,
+        r#"{"name":"fs","server":{"transport":"ssh"}}"#,
+    );
+    assert_eq!(status_of(&resp), 400, "{resp}");
+
+    // Slash in the name → 400 (names become tool ids).
+    let resp = attach(
+        &admin,
+        r#"{"name":"a/b","server":{"transport":"stdio","command":"x","args":[]}}"#,
+    );
+    assert_eq!(status_of(&resp), 400, "{resp}");
+
+    // Unknown config → 404.
+    let resp = call(
+        &d,
+        "POST",
+        "/api/agent/configs/nope/mcp",
+        r#"{"name":"fs","server":{"transport":"stdio","command":"x","args":[]}}"#,
+        Some(&admin),
+    );
+    assert_eq!(status_of(&resp), 404, "{resp}");
+
+    // Detach of nothing → 404; detach path is admin-gated too.
+    let resp = call(
+        &d,
+        "DELETE",
+        &format!("/api/agent/configs/{id}/mcp/fs"),
+        "",
+        Some(&admin),
+    );
+    assert_eq!(status_of(&resp), 404, "{resp}");
+    let resp = call(
+        &d,
+        "DELETE",
+        &format!("/api/agent/configs/{id}/mcp/fs"),
+        "",
+        Some(&member),
+    );
+    assert_eq!(status_of(&resp), 403, "{resp}");
+
+    // Tools discovery on unknown config → 404.
+    let resp = call(&d, "GET", "/api/agent/configs/nope/mcp/tools", "", Some(&admin));
+    assert_eq!(status_of(&resp), 404, "{resp}");
+}
+
+#[test]
+fn compact_validates_before_any_network() {
+    let (_dir, d) = mk_dashboard(3456);
+    let token = bootstrap_session(&d, "agent-compact", "correct horse battery");
+    let auth = bearer(&token);
+    let id = make_config(&d, &auth);
+
+    // Unknown session → 404 without touching the network.
+    let resp = call(
+        &d,
+        "POST",
+        "/api/agent/sessions/nope/compact",
+        &format!(r#"{{"configId":"{id}"}}"#),
+        Some(&auth),
+    );
+    assert_eq!(status_of(&resp), 404, "{resp}");
+
+    // Empty transcript → 400, no provider call.
+    let resp = call(
+        &d,
+        "POST",
+        "/api/agent/sessions",
+        &format!(r#"{{"configId":"{id}","title":"Empty"}}"#),
+        Some(&auth),
+    );
+    assert_eq!(status_of(&resp), 200, "{resp}");
+    let sid: String = serde_json::from_str::<serde_json::Value>(body_of(&resp)).expect("json")["id"]
+        .as_str()
+        .expect("sid")
+        .to_string();
+    let resp = call(
+        &d,
+        "POST",
+        &format!("/api/agent/sessions/{sid}/compact"),
+        &format!(r#"{{"configId":"{id}"}}"#),
+        Some(&auth),
+    );
+    assert_eq!(status_of(&resp), 400, "{resp}");
+    assert!(body_of(&resp).contains("no messages"), "{resp}");
 }

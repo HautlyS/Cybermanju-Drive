@@ -8,7 +8,7 @@ import type {
   SearchResult, EncryptionStatus, EncryptionKeyInfo,
   CompressionStats, ParseResult, GeoMarker,
   FileContent, SavedContent,
-  ProviderPreset, AgentConfig, AgentSession, AgentJob,
+  ProviderPreset, AgentConfig, AgentSession, AgentJob, McpServerConfig,
   ViewMode, PanelType, SidebarSection,
   SyncConfig, SyncProgress, SyncResult, RemoteFile,
   SyncJob, SyncRunRecord, RestoreOutcome, QuotaUsage,
@@ -1466,6 +1466,49 @@ export const useAppStore = defineStore('cybermanju', () => {
     }
   }
 
+  async function compactAgentSession(configId: string, sessionId: string) {
+    try {
+      const compacted = await invoke<AgentSession>('compact_agent_session', { configId, sessionId })
+      await fetchAgentSessions()
+      notifySuccess('Session compacted — old transcript kept for revert')
+      return compacted
+    } catch (e) {
+      notifyError('Compaction failed', e)
+      return null
+    }
+  }
+
+  async function mcpAddServer(configId: string, name: string, server: McpServerConfig) {
+    try {
+      const updated = await invoke<AgentConfig>('mcp_add_server', { configId, name, server })
+      await fetchAgentConfigs()
+      notifySuccess(`MCP server '${name}' attached`)
+      return updated
+    } catch (e) {
+      notifyError('Failed to attach MCP server', e)
+      return null
+    }
+  }
+
+  async function mcpRemoveServer(configId: string, name: string) {
+    try {
+      await invoke('mcp_remove_server', { configId, name })
+      await fetchAgentConfigs()
+      notifySuccess(`MCP server '${name}' detached`)
+    } catch (e) {
+      notifyError('Failed to detach MCP server', e)
+    }
+  }
+
+  async function mcpListTools(configId: string) {
+    try {
+      return await invoke<Array<{ server: string; name: string; description: string }>>('mcp_list_tools', { configId })
+    } catch (e) {
+      notifyError('MCP discovery failed', e)
+      return null
+    }
+  }
+
   async function fetchDisks() {
     try {
       disks.value = await invoke<DiskRow[]>('list_disks')
@@ -1574,6 +1617,7 @@ export const useAppStore = defineStore('cybermanju', () => {
     fetchAgentProviders, fetchAgentConfigs, saveAgentConfig, deleteAgentConfig,
     saveAgentKey, refreshAgentModels, fetchAgentSessions, loadAgentSession, deleteAgentSession,
     startAgentRun, pollAgentJob, abortAgentJob, approveAgentJob,
+    compactAgentSession, mcpAddServer, mcpRemoveServer, mcpListTools,
     fetchDisks, createDisk, attachDisk, detachDisk, resizeDisk, checkDisk,
     // User Management
     fetchUsers, createUser, deleteUser, updateUserRole,

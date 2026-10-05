@@ -146,6 +146,12 @@ pub struct AgentConfig {
     /// Auto-approve `ask` (never overrides `deny`).
     #[serde(default)]
     pub auto_approve: bool,
+    /// Attached MCP servers by name (validated on save, connected per run).
+    #[serde(default)]
+    pub mcp_servers: std::collections::BTreeMap<String, McpServerConfig>,
+    /// Attached MCP servers by name (validated on save, connected per run).
+    #[serde(default)]
+    pub mcp_servers: std::collections::BTreeMap<String, McpServerConfig>,
     #[serde(default = "default_max_turns")]
     pub max_turns: u32,
     /// A key is stored server-side (never echoed back).
@@ -211,4 +217,64 @@ pub struct AgentSession {
     pub usage: TokenUsage,
     pub created_at: String,
     pub updated_at: String,
+}
+
+/// One MCP (Model Context Protocol) server attached to a config.
+///
+/// `stdio` spawns a local command (admin-gated — it executes processes);
+/// `http` speaks Streamable HTTP (usable anywhere, CORS permitting).
+/// Tools surface namespaced as `mcp__<server>__<tool>` so permission rules
+/// match them like any other tool.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServerConfig {
+    /// `"stdio"` or `"http"`.
+    pub transport: String,
+    /// Command for stdio (e.g. `"npx"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: std::collections::BTreeMap<String, String>,
+    /// Endpoint for Streamable HTTP.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default)]
+    pub headers: Vec<(String, String)>,
+    /// Disabled servers are skipped at connect time, never deleted silently.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl McpServerConfig {
+    /// Validate without connecting (empty command / bad URL fail here).
+    pub fn validate(&self) -> Result<(), String> {
+        match self.transport.as_str() {
+            "stdio" => {
+                let cmd = self.command.as_deref().unwrap_or("").trim();
+                if cmd.is_empty() {
+                    return Err("invalid: stdio MCP servers need a command".to_string());
+                }
+                if cmd.contains('/') || cmd.contains('\\') {
+                    return Err(
+                        "invalid: stdio command must be a bare binary name on PATH".to_string(),
+                    );
+                }
+                Ok(())
+            }
+            "http" => {
+                let url = self.url.as_deref().unwrap_or("");
+                if !(url.starts_with("http://") || url.starts_with("https://")) {
+                    return Err("invalid: http MCP servers need an http(s) url".to_string());
+                }
+                Ok(())
+            }
+            other => Err(format!("invalid: unknown MCP transport '{other}'")),
+        }
+    }
 }

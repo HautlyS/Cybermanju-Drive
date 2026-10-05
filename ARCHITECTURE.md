@@ -757,6 +757,9 @@ Login via `POST /api/users/login` with `{ "username": "...", "password": "..." }
 | `GET` | `/api/agent/jobs`, `/api/agent/jobs/{id}` | List/poll jobs (turns, usage, approvals) |
 | `POST` | `/api/agent/jobs/{id}/abort` | Cancel a run |
 | `POST` | `/api/agent/jobs/{id}/approve` | Answer an approval/question |
+| `POST` | `/api/agent/sessions/{id}/compact` | Summarize into a fresh session (old kept) |
+| `POST`/`DELETE` | `/api/agent/configs/{id}/mcp`, `…/mcp/{name}` | Attach/detach MCP servers (admin) |
+| `GET` | `/api/agent/configs/{id}/mcp/tools` | Discover MCP tools |
 | `GET`/`PUT` | `/api/files/{id}/content` | Read/overwrite managed file text (1 MiB cap, versioned saves) |
 | `POST` | `/api/code/parse` | Parse source text (shared heuristic core) |
 | **Health** | | |

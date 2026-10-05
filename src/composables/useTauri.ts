@@ -845,6 +845,32 @@ const REST_ROUTES: Record<string, RestMapping> = {
     transformRequest: (args) => ({ approved: args.approved, answer: args.answer }),
   },
 
+  compact_agent_session: {
+    method: 'POST',
+    buildPath: (args) => `/api/agent/sessions/${args.sessionId}/compact`,
+    transformRequest: (args) => ({ configId: args.configId }),
+    transformResponse: (raw) => transformResponseKeys(raw),
+  },
+
+  mcp_add_server: {
+    method: 'POST',
+    buildPath: (args) => `/api/agent/configs/${args.configId}/mcp`,
+    transformRequest: (args) => ({ name: args.name, server: args.server }),
+    transformResponse: (raw) => transformResponseKeys(raw),
+  },
+
+  mcp_remove_server: {
+    method: 'DELETE',
+    buildPath: (args) => `/api/agent/configs/${args.configId}/mcp/${args.name}`,
+    transformResponse: (raw) => transformResponseKeys(raw),
+  },
+
+  mcp_list_tools: {
+    method: 'GET',
+    buildPath: (args) => `/api/agent/configs/${args.configId}/mcp/tools`,
+    transformResponse: (raw) => transformResponseKeys(raw),
+  },
+
   // ── Managed file text content (code editor) ──
   read_file_content: {
     method: 'GET',
@@ -975,7 +1001,8 @@ const REST_FIRST = new Set([
   'list_agent_sessions', 'get_agent_session', 'create_agent_session',
   'delete_agent_session', 'import_agent_session', 'start_agent_run',
   'agent_job_status', 'list_agent_jobs', 'abort_agent_job',
-  'approve_agent_job',
+  'approve_agent_job', 'compact_agent_session',
+  'mcp_add_server', 'mcp_remove_server', 'mcp_list_tools',
 ])
 
 // Commands the `cybermanju-drive-wasm` crate serves on a static host.

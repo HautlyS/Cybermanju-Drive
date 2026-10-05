@@ -121,6 +121,24 @@ pub fn anthropic_tools() -> serde_json::Value {
         .collect()
 }
 
+/// Wrap one canonical definition (`name/description/input_schema`, e.g.
+/// from MCP discovery) in the OpenAI `{type, function}` envelope.
+pub fn as_openai_tool(def: &serde_json::Value) -> serde_json::Value {
+    let name = def.get("name").cloned().unwrap_or(serde_json::Value::Null);
+    let description = def
+        .get("description")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    let parameters = def.get("input_schema").cloned().unwrap_or(serde_json::json!({
+        "type": "object",
+        "properties": {},
+    }));
+    serde_json::json!({
+        "type": "function",
+        "function": { "name": name, "description": description, "parameters": parameters },
+    })
+}
+
 // ─── auth ─────────────────────────────────────────────────────────────────
 
 /// Headers for a chat call. The key itself travels only here, never in a
@@ -484,6 +502,36 @@ pub fn get_json(url: &str, headers: &[(String, String)]) -> Result<serde_json::V
         return Err(classify_provider_error(Some(status), "models request failed", ""));
     }
     Ok(value)
+}
+
+/// Raw POST returning status + headers + body (Streamable HTTP clients need
+/// the session header). Same timeout and prefix contract as `post_json`.
+#[cfg(feature = "native")]
+pub fn post_raw(
+    url: &str,
+    headers: &[(String, String)],
+    body: &serde_json::Value,
+    timeout_secs: u64,
+) -> Result<(u16, Vec<(String, String)>, String), String> {
+    let client = reqwest::blocking::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|e| format!("network: cannot build HTTP client: {e}"))?;
+    let mut req = client.post(url).json(body);
+    for (name, value) in headers {
+        req = req.header(name.as_str(), value.as_str());
+    }
+    let resp = req.send().map_err(|e| format!("network: request failed: {e}"))?;
+    let status = resp.status().as_u16();
+    let mut out_headers = Vec::new();
+    for (name, value) in resp.headers().iter() {
+        out_headers.push((name.to_string(), value.to_str().unwrap_or("").to_string()));
+    }
+    let text = resp
+        .text()
+        .map_err(|e| format!("network: unreadable reply: {e}"))?;
+    Ok((status, out_headers, text))
 }
 
 #[cfg(test)]

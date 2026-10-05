@@ -116,6 +116,64 @@
       <div v-if="!configs.length" class="empty text-muted">No configs — open SETUP, pick a preset, save.</div>
     </div>
 
+    <div v-if="chatConfig" class="section">
+      <h3 class="section-title">[MCP] SERVERS FOR {{ chatConfig.name.toUpperCase() }} ({{ mcpEntries.length }})</h3>
+      <div class="config-list">
+        <div v-for="m in mcpEntries" :key="m.name" class="config-card">
+          <div class="cfg-header">
+            <span class="cfg-name">{{ m.name }}</span>
+            <span class="cfg-type text-muted">{{ m.cfg.transport }}{{ m.cfg.enabled ? '' : ' · OFF' }}</span>
+          </div>
+          <div class="cfg-meta text-muted">
+            <span v-if="m.cfg.transport === 'stdio'">{{ m.cfg.command }} {{ (m.cfg.args || []).join(' ') }}</span>
+            <span v-else>{{ m.cfg.url }}</span>
+          </div>
+          <div class="cfg-actions">
+            <button class="bw-btn xs danger" @click="removeMcp(m.name)">DETACH</button>
+          </div>
+        </div>
+      </div>
+      <div class="w-row">
+        <input v-model="mcpForm.name" class="bw-input" placeholder="server-name" spellcheck="false" />
+        <select v-model="mcpForm.transport" class="bw-input">
+          <option value="stdio">STDIO (LOCAL CMD)</option>
+          <option value="http">HTTP (STREAMABLE)</option>
+        </select>
+      </div>
+      <div class="w-row">
+        <input
+          v-if="mcpForm.transport === 'stdio'"
+          v-model="mcpForm.command"
+          class="bw-input"
+          placeholder="command on PATH (e.g. npx)"
+          spellcheck="false"
+        />
+        <input
+          v-if="mcpForm.transport === 'stdio'"
+          v-model="mcpForm.args"
+          class="bw-input"
+          placeholder="args, space-separated"
+          spellcheck="false"
+        />
+        <input
+          v-if="mcpForm.transport === 'http'"
+          v-model="mcpForm.url"
+          class="bw-input"
+          placeholder="https://…/mcp"
+          spellcheck="false"
+        />
+        <button class="bw-btn small" :disabled="mcpBusy || !mcpForm.name.trim()" @click="addMcp">ATTACH</button>
+        <button class="bw-btn small" :disabled="mcpBusy || !chatConfigId" @click="refreshMcpTools">LIST TOOLS</button>
+      </div>
+      <div v-if="mcpTools.length" class="remote-list">
+        <div v-for="t in mcpTools" :key="t.name" class="remote-row">
+          <span>{{ t.name }}</span><span class="text-muted">{{ (t.description || '').slice(0, 80) }}</span>
+        </div>
+      </div>
+      <div v-if="mcpMsg" class="w-msg">{{ mcpMsg }}</div>
+      <p class="text-muted hint">ATTACH/DETACH NEEDS ADMIN (STDIO SPAWNS PROCESSES). TOOLS APPEAR AS <span class="mono">mcp__server__tool</span> AND FOLLOW THE SAME ASK/DENY RULES.</p>
+    </div>
+
     <div class="section">
       <h3 class="section-title">[CHAT] SESSIONS ({{ sessions.length }})</h3>
       <div class="w-row">
@@ -145,6 +203,11 @@
 
     <div v-if="viewing" class="section thread">
       <h3 class="section-title">[THREAD] {{ viewing.title }}</h3>
+      <div class="w-actions thread-actions">
+        <button class="bw-btn xs" :disabled="!viewing.messages.length || jobActive" @click="compactThread" title="Summarize into a fresh session (old kept)">
+          COMPACT
+        </button>
+      </div>
       <div class="usage text-muted" v-if="threadUsage">TOKENS IN {{ threadUsage.inputTokens }} / OUT {{ threadUsage.outputTokens }}</div>
       <div class="messages">
         <div v-for="(m, i) in viewing.messages" :key="i" class="msg" :class="`role-${m.role}`">
@@ -264,6 +327,79 @@ const chatConfigId = ref('')
 const promptInput = ref('')
 const answerInput = ref('')
 const importEl = ref<HTMLInputElement | null>(null)
+
+const chatConfig = computed(() => configs.value.find(c => c.id === chatConfigId.value) ?? null)
+
+// ─── MCP attach/detach/discover (selected config) ───
+const mcpTools = ref<Array<{ server: string; name: string; description: string }>>([])
+const mcpBusy = ref(false)
+const mcpMsg = ref('')
+const mcpForm = reactive({ name: '', transport: 'stdio', command: '', args: '', url: '' })
+
+const mcpEntries = computed(() => {
+  const cfg = chatConfig.value
+  if (!cfg) return []
+  return Object.entries(cfg.mcpServers ?? {}).map(([name, server]) => ({ name, cfg: server }))
+})
+
+async function addMcp() {
+  if (!chatConfigId.value || !mcpForm.name.trim()) return
+  mcpBusy.value = true
+  mcpMsg.value = ''
+  try {
+    const server = {
+      transport: mcpForm.transport,
+      command: mcpForm.transport === 'stdio' ? mcpForm.command.trim() || undefined : undefined,
+      args: mcpForm.transport === 'stdio' ? mcpForm.args.split(/\s+/).filter(Boolean) : [],
+      env: {},
+      url: mcpForm.transport === 'http' ? mcpForm.url.trim() || undefined : undefined,
+      headers: [],
+      enabled: true,
+    }
+    const updated = await store.mcpAddServer(chatConfigId.value, mcpForm.name.trim(), server)
+    if (updated) {
+      mcpForm.name = ''
+      mcpForm.command = ''
+      mcpForm.args = ''
+      mcpForm.url = ''
+      mcpMsg.value = `Attached — ${updated.mcpServers ? Object.keys(updated.mcpServers).length : 0} server(s).`
+    }
+  } finally {
+    mcpBusy.value = false
+  }
+}
+
+async function removeMcp(name: string) {
+  if (!chatConfigId.value) return
+  mcpBusy.value = true
+  try {
+    await store.mcpRemoveServer(chatConfigId.value, name)
+    mcpTools.value = mcpTools.value.filter(t => t.server !== name)
+  } finally {
+    mcpBusy.value = false
+  }
+}
+
+async function refreshMcpTools() {
+  if (!chatConfigId.value) return
+  mcpBusy.value = true
+  mcpMsg.value = ''
+  try {
+    const tools = await store.mcpListTools(chatConfigId.value)
+    if (tools) {
+      mcpTools.value = tools
+      mcpMsg.value = tools.length ? `${tools.length} tools discovered.` : 'Connected — no tools exposed.'
+    }
+  } finally {
+    mcpBusy.value = false
+  }
+}
+
+async function compactThread() {
+  if (!viewing.value || !viewing.value.messages.length || jobActive.value) return
+  const compacted = await store.compactAgentSession(viewing.value.configId, viewing.value.id)
+  if (compacted) setViewing(compacted)
+}
 
 /** Mode-aware viewer setter (server viewing lives in a ref, local in state). */
 function setViewing(s: AgentSession | null) {
@@ -976,6 +1112,10 @@ onMounted(async () => {
 .empty { font-size: 10px; }
 
 .thread { border-top: 2px solid #FFFFFF; padding-top: 12px; }
+.thread-actions { margin-bottom: 8px; }
+.mono { font-family: inherit; border: 1px solid rgba(255,255,255,0.4); padding: 0 4px; }
+.remote-list { margin-top: 6px; }
+.remote-row { display: flex; justify-content: space-between; gap: 8px; font-size: 10px; border-bottom: 1px solid #222; padding: 2px 0; }
 .usage { font-size: 9px; margin-bottom: 6px; }
 .messages { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; max-height: 420px; overflow-y: auto; }
 .msg { border: 1px solid rgba(255,255,255,0.25); padding: 6px 8px; }
