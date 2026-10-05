@@ -47,7 +47,7 @@ touchConfig.onAction((action: TouchAction) => {
     toggle_sidebar: () => {},
     toggle_palette: () => { store.commandPaletteOpen = !store.commandPaletteOpen },
     toggle_help: () => { store.showShortcutsHelp = !store.showShortcutsHelp },
-    focus_search: () => { store.currentPanel = 'search' },
+    focus_search: () => { wm.open('search') },
     go_back: () => navigateInHistory(-1),
     go_forward: () => navigateInHistory(1),
     go_home: () => { store.currentPanel = 'landing' },
@@ -122,7 +122,7 @@ watch(shortcutOverrides, (v) => {
 shortcuts.on('toggle_sidebar', () => {})
 shortcuts.on('toggle_palette', () => { store.commandPaletteOpen = !store.commandPaletteOpen })
 shortcuts.on('toggle_help', () => { store.showShortcutsHelp = !store.showShortcutsHelp })
-shortcuts.on('focus_search', () => { store.currentPanel = 'search' })
+shortcuts.on('focus_search', () => { wm.open('search') })
 shortcuts.on('new_folder', () => { store.createFolderPromptOpen = true })
 shortcuts.on('upload_file', () => { showUploadDialog.value = true })
 shortcuts.on('refresh', () => { store.fetchFiles() })
@@ -242,9 +242,9 @@ ctx.registerContext('file_grid_bg', [
   },
   {
     id: 'view', label: 'VIEW MODE', icon: '[V]', submenu: [
-      { id: 'view_grid', label: 'GRID', icon: '[#]', action: () => { store.currentPanel = 'files'; store.viewMode = 'grid' } },
-      { id: 'view_list', label: 'LIST', icon: '[@]', action: () => { store.currentPanel = 'files'; store.viewMode = 'list' } },
-      { id: 'view_masonry', label: 'MASONRY', icon: '[*]', action: () => { store.currentPanel = 'files'; store.viewMode = 'masonry' } },
+      { id: 'view_grid', label: 'GRID', icon: '[#]', action: () => { wm.open('files'); store.viewMode = 'grid' } },
+      { id: 'view_list', label: 'LIST', icon: '[@]', action: () => { wm.open('files'); store.viewMode = 'list' } },
+      { id: 'view_masonry', label: 'MASONRY', icon: '[*]', action: () => { wm.open('files'); store.viewMode = 'masonry' } },
     ]
   },
   { id: 'div2', label: '', divider: true },

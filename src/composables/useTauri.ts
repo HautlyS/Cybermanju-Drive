@@ -526,6 +526,11 @@ const REST_ROUTES: Record<string, RestMapping> = {
     transformRequest: () => ({}),
   },
 
+  delete_account: {
+    method: 'DELETE',
+    buildPath: (args) => `/api/accounts/${args.accountId}`,
+  },
+
   // ── Collections (write) ──────────────────────────────────
   create_collection: {
     method: 'POST',

@@ -27,10 +27,14 @@
       </div>
     </div>
 
+    <div v-if="webLocked" class="web-note">
+      DESKTOP-ONLY OPS DISABLED IN WEB MODE — COMPRESSION NEEDS THE TAURI APP. ALGORITHM PICKER STAYS FOR REFERENCE.
+    </div>
+
     <div class="section" v-if="selectedFile">
       <h3 class="section-title">[FILE] SELECTED FILE</h3>
       <p class="selected-file-name">{{ selectedFile.name }}</p>
-      <button class="compress-btn" @click="handleCompress">[COMPRESS]</button>
+      <button class="compress-btn" :disabled="webLocked" :title="webLocked ? 'Desktop app only' : 'Compress file'" @click="handleCompress">[COMPRESS]</button>
     </div>
 
     <div class="section" v-if="compressionStats">
@@ -60,11 +64,14 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { isWebMode } from '@/composables/useTauri'
 import type { CompressionType } from '@/types'
 import { COMPRESSION_INFO } from '@/types'
 
 const store = useAppStore()
 const emit = defineEmits<{ close: [] }>()
+
+const webLocked = computed(() => isWebMode())
 
 const selectedFile = computed(() => store.selectedFile)
 const compressionStats = computed(() => store.compressionStats)
@@ -85,6 +92,20 @@ async function handleCompress() {
 </script>
 
 <style scoped>
+.web-note {
+  border: 1px dashed #f3f99d;
+  color: #f3f99d;
+  font-size: 9px;
+  line-height: 1.5;
+  padding: 8px 10px;
+  letter-spacing: 0.3px;
+}
+
+.algo-btn:disabled,
+.compress-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
 .compression-panel {
   width: 400px;
   height: 100%;

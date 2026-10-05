@@ -51,3 +51,10 @@ Stage Summary:
 - Release workflow: fails if any format artifact is missing (previously only
   `warn`), fixes setup-android's removed `tools` package, and publishes
   SHA256SUMS.txt with the release assets.
+## 2026-10-05 — decentralized-OS production pass (no toolchain; CI must prove)
+
+- Frontend transport surface closed: `REST_ROUTES` + `REST_FIRST` for sync jobs/runs/status/restore/remote/usage/oauth and durability (`repair/scrub/lease/gc`); Pinia actions + `SyncJob/SyncRunRecord/RestoreOutcome/QuotaUsage/ScrubRun/RepairStatus/GcReport/LeaseInfo` types + `describeSyncError` hints; full `SyncPanel.vue` wizard (config per-backend fields, test/save/OAuth, start/cancel/runs, quota, restore/remote-delete/browse, striped placement + conflict policy); Settings active transport (`VITE_TRANSPORT`, wasm-aware); `env.d.ts` typed env; `user-scalable=no` removed; WASM base fixed to `/cybermanju-drive/`.
+- Honesty: face detection no longer fabricates pseudo-faces (empty set + log, helper kept `#[allow(dead_code)]` for tests); `import_from_url` writes `imports/{id}_{name}` + `original_path`; README tree-sitter claim corrected to heuristic regex; `cybsh sync start` refusal points at `POST /api/sync/start → 202` (R8-1 resolved as documented).
+- Docs: new `docs/OPERATIONS.md`; README OS section + ARCHITECTURE §12; `AGENT-7.md` ticked `[x]` with Log; `AGENT-8.md` items 1–12/14–15 ticked, 13 in progress, R8-1/R8-2 resolved; `AUDIT.md` OS-push entry.
+- Honest status of old claims: "Zero mocks remaining" (prior worklog) was premature — F1/F7/F8/F19 covered above; version single-source holds (`package.json` truth, status endpoint uses `CARGO_PKG_VERSION`).
+- Not run here (no cargo/node_modules): `cargo fmt/clippy/test --workspace`, `npm run typecheck/lint`, `scripts/os-acceptance.sh 0/1/2`, `scripts/check-version.sh`.

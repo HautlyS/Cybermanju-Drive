@@ -17,6 +17,7 @@ import FilePermissionsPanel from '@/components/FilePermissionsPanel.vue'
 import FilePreview from '@/components/FilePreview.vue'
 import ProcessPanel from '@/components/ProcessPanel.vue'
 import DiskManagerPage from '@/components/DiskManagerPage.vue'
+import AccountManagerPanel from '@/components/AccountManagerPanel.vue'
 import WindowContent from '@/components/WindowContent.vue'
 
 // AGENT-8: the terminal is the heaviest new panel (a few thousand scrollback
@@ -58,7 +59,7 @@ const defaultSizes: SizeMap = {
   activity: { width: 540, height: 400 },
   favorites: { width: 420, height: 360 },
   recent: { width: 420, height: 360 },
-  accounts: { width: 480, height: 400 },
+  accounts: { width: 640, height: 560 },
   'loose-groups': { width: 440, height: 380 },
   style: { width: 440, height: 360 },
   storage: { width: 580, height: 480 },
@@ -75,7 +76,7 @@ const defaultSizes: SizeMap = {
 
 const inlinePanels: PanelType[] = [
   'search', 'trash', 'activity', 'favorites', 'recent',
-  'accounts', 'loose-groups', 'style'
+  'loose-groups', 'style'
 ]
 
 const panelComponentMap: Record<string, Component> = {
@@ -92,6 +93,7 @@ const panelComponentMap: Record<string, Component> = {
   terminal: TerminalPanel,
   processes: ProcessPanel,
   disks: DiskManagerPage,
+  accounts: AccountManagerPanel,
   encryption: EncryptionPanel,
   compression: CompressionPanel,
   permissions: FilePermissionsPanel,

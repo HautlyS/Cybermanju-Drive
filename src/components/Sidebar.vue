@@ -189,7 +189,7 @@
     </div>
 
     <div v-if="!store.sidebarCollapsed" class="sidebar-bottom">
-      <button class="qa-btn" @click="store.fetchGeoFiles(); store.currentPanel = 'map'" aria-label="OPEN MAP VIEW">[MAP]</button>
+      <button class="qa-btn" @click="store.fetchGeoFiles(); wm.open('map')" aria-label="OPEN MAP VIEW">[MAP]</button>
       <button class="qa-btn" @click="store.fetchCollections(); store.sidebarSection = 'collections'" aria-label="OPEN COLLECTIONS">[COL]</button>
       <button class="qa-btn" @click="store.detectFaces(store.selectedFileId || '')" aria-label="DETECT FACES">[FACE]</button>
     </div>

@@ -559,6 +559,16 @@ export const useAppStore = defineStore('cybermanju', () => {
     }
   }
 
+  async function deleteAccount(accountId: string) {
+    try {
+      await invoke('delete_account', { accountId })
+      await fetchAccounts()
+      notifySuccess('Account deleted')
+    } catch (e) {
+      notifyError('Failed to delete account (active accounts cannot be deleted)', e)
+    }
+  }
+
   // ── Actions: Map ──────────────────────────────────────────
   async function fetchGeoFiles() {
     try {
@@ -618,6 +628,39 @@ export const useAppStore = defineStore('cybermanju', () => {
       await fetchSyncConfigs()
     } catch (e) {
       notifyError('Failed to delete sync config', e)
+    }
+  }
+
+  /**
+   * Upsert a full sync config (create when `id` is empty, overwrite when set —
+   * `save_config` on the backend). An absent `token` leaves the stored secret
+   * untouched, so toggling `enabled` never wipes credentials. Returns the
+   * saved row, or null on failure (toast already shown).
+   */
+  async function saveSyncConfig(config: SyncConfig): Promise<SyncConfig | null> {
+    try {
+      const saved = await invoke<SyncConfig>('create_sync_config', { config })
+      await fetchSyncConfigs()
+      return saved ?? null
+    } catch (e) {
+      notifyError('Failed to save provider', e)
+      return null
+    }
+  }
+
+  /**
+   * Quiet connectivity probe — same `test_sync_connection` call the Sync
+   * panel uses, but without toast spam so the Account Manager can poll it
+   * while an OAuth browser flow completes.
+   */
+  async function probeSyncConnection(config: SyncConfig): Promise<{ ok: boolean; detail: string }> {
+    try {
+      const ok = await invoke<boolean>('test_sync_connection', { config })
+      return ok
+        ? { ok: true, detail: 'provider answered' }
+        : { ok: false, detail: 'provider answered false — check token / OAuth, then retry' }
+    } catch (e) {
+      return { ok: false, detail: e instanceof Error ? e.message : String(e) }
     }
   }
 
@@ -745,7 +788,11 @@ export const useAppStore = defineStore('cybermanju', () => {
 
   async function oauthStart(provider: string, configId: string) {
     try {
-      const res = await invoke<{ authorizeUrl: string; state: string }>('oauth_start', { provider, configId })
+      // The backend route only knows google|github|gitlab slugs —
+      // Google Drive and Google Photos share the `google` OAuth client.
+      const slug =
+        provider === 'googleDrive' || provider === 'googlePhotos' ? 'google' : provider
+      const res = await invoke<{ authorizeUrl: string; state: string }>('oauth_start', { provider: slug, configId })
       if (res?.authorizeUrl && typeof window !== 'undefined') window.open(res.authorizeUrl, '_blank')
       return res
     } catch (e) {
@@ -754,12 +801,36 @@ export const useAppStore = defineStore('cybermanju', () => {
     }
   }
 
+  function logout() {
+    currentUser.value = null
+    setSessionToken('')
+    notifySuccess('Logged out')
+  }
+
   // ── Actions: Durability (AGENT-7) ─────────────────────────
   async function fetchRepairStatus() {
     try {
       repairStatus.value = await invoke<RepairStatus>('repair_status')
     } catch (e) {
       notifyError('Failed to fetch repair status', e)
+    }
+  }
+
+  async function fetchRepairTasks() {
+    try {
+      return await invoke<RepairTask[]>('repair_tasks')
+    } catch (e) {
+      notifyError('Failed to fetch repair tasks', e)
+      return []
+    }
+  }
+
+  async function fetchRepairHealth() {
+    try {
+      return await invoke<Record<string, unknown>>('repair_health')
+    } catch (e) {
+      notifyError('Failed to fetch provider health', e)
+      return null
     }
   }
 
@@ -1260,13 +1331,14 @@ export const useAppStore = defineStore('cybermanju', () => {
     compressFile, decompressFile, fetchCollections, createCollection, addToCollection, removeFromCollection,
     fetchFaceGroups, detectFaces, detectFacesBatch, reclusterFaces,
     renameFaceGroup, mergeFaceGroups, deleteFaceGroup, findSimilarFaces,
-    fetchAccounts, createAccount, switchAccount, fetchGeoFiles,
+    fetchAccounts, createAccount, switchAccount, deleteAccount, fetchGeoFiles,
     parseFileCode, fetchLooseGroups,
-    fetchSyncConfigs, createSyncConfig, deleteSyncConfig, startSync,
+    fetchSyncConfigs, createSyncConfig, saveSyncConfig, probeSyncConnection, deleteSyncConfig, startSync,
     getSyncProgress, testSyncConnection, cancelSync, listRemoteFiles,
     getSyncJob, fetchSyncRuns, fetchSyncStatus, restoreSyncFile, deleteRemoteFile,
     fetchSyncUsage, oauthStart,
     fetchRepairStatus, runRepair, runRebuild, runGc, runScrub, fetchScrubRuns,
+    fetchRepairTasks, fetchRepairHealth,
     acquireLease, releaseLease, fetchLeaseStatus,
     // OS layer (cybsh, tasks, compute, disks, volume)
     execShellLine, completeShellLine,
@@ -1290,7 +1362,7 @@ export const useAppStore = defineStore('cybermanju', () => {
     // URL Import
     importFromUrl,
     // Auth
-    setSessionToken,
+    setSessionToken, logout,
     // Utility
     rebuildParentIndex,
     notifySuccess,

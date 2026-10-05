@@ -71,6 +71,7 @@
           <div class="cfg-actions">
             <button class="bw-btn xs" @click="testCfg(cfg)">TEST</button>
             <button class="bw-btn xs" @click="startCfg(cfg)">START</button>
+            <button v-if="isOauthCapable(cfg.backendType)" class="bw-btn xs" @click="oauthConnectCfg(cfg)">OAUTH</button>
             <button class="bw-btn xs" @click="usageCfg(cfg)">QUOTA</button>
             <button class="bw-btn xs danger" @click="removeCfg(cfg.id)">DEL</button>
           </div>
@@ -140,7 +141,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
-import { SYNC_BACKEND_INFO, describeSyncError } from '@/types'
+import { SYNC_BACKEND_INFO, describeSyncError, isOauthCapable } from '@/types'
 import type { SyncConfig } from '@/types'
 
 const store = useAppStore()
@@ -180,7 +181,7 @@ const needsRepo = computed(() => form.backendType === 'github' || form.backendTy
 const needsFolder = computed(() => form.backendType === 'googleDrive')
 const needsAlbum = computed(() => form.backendType === 'googlePhotos')
 const needsChat = computed(() => form.backendType === 'telegram')
-const oauthable = computed(() => form.backendType === 'github' || form.backendType === 'gitlab' || form.backendType === 'googleDrive' || form.backendType === 'googlePhotos')
+const oauthable = computed(() => isOauthCapable(form.backendType))
 
 function hintFor(e: string) {
   const d = describeSyncError(e)
@@ -242,9 +243,21 @@ async function saveConfig() {
 }
 
 async function oauthConnect() {
-  testMsg.value = 'Opening provider authorize URL… (paste token if the route 404s)'
-  const cfg = syncConfigs.value[0]
-  await store.oauthStart(form.backendType, cfg?.id ?? '')
+  // Prefer the config selected in START/MONITOR (the one the user means),
+  // then the matching saved config, then '' for a brand-new provider —
+  // the store maps googleDrive/googlePhotos to the backend `google` slug.
+  const target =
+    syncConfigs.value.find(c => c.id === runConfigId.value)
+    ?? syncConfigs.value.find(c => c.backendType === form.backendType)
+  testMsg.value = target
+    ? `Opening provider approval for ${target.backendType}… approve, then return here.`
+    : 'No matching saved config yet — SAVE first, then OAUTH CONNECT (or paste a token above).'
+  await store.oauthStart(form.backendType, target?.id ?? '')
+}
+
+async function oauthConnectCfg(cfg: SyncConfig) {
+  runConfigId.value = cfg.id
+  await store.oauthStart(cfg.backendType, cfg.id)
 }
 
 async function testCfg(cfg: SyncConfig) {

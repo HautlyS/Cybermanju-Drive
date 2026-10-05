@@ -535,13 +535,21 @@ pub fn import_from_url(
     // actually exists (AUDIT F19). Layout: `./imports/{id}_{sanitized-name}`.
     let safe_name: String = file_name
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     let stored_path = std::path::Path::new("imports").join(format!("{}_{}", file_id, safe_name));
     if let Some(parent) = stored_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create imports dir: {}", e))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create imports dir: {}", e))?;
     }
-    std::fs::write(&stored_path, &bytes).map_err(|e| format!("Failed to store downloaded file: {}", e))?;
+    std::fs::write(&stored_path, &bytes)
+        .map_err(|e| format!("Failed to store downloaded file: {}", e))?;
 
     let mut context = serde_json::Map::new();
     context.insert("source".to_string(), serde_json::json!("url_import"));

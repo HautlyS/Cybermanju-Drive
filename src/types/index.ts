@@ -1,5 +1,5 @@
 export type ViewMode = 'grid' | 'list' | 'masonry'
-export type PanelType = 'landing' | 'files' | 'preview' | 'encryption' | 'compression' | 'collections' | 'faces' | 'map' | 'code' | 'search' | 'style' | 'accounts' | 'loose-groups' | 'sync' | 'webdash' | 'users' | 'dashboard' | 'settings' | 'trash' | 'activity' | 'favorites' | 'recent' | 'storage' | 'terminal' | 'processes' | 'disks'
+export type PanelType = 'landing' | 'files' | 'preview' | 'encryption' | 'compression' | 'collections' | 'faces' | 'map' | 'code' | 'search' | 'style' | 'accounts' | 'loose-groups' | 'sync' | 'webdash' | 'users' | 'dashboard' | 'settings' | 'trash' | 'activity' | 'favorites' | 'recent' | 'storage' | 'terminal' | 'processes' | 'disks' | 'permissions'
 export type SidebarSection = 'tree' | 'locations' | 'collections' | 'people' | 'styles' | 'loose' | 'users' | 'sync' | 'dashboard' | 'landing' | 'tools'
 
 export interface ModuleInfo {
@@ -572,6 +572,7 @@ export const MODULE_METADATA: Record<PanelType, ModuleInfo> = {
   terminal: { id: 'terminal', label: 'CYBSH', icon: '[>]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #000d08 50%, #000000 100%)', description: 'System terminal — cybsh', requiresAuth: true },
   processes: { id: 'processes', label: 'TASKS', icon: '[%]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #000d0d 50%, #000000 100%)', description: 'Process table, top and task control', requiresAuth: true },
   disks: { id: 'disks', label: 'DISKS', icon: '[=]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #000a00 50%, #000000 100%)', description: 'Per-provider disks and the merged volume', requiresAuth: true },
+  permissions: { id: 'permissions', label: 'PERMS', icon: '[!]', color: '#FFFFFF', gradient: 'linear-gradient(180deg, #000000 0%, #0d0000 50%, #000000 100%)', description: 'Per-file access control', requiresAuth: true },
 }
 
 // ── OS layer (AGENT-8): cybsh, task table, compute fan-out ───────────────
@@ -730,4 +731,30 @@ export const SYNC_BACKEND_INFO: Record<SyncBackendType, { name: string; descript
     color: '#FFFFFF',
     icon: 'MessageCircle',
   },
+}
+
+/**
+ * Map a frontend `SyncBackendType` to the OAuth route slug the backend
+ * understands (`crates/sync/src/oauth.rs::provider_endpoints`).
+ * Returns `null` for backends with no OAuth flow (local dir, Telegram bot).
+ * Google Drive and Google Photos share the `google` OAuth client.
+ */
+export function oauthSlugForBackend(backend: SyncBackendType | string): string | null {
+  switch (backend) {
+    case 'googleDrive':
+    case 'googlePhotos':
+    case 'google':
+      return 'google'
+    case 'github':
+      return 'github'
+    case 'gitlab':
+      return 'gitlab'
+    default:
+      return null
+  }
+}
+
+/** Backends that can show an "OAuth connect" button. */
+export function isOauthCapable(backend: SyncBackendType | string): boolean {
+  return oauthSlugForBackend(backend) !== null
 }

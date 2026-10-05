@@ -1,31 +1,29 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import TopMenuBar from './TopMenuBar.vue'
 import Dock from './Dock.vue'
+import { useAppStore } from '@/stores/app'
+import { isTauri, isStaticHost } from '@/composables/useTauri'
+import { wasmBackendActive } from '@/composables/useWasmBackend'
 
 const emit = defineEmits<{ (e: 'open-app'): void }>()
 
+const store = useAppStore()
+
 // ── Boot State ──
-const phase = ref<'post' | 'loading' | 'boot' | 'ready'>('post')
+// No interactive terminal here by design: the landing screen is a verbose
+// SCI-FI loader. Every MODULE line below awaits a REAL store fetch —
+// nothing is placeholdered. The interactive shell lives in cybsh
+// (TerminalPanel, opened from the Dock / Ctrl+`).
+const phase = ref<'post' | 'loading' | 'ready'>('post')
 const bootProgress = ref(0)
 const bootLog = ref<string[]>([])
 const showCursor = ref(true)
 let cursorTimer: ReturnType<typeof setInterval> | null = null
 const postDone = ref(false)
-const loadProgress = ref(0)
 
-const bootMessages = [
-  'POST: CPU Quantum Co-Processor... ML-KEM-1024 [OK]',
-  'POST: Memory Encryption Zones... ChaCha20-Poly1305 [OK]',
-  'POST: Storage Decryption Module... Argon2id [OK]',
-  'Mounting redb KV store... cybermanju.db [OK]',
-  'Loading Tantivy BM25 search index... [OK]',
-  'Initializing Triple-Layer Compressor... LZ4+ZSTD+BROTLI [OK]',
-  'Warming ONNX Runtime... face detect model [OK]',
-  'Calibrating ML-DSA-87 signing oracle... [OK]',
-  'Establishing sync backends... [OK]',
-  'Spawning web dashboard @ :3456... [OK]',
-]
+interface ModuleLine { name: string; detail: string; ok: boolean }
+const moduleLines = ref<ModuleLine[]>([])
 
 const quotes = [
   '"The cloud is just someone else\'s computer.\n This one has ML-KEM-1024. Good luck, NSA."',
@@ -98,104 +96,26 @@ const buddhaGlow = ref(0)
 let buddhaTimer: ReturnType<typeof setInterval> | null = null
 let glowTimer: ReturnType<typeof setInterval> | null = null
 
-const terminalInput = ref('')
-const terminalHistory = ref<string[]>([])
-const commandHist = ref<string[]>([])
-const histIdx = ref(-1)
-
-const commands: Record<string, { out: string[]; desc: string }> = {
-  help: {
-    desc: 'Show available commands',
-    out: [
-      '  HELP     This message',
-      '  LAUNCH   Open file manager',
-      '  ABOUT    System info',
-      '  CLEAR    Clear terminal',
-      '  QUOTE    Show wisdom',
-      '  STATUS   System status',
-    ],
-  },
-  launch: {
-    desc: 'Launch app',
-    out: ['Launching Cybermanju Drive...'],
-  },
-  about: {
-    desc: 'System info',
-    out: [
-      'Cybermanju Drive v0.0.1',
-      'Post-Quantum Encrypted File System',
-      'ML-KEM-1024 | ML-DSA-87 | Triple Compression',
-      'https://github.com/hautlythird211/Cybermanju-Drive',
-    ],
-  },
-  clear: {
-    desc: 'Clear terminal',
-    out: [],
-  },
-  quote: {
-    desc: 'Random wisdom',
-    out: [quotes[Math.floor(Math.random() * quotes.length)]],
-  },
-  status: {
-    desc: 'System status',
-    out: [
-      'STATUS: ONLINE',
-      'CRYPTO: ML-KEM-1024 [ACTIVE]',
-      'SEARCH: Tantivy BM25 [INDEXED]',
-      'SYNC:   [CONNECTED]',
-      'FACE:   ONNX Runtime [WARM]',
-      'WEB:    :3456 [SERVING]',
-    ],
-  },
+// ── Verbose SCI-FI loader ──────────────────────────────────────
+// Each step awaits a REAL store fetch and reports the live count.
+// Nothing here is placeholdered: a line that says "3 ACCOUNTS" means
+// `store.accounts` actually holds 3 rows right now.
+function pushLine(text: string, mod?: ModuleLine) {
+  bootLog.value.push(text)
+  if (mod) moduleLines.value.push(mod)
 }
 
-function processCmd() {
-  const cmd = terminalInput.value.trim().toLowerCase()
-  terminalInput.value = ''
-  if (!cmd) return
-  commandHist.value.push(cmd)
-  histIdx.value = -1
-  terminalHistory.value.push(`> ${cmd}`)
-  const c = commands[cmd]
-  if (c) {
-    terminalHistory.value.push(...c.out)
-    if (cmd === 'clear') terminalHistory.value = []
-    if (cmd === 'launch') {
-      setTimeout(() => emit('open-app'), 800)
-    }
-  } else {
-    terminalHistory.value.push(`Unknown: ${cmd}. Try HELP.`)
-  }
-}
-
-function handleKey(e: KeyboardEvent) {
-  if (phase.value !== 'ready') return
-  if (e.key === 'Enter') processCmd()
-  if (e.key === 'ArrowUp') {
-    e.preventDefault()
-    if (commandHist.value.length) {
-      histIdx.value = histIdx.value < commandHist.value.length - 1 ? histIdx.value + 1 : histIdx.value
-      terminalInput.value = commandHist.value[commandHist.value.length - 1 - histIdx.value]
-    }
-  }
-  if (e.key === 'ArrowDown') {
-    e.preventDefault()
-    if (histIdx.value > 0) {
-      histIdx.value--
-      terminalInput.value = commandHist.value[commandHist.value.length - 1 - histIdx.value]
-    } else {
-      histIdx.value = -1
-      terminalInput.value = ''
-    }
-  }
+function fmtErr(e: unknown): string {
+  const d = e instanceof Error ? e.message : String(e)
+  return d.length > 90 ? d.slice(0, 90) + '…' : d
 }
 
 // ── Boot Sequence ──
 function runPost() {
   phase.value = 'post'
   bootLog.value = []
+  moduleLines.value = []
   postDone.value = false
-  let i = 0
   const postLines = [
     'Cybermanju Systems POST v0.0.1',
     'CPU: Quantum Co-Processor @ 2.4 GHz [PASS]',
@@ -204,76 +124,81 @@ function runPost() {
     'RTC: System Clock [SYNCED]',
     '────────────────────────────────────────────',
   ]
-  function tick() {
+  let i = 0
+  const tick = () => {
     if (i < postLines.length) {
       bootLog.value.push(postLines[i])
       i++
-      setTimeout(tick, 120 + Math.random() * 60)
+      setTimeout(tick, 90)
     } else {
       postDone.value = true
-      setTimeout(runLoading, 300)
+      setTimeout(() => void runLoading(), 250)
     }
   }
   tick()
 }
 
-function runLoading() {
+async function runLoading() {
   phase.value = 'loading'
-  loadProgress.value = 0
   bootLog.value = []
-  let step = 0
-  function tick() {
-    if (step < bootMessages.length) {
-      bootLog.value.push(bootMessages[step])
-      loadProgress.value = ((step + 1) / bootMessages.length) * 100
-      step++
-      setTimeout(tick, 80 + Math.random() * 40)
-    } else {
-      setTimeout(runBoot, 200)
-    }
-  }
-  tick()
-}
+  moduleLines.value = []
+  bootProgress.value = 0
 
-function runBoot() {
-  phase.value = 'boot'
-  bootLog.value = []
-  currentQuote.value = quotes[Math.floor(Math.random() * quotes.length)]
-  const bootLines = [
-    '',
-    `  ${currentQuote.value}`,
-    '',
-    '  ╔══════════════════════════════════════╗',
-    '  ║    CYBERMANJU DRIVE v0.0.1          ║',
-    '  ║    Post-Quantum Encrypted Storage    ║',
-    '  ║    System Ready.                     ║',
-    '  ╚══════════════════════════════════════╝',
-    '',
-  ]
-  let i = 0
-  function tick() {
-    if (i < bootLines.length) {
-      bootLog.value.push(bootLines[i])
-      i++
-      setTimeout(tick, 100 + Math.random() * 50)
-    } else {
-      setTimeout(() => {
-        phase.value = 'ready'
-        terminalHistory.value = [
-          'System ready. Type HELP for commands.',
-          '',
-        ]
-      }, 400)
+  const transport = isTauri() ? 'TAURI IPC' : isStaticHost() ? 'STATIC WASM PACK' : 'WEB REST :3456'
+  pushLine(`TRANSPORT :: ${transport} [OK]`, { name: 'TRANSPORT', detail: transport, ok: true })
+
+  let done = 0
+  const step = async (label: string, load: () => Promise<string>) => {
+    try {
+      const detail = await load()
+      pushLine(`${label} :: ${detail} [OK]`, { name: label, detail, ok: true })
+    } catch (e) {
+      const detail = `UNREACHABLE — ${fmtErr(e)}`
+      pushLine(`${label} :: ${detail} [WARN]`, { name: label, detail, ok: false })
     }
+    done++
+    bootProgress.value = Math.round((done / STEPS.length) * 100)
   }
-  tick()
+
+  const STEPS: Array<[string, () => Promise<string>]> = [
+    ['WASM', async () => {
+      if (!isStaticHost()) return `bypassed (${transport})`
+      await store.fetchOsWorkers()
+      const w = store.osWorkers
+      return w ? `${w.total} workers (${w.localThreads} local + ${w.providerSlots} provider), backend=${wasmBackendActive() ? 'loaded' : 'lazy'}` : 'wasm backend loaded, no workers yet'
+    }],
+    ['ACCOUNTS', async () => { await store.fetchAccounts(); return `${store.accounts.length} accounts, active=${store.activeAccount?.name ?? 'none'}` }],
+    ['FILES', async () => { await store.fetchFiles(); return `${store.files.length} nodes indexed` }],
+    ['COLLECTIONS', async () => { await store.fetchCollections(); return `${store.collections.length} collections` }],
+    ['FACES', async () => { await store.fetchFaceGroups(); return `${store.faceGroups.length} face groups` }],
+    ['LOOSE', async () => { await store.fetchLooseGroups(); return `${store.looseGroups.length} loose groups` }],
+    ['GEO', async () => { await store.fetchGeoFiles(); return `${store.geoMarkers.length} geo-tagged files` }],
+    ['ENCRYPT', async () => { await store.fetchEncryptionStatus(); await store.listKeys(); return `${store.encryptionKeys.length} keys, engine=${store.encryptionStatus.isEncrypted ? 'sealed' : 'open'}` }],
+    ['SYNC', async () => { await store.fetchSyncConfigs(); await store.fetchSyncStatus(); return `${store.syncConfigs.length} provider configs, status=${store.syncStatus?.status ?? 'unknown'}` }],
+    ['RUNS', async () => { await store.fetchSyncRuns(); return `${store.syncRuns.length} recorded runs` }],
+    ['DISKS', async () => { await store.fetchDisks(); return `${store.disks.length} .cybermanju disks` }],
+    ['VOLUME', async () => { await store.fetchOsDf(); const d = store.osDf; return d ? `${d.diskCount} disks, ${(d.usedBytes / 1048576).toFixed(1)} / ${(d.totalBytes / 1048576).toFixed(1)} MiB used` : 'volume not reported' }],
+    ['COMPUTE', async () => { await store.fetchOsWorkers(); await store.fetchOsJobs(); return `${store.osWorkers?.total ?? 0} workers, ${store.osJobs.length} jobs` }],
+    ['TASKS', async () => { await store.fetchOsPs(); await store.fetchOsTop(); const c = store.osPs?.counts; return c ? `${c.running} running / ${c.total} total` : 'task table unreachable' }],
+    ['USERS', async () => { await store.fetchUsers(); return `${store.users.length} app users (argon2)` }],
+    ['TRASH', async () => { await store.fetchTrashItems(); return `${store.trashItems.length} trashed items` }],
+    ['AUDIT', async () => { await store.fetchAuditLog(25); return `${store.auditLog.length} recent audit entries` }],
+    ['DASHBOARD', async () => { await store.fetchDashboardStatus(); const d = store.dashboardStatus; return d.running ? `serving ${d.url} (${d.activeConnections} conns)` : 'embedded server idle' }],
+  ]
+
+  for (const [label, load] of STEPS) {
+    // eslint-disable-next-line no-await-in-loop
+    await step(label, load)
+  }
+  currentQuote.value = quotes[Math.floor(Math.random() * quotes.length)]
+  setTimeout(() => { phase.value = 'ready' }, 350)
 }
 
 function restartBoot() {
   stopAnimations()
+  startBuddhaAnimation()
   bootLog.value = []
-  terminalHistory.value = []
-  terminalInput.value = ''
+  moduleLines.value = []
   currentFrame.value = 0
   buddhaGlow.value = 0
   runPost()
@@ -314,7 +239,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="landing-os" @keydown="handleKey" tabindex="0">
+  <div class="landing-os" tabindex="0">
     <TopMenuBar />
 
     <div class="landing-content">
@@ -324,8 +249,9 @@ onUnmounted(() => {
             <div v-for="(line, i) in bootLog" :key="i" class="boot-line">{{ line }}</div>
             <div v-if="phase === 'loading'" class="boot-progress">
               <div class="progress-track">
-                <div class="progress-fill" :style="{ width: loadProgress + '%' }" />
+                <div class="progress-fill" :style="{ width: bootProgress + '%' }" />
               </div>
+              <div class="boot-pct">{{ bootProgress }}%</div>
             </div>
             <div v-if="phase === 'post' && !postDone" class="cursor-block">&#9608;</div>
           </div>
@@ -347,18 +273,20 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div class="terminal-window">
-          <div class="terminal-log" ref="logRef">
-            <div v-for="(line, i) in terminalHistory" :key="i" class="term-line"
-              :class="{ 'term-prompt': line.startsWith('>'), 'term-system': !line.startsWith('>') }">
-              {{ line }}
-            </div>
-            <div class="term-input-line">
-              <span class="term-prompt-sign">&gt;</span>
-              <span class="term-input-text">{{ terminalInput }}</span>
-              <span class="term-cursor" :class="{ hide: showCursor }">&#9608;</span>
+        <div class="boot-report" role="status" aria-label="Module load report">
+          <div class="report-head">
+            <span class="report-title">CYBERMANJU DRIVE v0.0.1 — ALL MODULES LOADED</span>
+            <span class="report-counts">{{ moduleLines.filter(m => m.ok).length }}/{{ moduleLines.length }} OK</span>
+          </div>
+          <div class="report-quote">{{ currentQuote }}</div>
+          <div class="report-grid">
+            <div v-for="m in moduleLines" :key="m.name" class="report-row" :class="{ warn: !m.ok }">
+              <span class="report-name">{{ m.name }}</span>
+              <span class="report-detail">{{ m.detail }}</span>
+              <span class="report-flag">{{ m.ok ? '[OK]' : '[WARN]' }}</span>
             </div>
           </div>
+          <div class="report-hint">INTERACTIVE SHELL LIVES IN CYBSH — DOCK &gt; TERMINAL, OR CTRL+`</div>
         </div>
 
         <div class="launch-hint">
@@ -523,71 +451,104 @@ onUnmounted(() => {
   50% { transform: translateY(-20px) scale(1.5); opacity: 0.8; }
 }
 
-/* ── Terminal Window ── */
-.terminal-window {
+/* ── Module report (ready screen — NOT a terminal) ── */
+.boot-report {
   position: relative;
   z-index: 2;
   width: 92vw;
-  max-width: 640px;
-  max-height: 40vh;
-  background: rgba(0, 0, 0, 0.85);
-  border: 1px solid rgba(0, 255, 65, 0.2);
+  max-width: 680px;
+  max-height: 46vh;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.88);
+  border: 1px solid rgba(0, 255, 65, 0.25);
   border-radius: 8px;
   padding: 16px 20px;
-  backdrop-filter: blur(4px);
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
 }
 
-.terminal-log {
+.report-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.report-title {
+  color: #00ff41;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1px;
+}
+
+.report-counts {
+  color: rgba(0, 255, 65, 0.7);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.report-quote {
+  color: rgba(0, 255, 65, 0.55);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  margin-bottom: 10px;
+}
+
+.report-grid {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  overflow-y: auto;
-  max-height: 30vh;
 }
 
-.term-line {
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.term-system {
-  color: rgba(0, 255, 65, 0.7);
-}
-
-.term-prompt {
-  color: #00ff41;
-  font-weight: 700;
-}
-
-.term-input-line {
+.report-row {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 4px;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 11px;
+  line-height: 1.55;
 }
 
-.term-prompt-sign {
+.report-name {
   color: #00ff41;
   font-weight: 700;
-  opacity: 0.8;
+  min-width: 92px;
 }
 
-.term-input-text {
-  color: #00ff41;
-  font-size: 12px;
+.report-detail {
+  color: rgba(230, 255, 235, 0.75);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.term-cursor {
+.report-flag {
   color: #00ff41;
+  font-weight: 700;
+}
+
+.report-row.warn .report-flag {
+  color: #f3f99d;
+}
+
+.report-row.warn .report-detail {
+  color: rgba(243, 249, 157, 0.75);
+}
+
+.report-hint {
+  margin-top: 10px;
+  color: rgba(0, 255, 65, 0.4);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
+
+.boot-pct {
+  margin-top: 6px;
+  color: rgba(0, 255, 65, 0.6);
   font-size: 11px;
-  animation: blink 500ms step-end infinite;
-}
-
-.term-cursor.hide {
-  opacity: 0;
+  text-align: right;
 }
 
 /* ── Launch Buttons ── */
@@ -633,11 +594,11 @@ onUnmounted(() => {
   .boot-line {
     font-size: 11px;
   }
-  .terminal-window {
+  .boot-report {
     padding: 12px 14px;
     width: 96vw;
   }
-  .term-line {
+  .report-row {
     font-size: 10px;
   }
   .ascii-buddha {

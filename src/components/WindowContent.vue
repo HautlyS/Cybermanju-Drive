@@ -149,29 +149,6 @@
       </div>
     </div>
 
-    <!-- Accounts Panel -->
-    <div v-if="panelType === 'accounts'" class="panel-page">
-      <div class="panel-card">
-        <div class="panel-title">MULTI-ACCOUNT MANAGER</div>
-        <div class="accounts-list">
-          <div
-            v-for="account in store.accounts"
-            :key="account.id"
-            class="account-item panel-card-row"
-            :class="{ active: account.isActive }"
-            @click="store.switchAccount(account.id)"
-          >
-            <div class="bw-dot" :class="{ 'bw-dot-on': account.isActive }" />
-            <div class="account-info">
-              <div class="account-name">{{ account.name }}</div>
-              <div class="account-meta">{{ account.accountType }} {{ account.path }}</div>
-            </div>
-            <div v-if="account.isActive" class="active-badge">ACTIVE</div>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- Loose Groups Panel -->
     <div v-if="panelType === 'loose-groups'" class="panel-page">
       <div class="panel-card">
@@ -378,6 +355,42 @@ function highlightTerms(text: string, query: string): string {
   cursor: pointer;
   appearance: none;
   border-radius: 4px;
+}
+
+.bw-input-sm {
+  background: #111;
+  border: 1px solid #333;
+  color: #ccc;
+  font-family: 'Courier New', monospace;
+  font-size: 9px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  min-width: 0;
+}
+
+.session-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.session-user {
+  font-size: 10px;
+  color: #e0e0e0;
+  font-weight: 700;
+}
+
+.acct-create {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.acct-create .bw-input-sm {
+  flex: 1;
+  min-width: 90px;
 }
 
 .search-current-dir {

@@ -163,3 +163,10 @@ Add it to your brief's *Requests to the supervisor* section.
 `scripts/os-acceptance.sh` passes all three tiers **and** the supervisor gate
 (`fmt`, `clippy -D warnings`, `cargo test --workspace`, `typecheck`, `lint`) is green
 **and** every checkbox in the three briefs is ticked.
+
+### 2026-10-05 status
+
+- AGENT-6: all boxes `[x]`; Tauri disk commands registered; `REST_FIRST` routes desktop disk/terminal via `:3456`.
+- AGENT-7: all boxes `[x]` (verified static + client surface added this pass: `repair/scrub/lease` REST mappings, Pinia actions, types).
+- AGENT-8: items 1–12, 14–15 `[x]`; 13 (docs) in progress — README/ARCHITECTURE/OPERATIONS landed this pass; R8-1 resolved as documented `unsupported:` + 202 pointer.
+- No toolchain on this box (`cargo`/`node_modules` absent) — CI must run the gates above.

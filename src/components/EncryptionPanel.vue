@@ -46,10 +46,14 @@
       </div>
     </div>
 
+    <div v-if="webLocked" class="web-note">
+      DESKTOP-ONLY OPS DISABLED IN WEB MODE — KEY GENERATION AND FILE ENCRYPTION NEED THE TAURI APP. STATUS + KEY LIST ABOVE ARE LIVE.
+    </div>
+
     <div class="section">
       <h3 class="section-title">[KEY] GENERATE KEYPAIR</h3>
       <div class="algo-buttons">
-        <button v-for="(info, algo) in ENCRYPTION_INFO" :key="algo" class="algo-btn" @click="handleGenerate(algo as EncryptionAlgo)">
+        <button v-for="(info, algo) in ENCRYPTION_INFO" :key="algo" class="algo-btn" :disabled="webLocked" :title="webLocked ? 'Desktop app only' : 'Generate ' + info.name" @click="handleGenerate(algo as EncryptionAlgo)">
           <div class="algo-top">
             <span class="nist-badge">L{{ info.nistLevel }}</span>
           </div>
@@ -80,7 +84,7 @@
         <select v-model="selectedAlgo" class="encrypt-select">
           <option v-for="(info, algo) in ENCRYPTION_INFO" :key="algo" :value="algo">{{ info.name }} (L{{ info.nistLevel }})</option>
         </select>
-        <button class="encrypt-btn" @click="handleEncrypt">[ENC]</button>
+        <button class="encrypt-btn" :disabled="webLocked" :title="webLocked ? 'Desktop app only' : 'Encrypt file'" @click="handleEncrypt">[ENC]</button>
       </div>
     </div>
   </div>
@@ -89,11 +93,14 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { isWebMode } from '@/composables/useTauri'
 import type { EncryptionAlgo } from '@/types'
 import { ENCRYPTION_INFO } from '@/types'
 
 const store = useAppStore()
 const emit = defineEmits<{ close: [] }>()
+
+const webLocked = computed(() => isWebMode())
 
 const encryptionStatus = computed(() => store.encryptionStatus)
 const encryptionKeys = computed(() => store.encryptionKeys)
@@ -118,6 +125,20 @@ async function handleEncrypt() {
 </script>
 
 <style scoped>
+.web-note {
+  border: 1px dashed #f3f99d;
+  color: #f3f99d;
+  font-size: 9px;
+  line-height: 1.5;
+  padding: 8px 10px;
+  letter-spacing: 0.3px;
+}
+
+.algo-btn:disabled,
+.encrypt-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
 .encryption-panel {
   width: 400px;
   height: 100%;

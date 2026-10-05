@@ -1,11 +1,12 @@
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import { resolve } from "path";
+import wasmStub from "./vite-plugin-wasm-stub";
 
 const host = process.env.TAURI_DEV_HOST;
 
 export default defineConfig(async () => ({
-  plugins: [vue()],
+  plugins: [vue(), wasmStub],
   resolve: {
     alias: {
       "@": resolve(__dirname, "src"),

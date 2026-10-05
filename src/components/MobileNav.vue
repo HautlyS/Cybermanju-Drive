@@ -1,16 +1,16 @@
 <template>
   <nav class="mobile-nav" role="navigation" aria-label="MOBILE NAVIGATION">
-    <button class="mn-btn" :class="{ active: store.currentPanel === 'files' }" @click="store.currentPanel = 'files'" aria-label="FILES">[#]</button>
-    <button class="mn-btn" :class="{ active: store.currentPanel === 'search' }" @click="store.currentPanel = 'search'; store.searchQuery ? null : null" aria-label="SEARCH">[S]</button>
-    <button class="mn-btn" :class="{ active: store.currentPanel === 'favorites' }" @click="store.currentPanel = 'favorites'" aria-label="FAVORITES">[*]</button>
-    <button class="mn-btn" :class="{ active: store.currentPanel === 'recent' }" @click="store.currentPanel = 'recent'" aria-label="RECENT">[T]</button>
-    <button class="mn-btn" :class="{ active: store.currentPanel === 'settings' }" @click="store.currentPanel = 'settings'" aria-label="SETTINGS">[@]</button>
+    <button class="mn-btn" @click="wm.open('files')" aria-label="FILES">[#]</button>
+    <button class="mn-btn" @click="wm.open('search')" aria-label="SEARCH">[S]</button>
+    <button class="mn-btn" @click="wm.open('terminal')" aria-label="TERMINAL">[&gt;]</button>
+    <button class="mn-btn" @click="wm.open('favorites')" aria-label="FAVORITES">[*]</button>
+    <button class="mn-btn" @click="wm.open('settings')" aria-label="SETTINGS">[@]</button>
   </nav>
 </template>
 
 <script setup lang="ts">
-import { useAppStore } from '@/stores/app'
-const store = useAppStore()
+import { useWindowManager } from '@/composables/useWindowManager'
+const wm = useWindowManager()
 </script>
 
 <style scoped>
