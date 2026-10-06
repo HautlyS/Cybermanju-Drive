@@ -23,7 +23,7 @@
       <div v-if="recentSearches.length > 0 && !store.searchQuery" class="recent-searches">
         <div class="bw-title" style="padding: 0 12px; margin-bottom: 6px;">RECENT SEARCHES</div>
         <div v-for="sq in recentSearches" :key="sq" class="recent-search-item" @click="store.searchQuery = sq; store.searchFiles(sq)">
-          <span class="text-muted">[R]</span>
+          <span class="text-muted"><AppIcon name="solar:history-bold" :size="12" /></span>
           <span>{{ sq }}</span>
         </div>
       </div>
@@ -47,7 +47,7 @@
           class="load-more-btn"
           @click="store.loadMoreSearchResults()"
           :disabled="store.isSearching"
-        >[LOAD MORE] ({{ store.searchTotalResults - filteredSearchResults.length }} MORE)</button>
+        ><AppIcon name="solar:double-alt-arrow-down-bold" :size="13" /> LOAD MORE ({{ store.searchTotalResults - filteredSearchResults.length }} MORE)</button>
       </div>
       <div v-else-if="store.searchQuery && !store.isSearching" class="empty-state">
         <p class="text-muted">NO RESULTS FOR "{{ store.searchQuery }}"</p>
@@ -63,8 +63,8 @@
         <div class="trash-header">
           <div class="panel-title">TRASH</div>
           <div class="trash-actions">
-            <button class="panel-btn" @click="store.fetchTrashItems()" title="REFRESH TRASH">[R]</button>
-            <button class="panel-btn panel-btn-danger" @click="store.emptyTrash()" title="EMPTY TRASH">[EMPTY]</button>
+            <button class="panel-btn" @click="store.fetchTrashItems()" title="REFRESH TRASH" aria-label="REFRESH TRASH"><AppIcon name="solar:refresh-bold" :size="12" /></button>
+            <button class="panel-btn panel-btn-danger" @click="store.emptyTrash()" title="EMPTY TRASH" aria-label="EMPTY TRASH"><AppIcon name="solar:trash-bin-trash-bold" :size="12" /></button>
           </div>
         </div>
         <p class="panel-hint">DELETED FILES CAN BE RESTORED FROM HERE.</p>
@@ -73,14 +73,14 @@
         </div>
         <div v-else class="trash-list">
           <div v-for="item in store.trashItems" :key="item.id" class="trash-item">
-            <span class="trash-icon">{{ item.originalFile.fileType === 'folder' ? '[+]' : '[=]' }}</span>
+            <span class="trash-icon"><AppIcon :name="item.originalFile.fileType === 'folder' ? 'solar:folder-bold' : 'solar:file-bold'" :size="14" /></span>
             <div class="trash-info">
               <span class="trash-name truncate">{{ item.originalFile.name }}</span>
               <span class="trash-date text-muted">{{ new Date(item.deletedAt).toLocaleDateString() }}</span>
             </div>
             <div class="trash-actions">
-              <button class="trash-action-btn" @click="store.restoreTrashItem(item.originalFile.id)" title="RESTORE">[RST]</button>
-              <button class="trash-action-btn danger" @click="store.deleteFromTrash(item.originalFile.id)" title="DELETE PERMANENTLY">[DEL]</button>
+              <button class="trash-action-btn" @click="store.restoreTrashItem(item.originalFile.id)" title="RESTORE" aria-label="RESTORE"><AppIcon name="solar:undo-left-round-bold" :size="12" /></button>
+              <button class="trash-action-btn danger" @click="store.deleteFromTrash(item.originalFile.id)" title="DELETE PERMANENTLY" aria-label="DELETE PERMANENTLY"><AppIcon name="solar:trash-bin-trash-bold" :size="12" /></button>
             </div>
           </div>
         </div>
@@ -92,7 +92,7 @@
       <div class="panel-card">
         <div class="trash-header">
           <div class="panel-title">ACTIVITY LOG</div>
-          <button class="panel-btn" @click="store.fetchAuditLog()" title="REFRESH">[R]</button>
+          <button class="panel-btn" @click="store.fetchAuditLog()" title="REFRESH" aria-label="REFRESH ACTIVITY"><AppIcon name="solar:refresh-bold" :size="12" /></button>
         </div>
         <p class="panel-hint">FILE OPERATIONS TIMELINE.</p>
         <div v-if="store.auditLog.length === 0" class="empty-state" style="height:80px;">
@@ -118,7 +118,7 @@
         </div>
         <div v-else class="fav-list">
           <div v-for="f in store.starredFiles" :key="f.id" class="fav-item" @click="store.selectFile(f.id)">
-            <span class="fav-icon">{{ f.fileType === 'folder' ? '[+]' : '[=]' }}</span>
+            <span class="fav-icon"><AppIcon :name="f.fileType === 'folder' ? 'solar:folder-bold' : 'solar:file-bold'" :size="14" /></span>
             <span class="fav-name truncate">{{ f.name }}</span>
           </div>
         </div>
@@ -139,7 +139,7 @@
             class="recent-item"
             @click="store.selectFile(f.id)"
           >
-            <span class="recent-icon">{{ f.fileType === 'folder' ? '[+]' : '[=]' }}</span>
+            <span class="recent-icon"><AppIcon :name="f.fileType === 'folder' ? 'solar:folder-bold' : 'solar:file-bold'" :size="14" /></span>
             <div class="recent-info">
               <span class="recent-name truncate">{{ f.name }}</span>
               <span class="recent-date text-muted">{{ new Date(f.modifiedAt).toLocaleDateString() }}</span>
@@ -180,6 +180,7 @@
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { ref, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { useWindowManager } from '@/composables/useWindowManager'

@@ -12,8 +12,8 @@
         <div class="confirm-header">{{ title }}</div>
         <div class="confirm-body">{{ message }}</div>
         <div class="confirm-actions">
-          <button ref="cancelBtnRef" class="confirm-btn cancel" @click="handleCancel">{{ cancelText }}</button>
-          <button ref="confirmBtnRef" class="confirm-btn ok" @click="handleConfirm">{{ confirmText }}</button>
+          <button ref="cancelBtnRef" class="confirm-btn cancel" @click="handleCancel"><AppIcon name="solar:close-bold" :size="13" /> {{ cancelText }}</button>
+          <button ref="confirmBtnRef" class="confirm-btn ok" @click="handleConfirm"><AppIcon name="solar:check-bold" :size="13" /> {{ confirmText }}</button>
         </div>
       </div>
     </div>
@@ -22,6 +22,7 @@
 
 <script setup lang="ts">
 import { ref, toRef } from 'vue'
+import AppIcon from '@/components/AppIcon.vue'
 import { useFocusTrap } from '@/composables/useFocusTrap'
 
 const props = withDefaults(defineProps<{
@@ -33,8 +34,8 @@ const props = withDefaults(defineProps<{
 }>(), {
   title: 'CONFIRM',
   message: 'ARE YOU SURE?',
-  confirmText: '[YES]',
-  cancelText: '[CANCEL]',
+  confirmText: 'YES',
+  cancelText: 'CANCEL',
 })
 
 const emit = defineEmits<{

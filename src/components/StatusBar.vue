@@ -111,51 +111,63 @@ const isSyncActive = computed(() => {
 .statusbar {
   display: flex;
   align-items: center;
-  height: 24px;
-  padding: 0 8px;
-  gap: 6px;
-  background: #000;
-  border-top: 2px solid #FFFFFF;
+  height: 26px;
+  padding: 0 10px;
+  gap: 8px;
+  background: var(--ui-glass);
+  backdrop-filter: blur(var(--ui-blur-strong)) saturate(var(--ui-saturate));
+  -webkit-backdrop-filter: blur(var(--ui-blur-strong)) saturate(var(--ui-saturate));
+  border-top: 1px solid var(--ui-border);
+  box-shadow: 0 -1px 0 var(--ui-glass-highlight);
   font-size: 10px;
   overflow: hidden;
   z-index: 10;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font-mono);
+  color: var(--ui-text-3);
 }
 
 .sb-left {
   display: flex;
   align-items: center;
+  gap: 8px;
   flex-shrink: 0;
+  min-width: 0;
 }
 
 .sb-path {
-  font-size: 10px;
+  font-size: var(--ui-fs-xs);
   font-weight: 600;
-  max-width: 240px;
+  max-width: 260px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: rgba(255,255,255,0.7);
+  color: var(--ui-text-2);
+  padding: 1px 8px;
+  border-radius: var(--ui-radius-full);
+  background: color-mix(in srgb, var(--ui-text) 6%, transparent);
+  border: 1px solid var(--ui-hairline);
 }
 
 .sb-progress-bar {
-  width: 60px;
-  height: 6px;
-  border: 1px solid #FFFFFF;
-  margin-left: 8px;
+  width: 64px;
+  height: 5px;
+  border: 1px solid color-mix(in srgb, var(--ui-accent) 40%, transparent);
+  border-radius: var(--ui-radius-full);
   overflow: hidden;
+  background: color-mix(in srgb, var(--ui-accent) 10%, transparent);
 }
 
 .sb-progress-fill {
   height: 100%;
-  width: 30%;
-  background: #FFFFFF;
+  width: 40%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, var(--ui-accent), transparent);
   animation: sb-progress 1.2s ease-in-out infinite;
 }
 
 @keyframes sb-progress {
   0% { transform: translateX(-100%); }
-  100% { transform: translateX(calc(60px * 3.33)); }
+  100% { transform: translateX(260%); }
 }
 
 .sb-center {
@@ -163,28 +175,35 @@ const isSyncActive = computed(() => {
   align-items: center;
   gap: 6px;
   flex-shrink: 0;
+  overflow: hidden;
 }
 
 .sb-item {
   white-space: nowrap;
-  color: rgba(255,255,255,0.6);
+  color: var(--ui-text-3);
+  font-size: var(--ui-fs-xs);
+  letter-spacing: 0.04em;
 }
 
 .sb-div {
-  color: rgba(255,255,255,0.3);
+  color: var(--ui-text-faint);
+  opacity: 0.6;
 }
 
 .sb-badge {
   font-weight: 700;
   font-size: 9px;
-  color: #FFFFFF;
-  border: 1px solid #FFFFFF;
-  padding: 0 4px;
+  letter-spacing: 0.08em;
+  color: var(--ui-accent);
+  background: var(--ui-accent-softer);
+  border: 1px solid color-mix(in srgb, var(--ui-accent) 34%, transparent);
+  padding: 1px 6px;
+  border-radius: var(--ui-radius-full);
 }
 
 .sb-hash {
   font-size: 9px;
-  color: rgba(255,255,255,0.5);
+  color: var(--ui-text-3);
 }
 
 .sb-right {
@@ -195,28 +214,44 @@ const isSyncActive = computed(() => {
 
 .sb-tech {
   font-size: 9px;
-  color: rgba(255,255,255,0.3);
-  letter-spacing: 0.5px;
+  color: var(--ui-text-faint);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding-left: 8px;
 }
 
 .sb-clickable {
   cursor: pointer;
-  color: rgba(255,255,255,0.5);
+  color: var(--ui-text-3);
   font-size: 9px;
+  letter-spacing: 0.06em;
+  padding: 2px 7px;
+  margin: 0 3px;
+  border-radius: var(--ui-radius-full);
+  border: 1px solid transparent;
+  background: transparent;
+  transition:
+    color var(--ui-dur-fast) var(--ui-ease-out),
+    background-color var(--ui-dur-fast) var(--ui-ease-out),
+    border-color var(--ui-dur-fast) var(--ui-ease-out);
 }
 
 .sb-clickable:hover {
-  color: #FFFFFF;
-  text-decoration: underline;
+  color: var(--ui-text);
+  background: var(--ui-accent-softer);
+  border-color: color-mix(in srgb, var(--ui-accent) 30%, transparent);
+  text-decoration: none;
 }
 
 .sb-active {
-  color: #FFFFFF;
+  color: var(--ui-accent);
   font-weight: 700;
+  background: var(--ui-accent-softer);
+  border-color: color-mix(in srgb, var(--ui-accent) 34%, transparent);
+  animation: bw-pulse 2.2s ease-in-out infinite;
 }
 
 .job-icon {
-  color: rgba(255,255,255,0.5);
   font-size: 9px;
 }
 

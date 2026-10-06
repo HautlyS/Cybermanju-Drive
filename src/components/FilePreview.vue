@@ -1,7 +1,7 @@
 <template>
   <aside v-if="store.selectedFile" class="file-preview">
     <div class="preview-header">
-      <span class="preview-icon">{{ getIcon(store.selectedFile) }}</span>
+      <span class="preview-icon"><AppIcon :name="getIcon(store.selectedFile)" :size="32" /></span>
       <div class="preview-file-info">
         <span class="preview-filename truncate">{{ store.selectedFile.name }}</span>
         <span class="preview-path truncate text-muted">{{ store.selectedFile.path }}</span>
@@ -108,23 +108,24 @@
     </div>
 
     <div class="preview-actions">
-      <button class="pa-btn" @click="handleEncrypt" title="ENCRYPT">{{ store.selectedFile.encrypted ? '[DEC]' : '[ENC]' }}</button>
-      <button class="pa-btn" @click="handleCompress" title="COMPRESS">[CMP]</button>
-      <button class="pa-btn" @click="handleStar" title="STAR">{{ store.selectedFile.isStarred ? '[*]' : '[ ]' }}</button>
-      <button class="pa-btn" @click="handleCopyPath" title="COPY PATH">[CP]</button>
-      <button class="pa-btn danger" @click="handleDelete" title="DELETE">[DEL]</button>
+      <button class="pa-btn" @click="handleEncrypt" :title="store.selectedFile.encrypted ? 'DECRYPT' : 'ENCRYPT'" :aria-label="store.selectedFile.encrypted ? 'DECRYPT' : 'ENCRYPT'"><AppIcon :name="store.selectedFile.encrypted ? 'solar:lock-unlocked-bold' : 'solar:lock-bold'" :size="14" /></button>
+      <button class="pa-btn" @click="handleCompress" title="COMPRESS" aria-label="COMPRESS"><AppIcon name="solar:archive-bold" :size="14" /></button>
+      <button class="pa-btn" @click="handleStar" :title="store.selectedFile.isStarred ? 'UNSTAR' : 'STAR'" :aria-label="store.selectedFile.isStarred ? 'UNSTAR' : 'STAR'"><AppIcon :name="store.selectedFile.isStarred ? 'solar:star-bold' : 'solar:star-off-bold'" :size="14" /></button>
+      <button class="pa-btn" @click="handleCopyPath" title="COPY PATH" aria-label="COPY PATH"><AppIcon name="solar:copy-bold" :size="14" /></button>
+      <button class="pa-btn danger" @click="handleDelete" title="DELETE" aria-label="DELETE"><AppIcon name="solar:trash-bin-trash-bold" :size="14" /></button>
     </div>
   </aside>
 
   <aside v-else class="file-preview empty-preview">
     <div class="empty-content">
-      <span style="font-size:24px">[=]</span>
+      <span style="font-size:24px"><AppIcon name="solar:file-bold" :size="24" /></span>
       <span class="text-muted" style="font-size:11px">SELECT A FILE</span>
     </div>
   </aside>
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { computed } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { humanBytes } from '@/utils/format'
@@ -139,12 +140,12 @@ const filteredContextData = computed(() => {
 })
 
 function getIcon(file: FileNode): string {
-  if (file.fileType === 'folder') return '[+]'
-  if (file.encrypted) return '[@]'
-  if (file.compressionLayers && file.compressionLayers[0] && file.compressionLayers[0] !== 'none') return '[$]'
-  if (file.mimeType?.startsWith('image/')) return '[I]'
-  if (file.mimeType?.startsWith('text/') || file.mimeType?.includes('json')) return '[T]'
-  return '[=]'
+  if (file.fileType === 'folder') return 'solar:folder-bold'
+  if (file.encrypted) return 'solar:lock-bold'
+  if (file.compressionLayers && file.compressionLayers[0] && file.compressionLayers[0] !== 'none') return 'solar:archive-bold'
+  if (file.mimeType?.startsWith('image/')) return 'solar:gallery-bold'
+  if (file.mimeType?.startsWith('text/') || file.mimeType?.includes('json')) return 'solar:file-text-bold'
+  return 'solar:file-bold'
 }
 
 function getFaceGroupName(groupId: string): string {

@@ -25,11 +25,16 @@
 // panel asks for a reconnect when Google probes fail).
 
 import type { Session, SupabaseClient } from '@supabase/supabase-js'
+import { vaultDelete, vaultGet, vaultSet } from './useVault'
 
 const URL_KEY = 'cybermanju.supabaseUrl'
 const KEY_KEY = 'cybermanju.supabaseKey'
 const PENDING_CFG_KEY = 'cybermanju.oauthConfigId'
 const TOKEN_STASH_KEY = 'cybermanju.providerToken'
+// In-file twins (`.cybermanju` → kv table) — localStorage stays the hot
+// synchronous cache, the vault is the durable copy inside the file.
+const VAULT_URL_KEY = 'config:supabase.url'
+const VAULT_KEY_KEY = 'config:supabase.key'
 
 export type OAuthBackend = 'github' | 'google' | 'gitlab'
 
@@ -70,8 +75,12 @@ export function supabaseConfigured(): boolean {
 }
 
 export function setSupabaseConfig(url: string, key: string) {
-  writeLS(URL_KEY, url.trim().replace(/\/+$/, ''))
-  writeLS(KEY_KEY, key.trim())
+  const cleanUrl = url.trim().replace(/\/+$/, '')
+  const cleanKey = key.trim()
+  writeLS(URL_KEY, cleanUrl)
+  writeLS(KEY_KEY, cleanKey)
+  void (cleanUrl ? vaultSet(VAULT_URL_KEY, cleanUrl) : vaultDelete(VAULT_URL_KEY))
+  void (cleanKey ? vaultSet(VAULT_KEY_KEY, cleanKey) : vaultDelete(VAULT_KEY_KEY))
   client = null
   clientKey = ''
 }
@@ -79,8 +88,26 @@ export function setSupabaseConfig(url: string, key: string) {
 export function clearSupabaseConfig() {
   writeLS(URL_KEY, '')
   writeLS(KEY_KEY, '')
+  void vaultDelete(VAULT_URL_KEY)
+  void vaultDelete(VAULT_KEY_KEY)
   client = null
   clientKey = ''
+}
+
+/**
+ * Boot: pull the Supabase URL/key out of `.cybermanju` when localStorage is
+ * empty (fresh browser, restored file, cleared site data). Writes through to
+ * localStorage so `getSupabaseConfig()` stays synchronous everywhere.
+ */
+export async function hydrateSupabaseConfig(): Promise<boolean> {
+  if (supabaseConfigured()) return false
+  const [url, key] = await Promise.all([vaultGet(VAULT_URL_KEY), vaultGet(VAULT_KEY_KEY)])
+  if (!url && !key) return false
+  writeLS(URL_KEY, url || '')
+  writeLS(KEY_KEY, key || '')
+  client = null
+  clientKey = ''
+  return supabaseConfigured()
 }
 
 export async function getSupabaseClient(): Promise<SupabaseClient | null> {

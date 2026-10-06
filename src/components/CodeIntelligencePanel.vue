@@ -2,7 +2,7 @@
   <div class="code-panel">
     <div class="panel-header">
       <div class="header-left">
-        <span class="icon-code">[T]</span>
+        <span class="icon-code"><AppIcon name="solar:code-2-bold" /></span>
         <h2 class="panel-title">CODE INTELLIGENCE</h2>
         <span
           v-if="parseResult"
@@ -17,18 +17,18 @@
           class="bw-btn-sm"
           @click="showAst = !showAst"
           title="TOGGLE OUTLINE VIEW"
-        >{{ showAst ? '[TREE]' : '[AST]' }}</button>
+        ><AppIcon :name="showAst ? 'solar:folder-tree-bold' : 'solar:git-fork-bold'" :size="13" /> {{ showAst ? 'TREE' : 'AST' }}</button>
         <button
           v-if="parsedContent"
           class="bw-btn-sm"
           @click="showSource = !showSource"
           title="TOGGLE SOURCE VIEW"
-        >[SRC]</button>
+        ><AppIcon name="solar:file-code-bold" :size="13" /> SRC</button>
       </div>
     </div>
 
     <div class="section">
-      <h3 class="section-title">[SOURCE] WHAT TO PARSE</h3>
+      <h3 class="section-title"><AppIcon name="solar:file-code-bold" :size="13" /> WHAT TO PARSE</h3>
       <div class="mode-tabs" role="tablist" aria-label="Parse source">
         <button class="mode-tab" :class="{ on: mode === 'file' }" @click="mode = 'file'">FILE</button>
         <button class="mode-tab" :class="{ on: mode === 'paste' }" @click="mode = 'paste'">PASTE</button>
@@ -42,7 +42,7 @@
         </div>
         <p v-else class="text-muted">SELECT A FILE IN THE BROWSER FIRST</p>
         <button class="bw-btn" style="margin-top:6px;" :disabled="!fileContent || parsing" @click="handleParseFile">
-          {{ parsing ? '[PARSING…]' : '[PARSE SELECTED FILE]' }}
+          <AppIcon :name="parsing ? 'solar:loader-bold' : 'solar:play-bold'" :size="13" /> {{ parsing ? 'PARSING…' : 'PARSE SELECTED FILE' }}
         </button>
       </div>
 
@@ -62,7 +62,7 @@
         <div class="row-between">
           <span class="text-muted counter">{{ pastedContent.length }} CHARS / 1 MiB LIMIT</span>
           <button class="bw-btn" :disabled="!pastedContent.trim() || parsing" @click="handleParsePaste">
-            {{ parsing ? '[PARSING…]' : '[PARSE TEXT]' }}
+            <AppIcon :name="parsing ? 'solar:loader-bold' : 'solar:play-bold'" :size="13" /> {{ parsing ? 'PARSING…' : 'PARSE TEXT' }}
           </button>
         </div>
       </div>
@@ -72,7 +72,7 @@
           <input v-model="pathInput" class="bw-input" placeholder="/home/user/main.rs" spellcheck="false" @keyup.enter="handleParsePath" />
         </label>
         <button class="bw-btn" style="margin-top:6px;" :disabled="!pathInput.trim() || parsing" @click="handleParsePath">
-          {{ parsing ? '[PARSING…]' : '[PARSE FILE BY PATH]' }}
+          <AppIcon :name="parsing ? 'solar:loader-bold' : 'solar:play-bold'" :size="13" /> {{ parsing ? 'PARSING…' : 'PARSE FILE BY PATH' }}
         </button>
         <p class="text-muted hint">DESKTOP ONLY — reads from disk via Tauri.</p>
       </div>
@@ -81,7 +81,7 @@
     </div>
 
     <div class="section" v-if="parseResult">
-      <h3 class="section-title">[DATA] PARSE RESULT</h3>
+      <h3 class="section-title"><AppIcon name="solar:database-bold" :size="13" /> PARSE RESULT</h3>
       <div class="parse-meta">
         <div class="meta-row"><span class="meta-key text-muted">FILE</span><span class="meta-value truncate">{{ parseResult.filePath }}</span></div>
         <div class="meta-row"><span class="meta-key text-muted">LANGUAGE</span><span class="meta-value language-badge">{{ parseResult.language }}</span></div>
@@ -99,7 +99,7 @@
     </div>
 
     <div class="section" v-if="parseResult && showAst">
-      <h3 class="section-title">[TREE] SYMBOL OUTLINE</h3>
+      <h3 class="section-title"><AppIcon name="solar:folder-tree-bold" :size="13" /> SYMBOL OUTLINE</h3>
       <div class="outline-tools">
         <input
           v-model="filter"
@@ -137,7 +137,7 @@
     </div>
 
     <div class="section" v-if="parsedContent && showSource">
-      <h3 class="section-title">[SOURCE] SYNTAX VIEW</h3>
+      <h3 class="section-title"><AppIcon name="solar:file-code-bold" :size="13" /> SYNTAX VIEW</h3>
       <div class="source-view">
         <div
           v-for="(line, li) in sourceLines"
@@ -155,6 +155,7 @@
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { ref, computed, nextTick } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { isTauri } from '@/composables/useTauri'

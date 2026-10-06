@@ -1,0 +1,284 @@
+/**
+ * Cybermanju Drive — glass & motion layer.
+ *
+ * Utilities shared by every window, panel and overlay. Values come from the
+ * `--ui-*` custom properties published by `useTheme()`, so this whole file
+ * re-themes itself when the user switches theme/accent/density/glass.
+ */
+
+/* ── surfaces ─────────────────────────────────────────────────────────── */
+
+.ui-glass {
+  background: var(--ui-glass);
+  backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
+  -webkit-backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
+  border: 1px solid var(--ui-border);
+}
+
+.ui-glass-strong {
+  background: var(--ui-glass-2);
+  backdrop-filter: blur(var(--ui-blur-strong)) saturate(var(--ui-saturate));
+  -webkit-backdrop-filter: blur(var(--ui-blur-strong)) saturate(var(--ui-saturate));
+  border: 1px solid var(--ui-border);
+}
+
+.ui-surface {
+  background: var(--ui-surface-2);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-md);
+}
+
+.ui-raised {
+  box-shadow: var(--ui-shadow-2);
+}
+
+/* Specular top edge that sells the glass look on floating layers. */
+.ui-shine {
+  position: relative;
+  overflow: hidden;
+}
+
+.ui-shine::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--ui-glass-highlight) 20%,
+    var(--ui-glass-highlight) 80%,
+    transparent
+  );
+  pointer-events: none;
+}
+
+/* ── interaction ──────────────────────────────────────────────────────── */
+
+.ui-press {
+  transition:
+    transform var(--ui-dur-fast) var(--ui-ease-out),
+    background-color var(--ui-dur-fast) var(--ui-ease-out),
+    border-color var(--ui-dur-fast) var(--ui-ease-out),
+    box-shadow var(--ui-dur) var(--ui-ease-out);
+}
+
+.ui-press:hover {
+  transform: translateY(-1px);
+}
+
+.ui-press:active {
+  transform: translateY(0) scale(0.985);
+}
+
+.ui-focus-ring:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ui-accent) 70%, transparent);
+  outline-offset: 2px;
+}
+
+/* Accent sweep that runs once when an interactive surface is hovered. */
+.ui-sweep {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.ui-sweep::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    160px circle at var(--ui-sweep-x, 50%) var(--ui-sweep-y, 50%),
+    color-mix(in srgb, var(--ui-accent) 22%, transparent),
+    transparent 70%
+  );
+  opacity: 0;
+  transition: opacity var(--ui-dur) var(--ui-ease-out);
+  pointer-events: none;
+  z-index: -1;
+}
+
+.ui-sweep:hover::after {
+  opacity: 1;
+}
+
+/* ── typography helpers ───────────────────────────────────────────────── */
+
+.ui-overline {
+  font-family: var(--ui-font-mono);
+  font-size: var(--ui-fs-xs);
+  font-weight: 700;
+  letter-spacing: var(--ui-tracking-wide);
+  text-transform: uppercase;
+  color: var(--ui-text-3);
+}
+
+.ui-mono {
+  font-family: var(--ui-font-mono);
+  font-variant-ligatures: none;
+}
+
+.ui-gradient-text {
+  background: linear-gradient(
+    120deg,
+    var(--ui-text) 0%,
+    var(--ui-accent) 55%,
+    var(--ui-text) 110%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.ui-accent-text {
+  color: var(--ui-accent);
+}
+
+/* ── animation primitives ─────────────────────────────────────────────── */
+
+@keyframes ui-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes ui-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes ui-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes ui-slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes ui-shimmer {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes ui-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes ui-pulse-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--ui-accent) 40%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--ui-accent) 0%, transparent);
+  }
+}
+
+@keyframes ui-sweep-in {
+  from {
+    transform: scaleX(0);
+    opacity: 0;
+  }
+  to {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+}
+
+.ui-anim-fade {
+  animation: ui-fade-in var(--ui-dur) var(--ui-ease-out) both;
+}
+
+.ui-anim-rise {
+  animation: ui-rise var(--ui-dur-slow) var(--ui-ease-out) both;
+}
+
+.ui-anim-pop {
+  animation: ui-pop var(--ui-dur) var(--ui-ease-spring) both;
+}
+
+.ui-anim-stagger > * {
+  animation: ui-rise var(--ui-dur-slow) var(--ui-ease-out) both;
+}
+
+.ui-anim-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.ui-anim-stagger > *:nth-child(2) { animation-delay: 35ms; }
+.ui-anim-stagger > *:nth-child(3) { animation-delay: 70ms; }
+.ui-anim-stagger > *:nth-child(4) { animation-delay: 105ms; }
+.ui-anim-stagger > *:nth-child(5) { animation-delay: 140ms; }
+.ui-anim-stagger > *:nth-child(6) { animation-delay: 175ms; }
+.ui-anim-stagger > *:nth-child(7) { animation-delay: 210ms; }
+.ui-anim-stagger > *:nth-child(8) { animation-delay: 245ms; }
+
+/* ── reduced motion (theme `motion: reduced` or OS preference) ────────── */
+
+[data-ui-motion='reduced'] *,
+[data-ui-motion='reduced'] *::before,
+[data-ui-motion='reduced'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* ── scrollbars / selection ───────────────────────────────────────────── */
+
+::selection {
+  background: color-mix(in srgb, var(--ui-accent) 35%, transparent);
+  color: var(--ui-text);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ui-border-strong) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--ui-border-strong);
+  border-radius: var(--ui-radius-full);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ui-border-hover);
+  background-clip: content-box;
+}

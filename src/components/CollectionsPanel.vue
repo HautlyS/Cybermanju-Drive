@@ -2,7 +2,7 @@
   <div class="collections-panel">
     <div class="panel-header">
       <div class="header-left">
-        <span class="icon-col">[*]</span>
+        <span class="icon-col"><AppIcon name="solar:library-bold" /></span>
         <h2 class="panel-title">COLLECTIONS</h2>
       </div>
     </div>
@@ -32,19 +32,20 @@
     </div>
 
     <div class="section create-section">
-      <h3 class="section-title">[+] CREATE COLLECTION</h3>
+      <h3 class="section-title"><AppIcon name="solar:add-bold" :size="13" /> CREATE COLLECTION</h3>
       <input v-model="newName" class="bw-input" placeholder="COLLECTION NAME" @keyup.enter="handleCreate" />
       <select v-model="newType" class="bw-input" style="appearance:none;">
         <option value="custom">CUSTOM</option>
         <option value="highlights">HIGHLIGHTS</option>
         <option value="best_moments">BEST MOMENTS</option>
       </select>
-      <button class="bw-btn" style="width:100%;" @click="handleCreate">[CREATE]</button>
+      <button class="bw-btn" style="width:100%;" @click="handleCreate"><AppIcon name="solar:add-bold" :size="13" /> CREATE</button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { ref, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
 import type { CollectionType } from '@/types'

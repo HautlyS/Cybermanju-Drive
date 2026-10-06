@@ -33,7 +33,7 @@
               @click="execute(cmd)"
               @mouseenter="activeIndex = getGlobalIndex(gi, ci)"
             >
-              <span class="cp-item-icon">{{ cmd.icon }}</span>
+              <span class="cp-item-icon"><AppIcon :name="cmd.icon" :size="14" /></span>
               <span class="cp-item-label">{{ cmd.label }}</span>
               <span v-if="cmd.shortcut" class="cp-item-shortcut">{{ cmd.shortcut }}</span>
             </div>
@@ -48,6 +48,7 @@
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { ref, toRef, computed, nextTick, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { useWindowManager } from '@/composables/useWindowManager'
@@ -80,53 +81,53 @@ const commands = computed<CommandGroup[]>(() => [
   {
     label: 'NAVIGATION',
     items: [
-      { id: 'nav-files', label: 'Go to Files', icon: '[#]', shortcut: '', action: () => { wm.open('files') } },
-      { id: 'nav-search', label: 'Go to Search', icon: '[S]', action: () => { wm.open('search') } },
-      { id: 'nav-collections', label: 'Go to Collections', icon: '[*]', action: () => { wm.open('collections') } },
-      { id: 'nav-faces', label: 'Go to People (Faces)', icon: '[+]', action: () => { wm.open('faces') } },
-      { id: 'nav-map', label: 'Go to Map', icon: '[@]', action: () => { wm.open('map'); store.fetchGeoFiles() } },
-      { id: 'nav-code', label: 'Go to Code Intelligence', icon: '[T]', action: () => { wm.open('code') } },
-      { id: 'nav-sync', label: 'Go to Sync (providers + OAuth)', icon: '[~]', action: () => { wm.open('sync') } },
-      { id: 'nav-accounts', label: 'Go to Account Manager', icon: '[@]', action: () => { wm.open('accounts') } },
-      { id: 'nav-users', label: 'Go to User Management', icon: '[!]', action: () => { wm.open('users'); store.fetchUsers() } },
-      { id: 'nav-terminal', label: 'Open Terminal (cybsh)', icon: '[>]', shortcut: 'Ctrl+`', action: () => { wm.open('terminal') } },
-      { id: 'nav-tasks', label: 'Open Tasks (ps/top)', icon: '[%]', action: () => { wm.open('processes') } },
-      { id: 'nav-disks', label: 'Open Disks & Volume', icon: '[=]', action: () => { wm.open('disks') } },
-      { id: 'nav-storage', label: 'Open Storage Dashboard', icon: '[$]', action: () => { wm.open('storage') } },
-      { id: 'nav-settings', label: 'Go to Settings', icon: '[@]', action: () => { wm.open('settings') as PanelType } },
-      { id: 'nav-trash', label: 'Go to Trash', icon: '[%]', action: () => { wm.open('trash'); store.fetchTrashItems() } },
-      { id: 'nav-favorites', label: 'Go to Favorites', icon: '[*]', action: () => { wm.open('favorites') as PanelType } },
-      { id: 'nav-recent', label: 'Go to Recent Files', icon: '[T]', action: () => { wm.open('recent') as PanelType } },
-      { id: 'nav-activity', label: 'Go to Activity Log', icon: '[~]', action: () => { wm.open('activity'); store.fetchAuditLog() } },
+      { id: 'nav-files', label: 'Go to Files', icon: 'solar:folder-bold', shortcut: '', action: () => { wm.open('files') } },
+      { id: 'nav-search', label: 'Go to Search', icon: 'solar:magnifier-bold', action: () => { wm.open('search') } },
+      { id: 'nav-collections', label: 'Go to Collections', icon: 'solar:library-bold', action: () => { wm.open('collections') } },
+      { id: 'nav-faces', label: 'Go to People (Faces)', icon: 'solar:face-scan-circle-bold', action: () => { wm.open('faces') } },
+      { id: 'nav-map', label: 'Go to Map', icon: 'solar:map-bold', action: () => { wm.open('map'); store.fetchGeoFiles() } },
+      { id: 'nav-code', label: 'Go to Code Intelligence', icon: 'solar:code-bold', action: () => { wm.open('code') } },
+      { id: 'nav-sync', label: 'Go to Sync (providers + OAuth)', icon: 'solar:refresh-bold', action: () => { wm.open('sync') } },
+      { id: 'nav-accounts', label: 'Go to Account Manager', icon: 'solar:user-circle-bold', action: () => { wm.open('accounts') } },
+      { id: 'nav-users', label: 'Go to User Management', icon: 'solar:users-group-rounded-bold', action: () => { wm.open('users'); store.fetchUsers() } },
+      { id: 'nav-terminal', label: 'Open Terminal (cybsh)', icon: 'solar:file-terminal-bold', shortcut: 'Ctrl+`', action: () => { wm.open('terminal') } },
+      { id: 'nav-tasks', label: 'Open Tasks (ps/top)', icon: 'solar:cpu-bold', action: () => { wm.open('processes') } },
+      { id: 'nav-disks', label: 'Open Disks & Volume', icon: 'solar:ssd-square-bold', action: () => { wm.open('disks') } },
+      { id: 'nav-storage', label: 'Open Storage Dashboard', icon: 'solar:database-bold', action: () => { wm.open('storage') } },
+      { id: 'nav-settings', label: 'Go to Settings', icon: 'solar:settings-bold', action: () => { wm.open('settings') as PanelType } },
+      { id: 'nav-trash', label: 'Go to Trash', icon: 'solar:trash-bin-trash-bold', action: () => { wm.open('trash'); store.fetchTrashItems() } },
+      { id: 'nav-favorites', label: 'Go to Favorites', icon: 'solar:star-bold', action: () => { wm.open('favorites') as PanelType } },
+      { id: 'nav-recent', label: 'Go to Recent Files', icon: 'solar:history-bold', action: () => { wm.open('recent') as PanelType } },
+      { id: 'nav-activity', label: 'Go to Activity Log', icon: 'solar:pulse-bold', action: () => { wm.open('activity'); store.fetchAuditLog() } },
     ],
   },
   {
     label: 'ACTIONS',
     items: [
-      { id: 'act-new-folder', label: 'New Folder', icon: '[+]', shortcut: 'Ctrl+N', action: () => { store.createFolderPromptOpen = true } },
-      { id: 'act-encrypt', label: 'Encrypt Selected File', icon: '[@]', shortcut: 'Ctrl+E', action: () => { wm.open('encryption') } },
-      { id: 'act-compress', label: 'Compress Selected File', icon: '[$]', shortcut: 'Ctrl+Shift+C', action: () => { wm.open('compression') } },
-      { id: 'act-batch-detect', label: 'Batch Face Detection', icon: '[+]', action: () => { store.detectFacesBatch() } },
-      { id: 'act-refresh', label: 'Refresh Files', icon: '[R]', action: () => { store.fetchFiles() } },
-      { id: 'act-login', label: 'Login / Register', icon: '[!]', action: () => { store.showLoginPopup = true } },
+      { id: 'act-new-folder', label: 'New Folder', icon: 'solar:add-folder-bold', shortcut: 'Ctrl+N', action: () => { store.createFolderPromptOpen = true } },
+      { id: 'act-encrypt', label: 'Encrypt Selected File', icon: 'solar:lock-bold', shortcut: 'Ctrl+E', action: () => { wm.open('encryption') } },
+      { id: 'act-compress', label: 'Compress Selected File', icon: 'solar:archive-bold', shortcut: 'Ctrl+Shift+C', action: () => { wm.open('compression') } },
+      { id: 'act-batch-detect', label: 'Batch Face Detection', icon: 'solar:face-scan-circle-bold', action: () => { store.detectFacesBatch() } },
+      { id: 'act-refresh', label: 'Refresh Files', icon: 'solar:refresh-bold', action: () => { store.fetchFiles() } },
+      { id: 'act-login', label: 'Login / Register', icon: 'solar:login-bold', action: () => { store.showLoginPopup = true } },
     ],
   },
   {
     label: 'VIEW',
     items: [
-      { id: 'view-grid', label: 'Grid View', icon: '[#]', shortcut: 'Ctrl+G', action: () => { wm.open('files'); store.viewMode = 'grid' } },
-      { id: 'view-list', label: 'List View', icon: '[#]', shortcut: 'Ctrl+L', action: () => { wm.open('files'); store.viewMode = 'list' } },
-      { id: 'view-masonry', label: 'Masonry View', icon: '[#]', shortcut: 'Ctrl+M', action: () => { wm.open('files'); store.viewMode = 'masonry' } },
-      { id: 'view-toggle-sidebar', label: 'Toggle Sidebar', icon: '[#]', shortcut: 'Ctrl+B', action: () => { store.sidebarCollapsed = !store.sidebarCollapsed } },
-      { id: 'view-toggle-matrix', label: 'Toggle Matrix Rain', icon: '[~]', action: () => { store.matrixRainEnabled = !store.matrixRainEnabled } },
+      { id: 'view-grid', label: 'Grid View', icon: 'solar:grid-3x3-bold', shortcut: 'Ctrl+G', action: () => { wm.open('files'); store.viewMode = 'grid' } },
+      { id: 'view-list', label: 'List View', icon: 'solar:list-bold', shortcut: 'Ctrl+L', action: () => { wm.open('files'); store.viewMode = 'list' } },
+      { id: 'view-masonry', label: 'Masonry View', icon: 'solar:columns-3-bold', shortcut: 'Ctrl+M', action: () => { wm.open('files'); store.viewMode = 'masonry' } },
+      { id: 'view-toggle-sidebar', label: 'Toggle Sidebar', icon: 'solar:panel-left-bold', shortcut: 'Ctrl+B', action: () => { store.sidebarCollapsed = !store.sidebarCollapsed } },
+      { id: 'view-toggle-matrix', label: 'Toggle Matrix Rain', icon: 'solar:barcode-bold', action: () => { store.matrixRainEnabled = !store.matrixRainEnabled } },
     ],
   },
   {
     label: 'PANELS',
     items: [
-      { id: 'panel-encryption', label: 'Open Encryption Panel', icon: '[@]', shortcut: 'Ctrl+E', action: () => { wm.open('encryption') } },
-      { id: 'panel-compression', label: 'Open Compression Panel', icon: '[$]', shortcut: 'Ctrl+Shift+C', action: () => { wm.open('compression') } },
-      { id: 'panel-permissions', label: 'Open Permissions Panel', icon: '[!]', action: () => { wm.open('permissions' as PanelType) } },
+      { id: 'panel-encryption', label: 'Open Encryption Panel', icon: 'solar:lock-bold', shortcut: 'Ctrl+E', action: () => { wm.open('encryption') } },
+      { id: 'panel-compression', label: 'Open Compression Panel', icon: 'solar:archive-bold', shortcut: 'Ctrl+Shift+C', action: () => { wm.open('compression') } },
+      { id: 'panel-permissions', label: 'Open Permissions Panel', icon: 'solar:key-bold', action: () => { wm.open('permissions' as PanelType) } },
     ],
   },
 ])

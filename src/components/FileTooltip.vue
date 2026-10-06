@@ -6,7 +6,7 @@
       :style="{ left: x + 'px', top: y + 'px' }"
     >
       <div class="tt-header">
-        <span class="tt-icon">{{ icon }}</span>
+        <span class="tt-icon"><AppIcon :name="icon" :size="14" /></span>
         <span class="tt-name truncate">{{ file.name }}</span>
       </div>
       <div class="tt-meta">
@@ -26,6 +26,7 @@
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import type { FileNode } from '@/types'
 import { humanBytes } from '@/utils/format'
 
@@ -43,12 +44,12 @@ function formatDate(dateStr: string): string {
 }
 
 function getIcon(file: FileNode): string {
-  if (file.fileType === 'folder') return '[+]'
-  if (file.encrypted) return '[@]'
-  if (file.compressionLayers && file.compressionLayers[0] && file.compressionLayers[0] !== 'none') return '[$]'
-  if (file.mimeType?.startsWith('image/')) return '[I]'
-  if (file.mimeType?.startsWith('text/') || file.mimeType?.includes('json') || file.mimeType?.includes('xml')) return '[T]'
-  return '[=]'
+  if (file.fileType === 'folder') return 'solar:folder-bold'
+  if (file.encrypted) return 'solar:lock-bold'
+  if (file.compressionLayers && file.compressionLayers[0] && file.compressionLayers[0] !== 'none') return 'solar:archive-bold'
+  if (file.mimeType?.startsWith('image/')) return 'solar:gallery-bold'
+  if (file.mimeType?.startsWith('text/') || file.mimeType?.includes('json') || file.mimeType?.includes('xml')) return 'solar:file-text-bold'
+  return 'solar:file-bold'
 }
 
 const icon = getIcon

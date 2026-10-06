@@ -2,7 +2,7 @@
   <div class="acct-panel">
     <div class="panel-header">
       <div class="header-left">
-        <span class="icon-acct">[@]</span>
+        <span class="icon-acct"><AppIcon name="solar:user-circle-bold" /></span>
         <h2 class="panel-title">ACCOUNTS</h2>
         <span class="text-muted">{{ store.syncConfigs.length }} PROVIDERS · {{ store.disks.length }} DISKS</span>
       </div>
@@ -13,7 +13,7 @@
 
     <!-- Merged volume: proof that every .cybermanju disk is one volume -->
     <div class="section">
-      <h3 class="section-title">[VOLUME] ONE MERGED DISK</h3>
+      <h3 class="section-title"><AppIcon name="solar:ssd-square-bold" :size="13" /> ONE MERGED DISK</h3>
       <div v-if="staticHost" class="static-note">
         OFFLINE DEMO VAULT — real redb cybermanju.db in this browser{{ dbBackend ? ` (${dbBackend.toUpperCase()})` : '' }}. ACCOUNTS, PROVIDERS, DISKS, USERS + FILES WORK HERE; ONLY PROVIDER NETWORK SYNC NEEDS THE SERVER.
       </div>
@@ -30,7 +30,7 @@
 
     <!-- App session -->
     <div class="section">
-      <h3 class="section-title">[SESSION] APP LOGIN</h3>
+      <h3 class="section-title"><AppIcon name="solar:login-bold" :size="13" /> APP LOGIN</h3>
       <div class="card">
         <div v-if="store.currentUser" class="row-between">
           <span>{{ store.currentUser.username }} · {{ store.currentUser.role }}</span>
@@ -45,7 +45,7 @@
 
     <!-- Local accounts -->
     <div class="section">
-      <h3 class="section-title">[LOCAL] DEVICE ACCOUNTS ({{ store.accounts.length }})</h3>
+      <h3 class="section-title"><AppIcon name="solar:laptop-bold" :size="13" /> DEVICE ACCOUNTS ({{ store.accounts.length }})</h3>
       <div v-if="store.accounts.length" class="cards">
         <div
           v-for="a in store.accounts"
@@ -81,7 +81,7 @@
 
     <!-- Providers -->
     <div class="section">
-      <h3 class="section-title">[PROVIDERS] CLOUD + LOCAL CONNECTIONS</h3>
+      <h3 class="section-title"><AppIcon name="solar:cloud-bold" :size="13" /> CLOUD + LOCAL CONNECTIONS</h3>
       <div v-if="!store.syncConfigs.length" class="card">
         <span class="text-muted">No providers connected — add one below.</span>
       </div>
@@ -224,7 +224,7 @@
 
     <!-- New provider wizard -->
     <div class="section">
-      <h3 class="section-title">[NEW] ADD PROVIDER</h3>
+      <h3 class="section-title"><AppIcon name="solar:add-bold" :size="13" /> ADD PROVIDER</h3>
       <div class="card">
         <div class="form-row">
           <select v-model="wiz.backendType" class="input" aria-label="Backend">
@@ -278,6 +278,7 @@
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { isStaticHost } from '@/composables/useTauri'

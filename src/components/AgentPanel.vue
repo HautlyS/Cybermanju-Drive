@@ -2,7 +2,7 @@
   <div class="agent-panel">
     <div class="panel-header">
       <div class="header-left">
-        <span class="icon-agent">[A]</span>
+        <span class="icon-agent"><AppIcon name="solar:bot-bold" /></span>
         <h2 class="panel-title">AI AGENT</h2>
         <span class="text-muted transport-tag">{{ transportLabel }}</span>
       </div>
@@ -11,7 +11,7 @@
 
     <!-- Provider + config setup -->
     <div v-if="showSetup" class="section wizard">
-      <h3 class="section-title">[NEW] PROVIDER PRESETS ({{ allPresets.length }})</h3>
+      <h3 class="section-title"><AppIcon name="solar:add-bold" :size="13" /> PROVIDER PRESETS ({{ allPresets.length }})</h3>
       <div class="preset-grid">
         <button
           v-for="p in allPresets"
@@ -32,7 +32,7 @@
         <label class="w-label">MODEL
           <span class="model-row">
             <input v-model="form.model" class="bw-input" placeholder="MODEL ID" list="agent-models" />
-            <button class="bw-btn small" :disabled="modelBusy || !form.providerId" @click="refreshModels" title="REFRESH MODEL LIST FROM PROVIDER">↻</button>
+            <button class="bw-btn small" :disabled="modelBusy || !form.providerId" @click="refreshModels" title="REFRESH MODEL LIST FROM PROVIDER" aria-label="REFRESH MODEL LIST"><AppIcon name="solar:refresh-bold" :size="13" /></button>
           </span>
           <datalist id="agent-models">
             <option v-for="m in models" :key="m" :value="m" />
@@ -99,7 +99,7 @@
     </div>
 
     <div class="section">
-      <h3 class="section-title">[CFG] AGENT CONFIGS ({{ configs.length }})</h3>
+      <h3 class="section-title"><AppIcon name="solar:settings-minimalistic-bold" :size="13" /> AGENT CONFIGS ({{ configs.length }})</h3>
       <div class="config-list">
         <div v-for="cfg in configs" :key="cfg.id" class="config-card" :class="{ on: chatConfigId === cfg.id }" @click="chatConfigId = cfg.id">
           <div class="cfg-header">
@@ -117,7 +117,7 @@
     </div>
 
     <div v-if="chatConfig" class="section">
-      <h3 class="section-title">[MCP] SERVERS FOR {{ chatConfig.name.toUpperCase() }} ({{ mcpEntries.length }})</h3>
+      <h3 class="section-title"><AppIcon name="solar:plug-circle-bold" :size="13" /> SERVERS FOR {{ chatConfig.name.toUpperCase() }} ({{ mcpEntries.length }})</h3>
       <div class="config-list">
         <div v-for="m in mcpEntries" :key="m.name" class="config-card">
           <div class="cfg-header">
@@ -175,7 +175,7 @@
     </div>
 
     <div class="section">
-      <h3 class="section-title">[CHAT] SESSIONS ({{ sessions.length }})</h3>
+      <h3 class="section-title"><AppIcon name="solar:chat-square-bold" :size="13" /> SESSIONS ({{ sessions.length }})</h3>
       <div class="w-row">
         <select v-model="chatConfigId" class="bw-input">
           <option value="">SELECT CONFIG</option>
@@ -198,14 +198,14 @@
         >
           <span class="session-title">{{ s.title }}</span>
           <span class="text-muted session-meta">{{ s.messages.length }} msgs</span>
-          <button class="bw-btn xs" @click.stop="exportSession(s.id)">↓</button>
-          <button class="bw-btn xs danger" @click.stop="removeSession(s.id)">×</button>
+          <button class="bw-btn xs" @click.stop="exportSession(s.id)" title="EXPORT SESSION" aria-label="EXPORT SESSION"><AppIcon name="solar:download-bold" :size="13" /></button>
+          <button class="bw-btn xs danger" @click.stop="removeSession(s.id)" aria-label="CLOSE"><AppIcon name="solar:close-bold" :size="13" /></button>
         </div>
       </div>
     </div>
 
     <div v-if="viewing" class="section thread">
-      <h3 class="section-title">[THREAD] {{ viewing.title }}</h3>
+      <h3 class="section-title"><AppIcon name="solar:chat-square-bold" :size="13" /> {{ viewing.title }}</h3>
       <div class="w-actions thread-actions">
         <button class="bw-btn xs" :disabled="!viewing.messages.length || jobActive" @click="compactThread" title="Summarize into a fresh session (old kept)">
           COMPACT
@@ -217,7 +217,7 @@
           <div class="msg-role text-muted">{{ roleLabel(m) }}</div>
           <div v-if="m.content" class="msg-body">{{ m.content }}</div>
           <div v-if="m.toolName || m.toolInput" class="tool-block">
-            <span class="tool-name">⚙ {{ m.toolName ?? toolNameOf(m) }}</span>
+            <span class="tool-name"><AppIcon name="solar:toolbox-bold" :size="12" /> {{ m.toolName ?? toolNameOf(m) }}</span>
             <pre class="tool-input">{{ prettyInput(m) }}</pre>
           </div>
         </div>
@@ -225,7 +225,7 @@
       </div>
 
       <div v-if="pendingApproval" class="approval">
-        <div class="approval-title">{{ pendingApproval.question ? '[QUESTION] NEEDS YOUR ANSWER' : '[APPROVAL] AGENT WAITS' }}</div>
+        <div class="approval-title"><AppIcon :name="pendingApproval.question ? 'solar:question-circle-bold' : 'solar:shield-check-bold'" :size="13" /> {{ pendingApproval.question ? 'NEEDS YOUR ANSWER' : 'AGENT WAITS' }}</div>
         <div class="approval-text">{{ pendingApproval.question || pendingApproval.summary }}</div>
         <div v-if="pendingApproval.question" class="w-row">
           <input v-model="answerInput" class="bw-input" placeholder="TYPE ANSWER…" @keyup.enter="answerApproval(true)" />
@@ -260,6 +260,7 @@
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { computed, reactive, ref, watch, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { isStaticHost } from '@/composables/useTauri'
@@ -988,8 +989,8 @@ async function initRepo() {
 
 function roleLabel(m: { role: string; toolName?: string | null }) {
   if (m.role === 'user') return 'YOU'
-  if (m.role === 'tool') return `TOOL ⇐ ${m.toolName ?? ''}`
-  if (m.role === 'assistant_tool') return 'AGENT ⚙'
+  if (m.role === 'tool') return `TOOL: ${m.toolName ?? ''}`
+  if (m.role === 'assistant_tool') return 'AGENT TOOL'
   return 'AGENT'
 }
 

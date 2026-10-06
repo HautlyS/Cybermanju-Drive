@@ -2,14 +2,14 @@
   <div class="compression-panel">
     <div class="panel-header">
       <div class="header-left">
-        <span class="icon-compress">[$]</span>
+        <span class="icon-compress"><AppIcon name="solar:archive-bold" /></span>
         <h2 class="panel-title">COMPRESSION ENGINE</h2>
       </div>
-      <button class="close-btn" @click="$emit('close')">X</button>
+      <button class="close-btn" @click="$emit('close')" aria-label="CLOSE"><AppIcon name="solar:close-bold" :size="13" /></button>
     </div>
 
     <div class="section">
-      <h3 class="section-title">[CMP] COMPRESSION ALGORITHMS</h3>
+      <h3 class="section-title"><AppIcon name="solar:archive-bold" :size="13" /> COMPRESSION ALGORITHMS</h3>
       <div class="algo-list">
         <button
           v-for="(info, type) in COMPRESSION_INFO"
@@ -32,13 +32,13 @@
     </div>
 
     <div class="section" v-if="selectedFile">
-      <h3 class="section-title">[FILE] SELECTED FILE</h3>
+      <h3 class="section-title"><AppIcon name="solar:file-bold" :size="13" /> SELECTED FILE</h3>
       <p class="selected-file-name">{{ selectedFile.name }}</p>
-      <button class="compress-btn" :disabled="webLocked" :title="webLocked ? 'Desktop app only' : 'Compress file'" @click="handleCompress">[COMPRESS]</button>
+      <button class="compress-btn" :disabled="webLocked" :title="webLocked ? 'Desktop app only' : 'Compress file'" @click="handleCompress"><AppIcon name="solar:archive-bold" :size="14" /> COMPRESS</button>
     </div>
 
     <div class="section" v-if="compressionStats">
-      <h3 class="section-title">[STATS] RESULTS</h3>
+      <h3 class="section-title"><AppIcon name="solar:chart-bold" :size="13" /> RESULTS</h3>
       <div class="stats-card">
         <div class="stat-row">
           <span class="stat-key text-muted">ORIGINAL</span>
@@ -62,6 +62,7 @@
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { ref, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { humanBytes } from '@/utils/format'

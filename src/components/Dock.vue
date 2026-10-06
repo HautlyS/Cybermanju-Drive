@@ -11,7 +11,7 @@
         :title="app.label"
       >
         <div class="dock-icon">
-          <span class="dock-icon-text">{{ app.icon }}</span>
+          <AppIcon class="dock-icon-text" :name="app.icon" :size="16" />
         </div>
         <div class="dock-indicator" v-if="wm.isOpen(app.panelType)">
           <div class="indicator-dot" :class="{ active: isAppActive(app.panelType) }" />
@@ -28,7 +28,7 @@
         :title="win.title + ' (minimized)'"
       >
         <div class="dock-icon minimized">
-          <span class="dock-icon-text">{{ win.icon }}</span>
+          <AppIcon class="dock-icon-text" :name="win.icon" :size="16" />
         </div>
         <div class="dock-indicator">
           <div class="indicator-dot muted" />
@@ -39,6 +39,7 @@
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { computed } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { useWindowManager } from '@/composables/useWindowManager'
@@ -55,23 +56,23 @@ interface DockApp {
 }
 
 const dockApps = computed<DockApp[]>(() => [
-  { panelType: 'files', label: 'File Browser', icon: '[#]', category: 'core' },
-  { panelType: 'search', label: 'Search', icon: '[S]', category: 'core' },
-  { panelType: 'collections', label: 'Collections', icon: '[*]', category: 'organize' },
-  { panelType: 'faces', label: 'People', icon: '[+]', category: 'organize' },
-  { panelType: 'map', label: 'Map', icon: '[@]', category: 'tools' },
-  { panelType: 'code', label: 'Code', icon: '[T]', category: 'tools' },
-  { panelType: 'editor', label: 'Editor', icon: '[E]', category: 'tools' },
-  { panelType: 'agent', label: 'Agent', icon: '[A]', category: 'tools' },
-  { panelType: 'sync', label: 'Sync', icon: '[~]', category: 'tools' },
-  { panelType: 'storage', label: 'Storage', icon: '[$]', category: 'tools' },
-  { panelType: 'disks', label: 'Disks', icon: '[=]', category: 'tools' },
-  { panelType: 'terminal', label: 'Terminal', icon: '[>]', category: 'system' },
-  { panelType: 'processes', label: 'Tasks', icon: '[%]', category: 'system' },
-  { panelType: 'settings', label: 'Settings', icon: '[@]', category: 'system' },
-  { panelType: 'trash', label: 'Trash', icon: '[%]', category: 'system' },
-  { panelType: 'users', label: 'Users', icon: '[!]', category: 'system' },
-  { panelType: 'accounts', label: 'Accounts', icon: '[+]', category: 'system' },
+  { panelType: 'files', label: 'File Browser', icon: 'solar:folder-bold', category: 'core' },
+  { panelType: 'search', label: 'Search', icon: 'solar:magnifier-bold', category: 'core' },
+  { panelType: 'collections', label: 'Collections', icon: 'solar:library-bold', category: 'organize' },
+  { panelType: 'faces', label: 'People', icon: 'solar:face-scan-circle-bold', category: 'organize' },
+  { panelType: 'map', label: 'Map', icon: 'solar:map-bold', category: 'tools' },
+  { panelType: 'code', label: 'Code', icon: 'solar:code-bold', category: 'tools' },
+  { panelType: 'editor', label: 'Editor', icon: 'solar:file-code-bold', category: 'tools' },
+  { panelType: 'agent', label: 'Agent', icon: 'solar:bot-bold', category: 'tools' },
+  { panelType: 'sync', label: 'Sync', icon: 'solar:refresh-bold', category: 'tools' },
+  { panelType: 'storage', label: 'Storage', icon: 'solar:database-bold', category: 'tools' },
+  { panelType: 'disks', label: 'Disks', icon: 'solar:ssd-square-bold', category: 'tools' },
+  { panelType: 'terminal', label: 'Terminal', icon: 'solar:file-terminal-bold', category: 'system' },
+  { panelType: 'processes', label: 'Tasks', icon: 'solar:cpu-bold', category: 'system' },
+  { panelType: 'settings', label: 'Settings', icon: 'solar:settings-bold', category: 'system' },
+  { panelType: 'trash', label: 'Trash', icon: 'solar:trash-bin-trash-bold', category: 'system' },
+  { panelType: 'users', label: 'Users', icon: 'solar:users-group-rounded-bold', category: 'system' },
+  { panelType: 'accounts', label: 'Accounts', icon: 'solar:user-circle-bold', category: 'system' },
 ])
 
 const minimizedWindows = computed(() =>
@@ -117,7 +118,7 @@ function handleDockContext(e: MouseEvent, panelType: PanelType) {
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 60px;
+  height: 62px;
   padding: 0 16px;
   background: transparent;
   z-index: 50;
@@ -129,15 +130,33 @@ function handleDockContext(e: MouseEvent, panelType: PanelType) {
   align-items: center;
   gap: 4px;
   padding: 6px 10px;
-  background: rgba(20, 20, 20, 0.85);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
+  background: var(--ui-glass-2);
+  backdrop-filter: blur(var(--ui-blur-strong)) saturate(var(--ui-saturate));
+  -webkit-backdrop-filter: blur(var(--ui-blur-strong)) saturate(var(--ui-saturate));
+  border: 1px solid var(--ui-border-strong);
+  border-radius: 18px;
   box-shadow:
-    0 4px 24px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    var(--ui-shadow-3),
+    inset 0 1px 0 var(--ui-glass-highlight);
   pointer-events: auto;
+  position: relative;
+}
+
+.dock::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  border-radius: 18px 18px 0 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--ui-accent) 45%, transparent) 30%,
+    color-mix(in srgb, var(--ui-accent) 45%, transparent) 70%,
+    transparent
+  );
+  opacity: 0.7;
+  pointer-events: none;
 }
 
 .dock-item {
@@ -147,23 +166,27 @@ function handleDockContext(e: MouseEvent, panelType: PanelType) {
   gap: 2px;
   padding: 4px 6px;
   cursor: pointer;
-  border-radius: 8px;
-  transition: all 0.12s;
+  border-radius: 10px;
+  transition:
+    background-color var(--ui-dur-fast) var(--ui-ease-out),
+    transform var(--ui-dur) var(--ui-ease-spring);
   position: relative;
   min-width: 44px;
+  background: transparent;
+  border: none;
 }
 
 .dock-item:hover {
-  background: rgba(255, 255, 255, 0.06);
-  transform: translateY(-2px);
+  background: var(--ui-accent-softer);
+  transform: translateY(-4px) scale(1.06);
 }
 
 .dock-item:active {
-  transform: translateY(0px);
+  transform: translateY(-1px) scale(1.01);
 }
 
 .dock-item.active {
-  background: rgba(0, 255, 65, 0.06);
+  background: color-mix(in srgb, var(--ui-accent) 10%, transparent);
 }
 
 .dock-icon {
@@ -172,40 +195,42 @@ function handleDockContext(e: MouseEvent, panelType: PanelType) {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #1a1a1a;
-  border-radius: 8px;
-  transition: all 0.12s;
-  border: 1px solid #2a2a2a;
+  background: var(--ui-glass);
+  border: 1px solid var(--ui-border);
+  border-radius: 10px;
+  transition:
+    background-color var(--ui-dur) var(--ui-ease-out),
+    border-color var(--ui-dur) var(--ui-ease-out),
+    box-shadow var(--ui-dur) var(--ui-ease-out),
+    transform var(--ui-dur) var(--ui-ease-spring);
 }
 
 .dock-item:hover .dock-icon {
-  background: #222;
-  border-color: #3a3a3a;
+  background: var(--ui-surface-3);
+  border-color: var(--ui-border-hover);
 }
 
 .dock-item.active .dock-icon {
-  background: rgba(0, 255, 65, 0.1);
-  border-color: rgba(0, 255, 65, 0.2);
-}
-
-.dock-item.active:hover .dock-icon {
-  background: rgba(0, 255, 65, 0.15);
-  border-color: rgba(0, 255, 65, 0.3);
+  background: var(--ui-accent-softer);
+  border-color: color-mix(in srgb, var(--ui-accent) 45%, transparent);
+  box-shadow: var(--ui-glow-soft);
 }
 
 .dock-icon-text {
-  font-family: 'Courier New', monospace;
-  font-size: 13px;
-  font-weight: 700;
-  color: #ccc;
+  color: var(--ui-text-2);
+  transition: color var(--ui-dur) var(--ui-ease-out), transform var(--ui-dur) var(--ui-ease-spring);
+}
+
+.dock-item:hover .dock-icon-text {
+  transform: scale(1.08);
 }
 
 .dock-item.active .dock-icon-text {
-  color: #00ff41;
+  color: var(--ui-accent);
 }
 
 .dock-icon.minimized {
-  opacity: 0.5;
+  opacity: 0.55;
 }
 
 .dock-indicator {
@@ -219,28 +244,32 @@ function handleDockContext(e: MouseEvent, panelType: PanelType) {
   width: 4px;
   height: 4px;
   border-radius: 50%;
-  background: #444;
-  transition: all 0.15s;
+  background: var(--ui-text-faint);
+  transition:
+    width var(--ui-dur) var(--ui-ease-spring),
+    background-color var(--ui-dur) var(--ui-ease-out),
+    box-shadow var(--ui-dur) var(--ui-ease-out);
 }
 
 .indicator-dot.active {
-  background: #00ff41;
+  background: var(--ui-accent);
   width: 16px;
-  border-radius: 2px;
+  border-radius: var(--ui-radius-full);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--ui-accent) 75%, transparent);
 }
 
 .indicator-dot.muted {
-  background: #333;
+  background: var(--ui-border-strong);
 }
 
 .minimized-item .dock-icon {
-  opacity: 0.4;
+  opacity: 0.5;
 }
 
 .dock-divider {
   width: 1px;
   height: 28px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--ui-border-strong);
   margin: 0 4px;
 }
 </style>

@@ -1042,7 +1042,8 @@ function wasmArgsForCommand(
 interface DbWasmRoute {
   op: string
   args: (a: Record<string, unknown>) => Record<string, unknown>
-  map?: (raw: unknown, a: Record<string, unknown>) => unknown
+  /** May be async — routes that need a second lookup (e.g. the file node). */
+  map?: (raw: unknown, a: Record<string, unknown>) => unknown | Promise<unknown>
   probe?: boolean
 }
 
@@ -1105,6 +1106,131 @@ const DB_WASM_ROUTES: Record<string, DbWasmRoute> = {
   create_folder: { op: 'files.create_folder', args: (a) => ({ name: a.name, parentId: a.parentId }) },
   rename_file: { op: 'files.rename', args: (a) => ({ fileId: a.fileId, newName: a.newName }) },
   delete_file: { op: 'files.delete', args: (a) => ({ fileId: a.fileId }) },
+  // ── Managed text content — body in kv (`content:<fileId>`), node in files.
+  // Uploads land base64 with `encoding:<fileId>` = "base64"; the read route
+  // decodes so the editor always sees text.
+  read_file_content: {
+    op: 'kv.get',
+    args: (a) => ({ key: `content:${a.fileId}` }),
+    map: async (raw, a) => {
+      const fileId = String(a.fileId ?? '')
+      const row = raw as { value?: unknown } | null
+      const body = row && typeof row === 'object' && typeof row.value === 'string' ? row.value : ''
+      const [encoding, node] = await Promise.all([
+        wasmDbDispatch('kv.get', { key: `encoding:${fileId}` }),
+        wasmDbDispatch('files.get', { fileId }).catch(() => null),
+      ])
+      const enc = (encoding as { value?: unknown } | null)?.value
+      const content = enc === 'base64' ? base64ToText(body) : body
+      const meta = node as { name?: string; hashBlake3?: string | null } | null
+      return {
+        fileId,
+        name: String(meta?.name ?? a.name ?? a.fileName ?? ''),
+        content,
+        sizeBytes: content.length,
+        truncated: false,
+        hashBlake3: meta?.hashBlake3 ?? null,
+      }
+    },
+  },
+  write_file_content: {
+    op: 'kv.set',
+    args: (a) => ({ key: `content:${a.fileId}`, value: String(a.content ?? '') }),
+    map: async (_raw, a) => {
+      const fileId = String(a.fileId ?? '')
+      const content = String(a.content ?? '')
+      // Text from the editor replaces any uploaded encoding marker, and the
+      // node's size/modified stamp follows so the file list stays honest.
+      await wasmDbDispatch('kv.delete', { key: `encoding:${fileId}` }).catch(() => null)
+      await wasmDbDispatch('files.patch', {
+        fileId,
+        patch: { sizeBytes: content.length, hashBlake3: null },
+      }).catch(() => null)
+      const node = (await wasmDbDispatch('files.get', { fileId }).catch(() => null)) as {
+        name?: string
+        hashBlake3?: string | null
+        modifiedAt?: string
+      } | null
+      return {
+        fileId,
+        name: String(node?.name ?? a.name ?? ''),
+        sizeBytes: content.length,
+        hashBlake3: node?.hashBlake3 ?? null,
+        modifiedAt: String(node?.modifiedAt ?? new Date().toISOString()),
+      }
+    },
+  },
+}
+
+/** Bytes in any shape the dialog hands us → `Uint8Array`. */
+function coerceBytes(data: unknown): Uint8Array {
+  if (data instanceof Uint8Array) return data
+  if (Array.isArray(data)) return Uint8Array.from(data as number[])
+  if (data instanceof ArrayBuffer) return new Uint8Array(data)
+  if (typeof data === 'string') return new TextEncoder().encode(data)
+  return new Uint8Array()
+}
+
+function base64ToText(b64: string): string {
+  try {
+    const bin = atob(b64)
+    const bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+    return new TextDecoder().decode(bytes)
+  } catch {
+    return ''
+  }
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let bin = ''
+  const CHUNK = 0x8000
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+  }
+  return btoa(bin)
+}
+
+const MIME_BY_EXT: Record<string, string> = {
+  txt: 'text/plain', md: 'text/markdown', json: 'application/json',
+  csv: 'text/csv', html: 'text/html', css: 'text/css', js: 'text/javascript',
+  ts: 'text/typescript', py: 'text/x-python', rs: 'text/x-rust',
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+  svg: 'image/svg+xml', pdf: 'application/pdf', zip: 'application/zip',
+}
+
+function guessMime(name: string): string {
+  const ext = name.split('.').pop()?.toLowerCase() ?? ''
+  return MIME_BY_EXT[ext] ?? 'application/octet-stream'
+}
+
+/**
+ * Commands with no REST twin that the *browser* can serve itself. Each one
+ * is real work done against the worker database (or wasm), never a stub —
+ * everything the desktop app does over IPC, the static build does here.
+ */
+type StaticHandler = (args: Record<string, unknown>) => Promise<unknown>
+
+const STATIC_COMMAND_HANDLERS: Record<string, StaticHandler> = {
+  // Byte upload → base64 body in kv + `encoding:<id>` marker (binary files
+  // are re-decoded on read so the editor still gets text out of them).
+  upload_file: async (args) => {
+    const fileName = String(args.fileName ?? '').trim()
+    if (!fileName) throw new Error('invalid: fileName is required')
+    const bytes = coerceBytes(args.fileData)
+    const node = (await wasmDbDispatch('files.create', {
+      name: fileName,
+      fileType: 'file',
+      parentId: args.parentPath ?? null,
+      content: bytesToBase64(bytes),
+      sizeBytes: bytes.length,
+      mimeType: guessMime(fileName),
+    })) as { id?: string } | null
+    const id = node?.id
+    if (!id) throw new Error('upload failed: the database did not create a file node')
+    await wasmDbDispatch('kv.set', { key: `encoding:${id}`, value: 'base64' })
+    return node
+  },
 }
 
 /**
@@ -1219,9 +1345,11 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
     if (dbRoute) {
       if (dbRoute.probe) return (await probeStaticConnection(args ?? {})) as T
       const raw = await wasmDbDispatch(dbRoute.op, dbRoute.args(args ?? {}))
-      const out = dbRoute.map ? dbRoute.map(raw, args ?? {}) : raw
+      const out = dbRoute.map ? await dbRoute.map(raw, args ?? {}) : raw
       return transformResponseKeys(out) as T
     }
+    const handler = STATIC_COMMAND_HANDLERS[cmd]
+    if (handler) return (await handler(args ?? {})) as T
     // Anything else (provider network sync, encryption, faces, …) still
     // needs the server — one clear error, no fetch spam.
     throw new Error(

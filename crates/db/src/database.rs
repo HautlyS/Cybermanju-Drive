@@ -79,6 +79,12 @@ const AGENT_CONFIGS_TABLE: TableDefinition<'static, &'static str, &'static str> 
     TableDefinition::new("agent_configs");
 const AGENT_SESSIONS_TABLE: TableDefinition<'static, &'static str, &'static str> =
     TableDefinition::new("agent_sessions");
+// Generic key/value blob: vault secrets, app config, shell file content and
+// any other session state the browser build keeps inside `.cybermanju`.
+// Keys are namespaced by convention (`secret:`, `config:`, `content:`,
+// `volume:`), values are raw UTF-8 strings.
+const KV_TABLE: TableDefinition<'static, &'static str, &'static str> =
+    TableDefinition::new("kv");
 
 /// Rows kept in `sync_runs` — enough for a UI history page, few enough that
 /// the prune scan stays trivial.
@@ -127,6 +133,9 @@ impl Database {
             // <<< AI AGENT tables >>>
             write_txn.open_table(AGENT_CONFIGS_TABLE)?;
             write_txn.open_table(AGENT_SESSIONS_TABLE)?;
+            // Generic kv blob (secrets, config, content) — same table the
+            // browser build writes so a `.cybermanju` image opens here too.
+            write_txn.open_table(KV_TABLE)?;
             {
                 let mut schema = write_txn.open_table(SCHEMA_VERSION_TABLE)?;
                 if schema.get("schema")?.is_none() {
@@ -253,6 +262,11 @@ impl Database {
     /// Agent session transcripts.
     pub fn get_agent_sessions_table() -> TableDefinition<'static, &'static str, &'static str> {
         AGENT_SESSIONS_TABLE
+    }
+
+    /// Generic key/value blob (secrets, config, file content, volume mirror).
+    pub fn get_kv_table() -> TableDefinition<'static, &'static str, &'static str> {
+        KV_TABLE
     }
 
     /// Row key for a synced copy: one local file × one config.

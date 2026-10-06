@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { ref, onMounted, onUnmounted } from 'vue'
 import TopMenuBar from './TopMenuBar.vue'
 import Dock from './Dock.vue'
@@ -283,7 +284,7 @@ onUnmounted(() => {
             <div v-for="m in moduleLines" :key="m.name" class="report-row" :class="{ warn: !m.ok }">
               <span class="report-name">{{ m.name }}</span>
               <span class="report-detail">{{ m.detail }}</span>
-              <span class="report-flag">{{ m.ok ? '[OK]' : '[WARN]' }}</span>
+              <span class="report-flag"><AppIcon :name="m.ok ? 'solar:check-circle-bold' : 'solar:danger-triangle-bold'" :size="13" /></span>
             </div>
           </div>
           <div class="report-hint">INTERACTIVE SHELL LIVES IN CYBSH — DOCK &gt; TERMINAL, OR CTRL+`</div>

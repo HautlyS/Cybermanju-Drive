@@ -8,7 +8,7 @@
       <div ref="loginRef" class="login-modal" role="dialog" aria-label="Login">
         <div class="login-header">
           <h2>{{ isRegister ? 'REGISTER' : 'LOGIN' }}</h2>
-          <button class="close-btn" @click="store.showLoginPopup = false" aria-label="Close">X</button>
+          <button class="close-btn" @click="store.showLoginPopup = false" aria-label="Close"><AppIcon name="solar:close-bold" :size="13" /></button>
         </div>
 
         <div class="login-body">
@@ -43,10 +43,10 @@
 
           <div class="login-actions">
             <button class="bw-btn" @click="isRegister = !isRegister; errorMsg = ''">
-              {{ isRegister ? '[BACK TO LOGIN]' : '[REGISTER]' }}
+              <AppIcon :name="isRegister ? 'solar:arrow-to-down-left-bold' : 'solar:user-plus-bold'" :size="13" /> {{ isRegister ? 'BACK TO LOGIN' : 'REGISTER' }}
             </button>
             <button class="bw-btn bw-btn-inverse" @click="isRegister ? handleRegister() : handleLogin()">
-              {{ isRegister ? '[REGISTER]' : '[LOGIN]' }}
+              <AppIcon :name="isRegister ? 'solar:user-plus-bold' : 'solar:login-bold'" :size="13" /> {{ isRegister ? 'REGISTER' : 'LOGIN' }}
             </button>
           </div>
         </div>
@@ -56,6 +56,7 @@
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { ref, toRef, onMounted, nextTick } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { invoke } from '@/composables/useTauri'

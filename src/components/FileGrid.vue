@@ -2,9 +2,9 @@
   <main class="file-grid">
     <div class="file-toolbar">
       <div class="ft-left">
-        <button class="view-toggle" :class="{ active: store.viewMode === 'grid' }" @click="store.viewMode = 'grid'" title="GRID (CTRL+G)">[##]</button>
-        <button class="view-toggle" :class="{ active: store.viewMode === 'list' }" @click="store.viewMode = 'list'" title="LIST (CTRL+L)">[#]</button>
-        <button class="view-toggle" :class="{ active: store.viewMode === 'masonry' }" @click="store.viewMode = 'masonry'" title="MASONRY (CTRL+M)">[&]</button>
+        <button class="view-toggle" :class="{ active: store.viewMode === 'grid' }" @click="store.viewMode = 'grid'" title="GRID (CTRL+G)" aria-label="GRID VIEW"><AppIcon name="solar:grid-3x3-bold" :size="13" /></button>
+        <button class="view-toggle" :class="{ active: store.viewMode === 'list' }" @click="store.viewMode = 'list'" title="LIST (CTRL+L)" aria-label="LIST VIEW"><AppIcon name="solar:list-bold" :size="13" /></button>
+        <button class="view-toggle" :class="{ active: store.viewMode === 'masonry' }" @click="store.viewMode = 'masonry'" title="MASONRY (CTRL+M)" aria-label="MASONRY VIEW"><AppIcon name="solar:columns-3-bold" :size="13" /></button>
         <div class="ft-div" />
         <select v-model="sortField" class="sort-select" title="SORT BY" aria-label="SORT BY">
           <option value="name">NAME</option>
@@ -13,7 +13,7 @@
           <option value="type">TYPE</option>
         </select>
         <button class="view-toggle" @click="sortDir = sortDir === 'asc' ? 'desc' : 'asc'" :title="sortDir === 'asc' ? 'ASCENDING' : 'DESCENDING'" :aria-label="sortDir">
-          {{ sortDir === 'asc' ? '^' : 'v' }}
+          <AppIcon :name="sortDir === 'asc' ? 'solar:alt-arrow-up-bold' : 'solar:alt-arrow-down-bold'" :size="13" />
         </button>
       </div>
       <div class="ft-center">
@@ -34,11 +34,11 @@
 
     <div v-if="store.isMultiSelect && selectedCount" class="bulk-toolbar" role="toolbar" aria-label="BULK ACTIONS">
       <span class="bulk-label">{{ selectedCount }} SELECTED</span>
-      <button class="bulk-btn" @click="execBulk('encrypt')" title="ENCRYPT ALL" aria-label="ENCRYPT SELECTED">[ENC]</button>
-      <button class="bulk-btn" @click="execBulk('compress')" title="COMPRESS ALL" aria-label="COMPRESS SELECTED">[CMP]</button>
-      <button class="bulk-btn" @click="execBulk('star')" title="STAR ALL" aria-label="STAR SELECTED">[*]</button>
-      <button class="bulk-btn danger" @click="execBulk('delete')" title="DELETE ALL" aria-label="DELETE SELECTED">[DEL]</button>
-      <button class="bulk-btn" @click="clearSelection" aria-label="CLEAR SELECTION">[CLEAR]</button>
+      <button class="bulk-btn" @click="execBulk('encrypt')" title="ENCRYPT ALL" aria-label="ENCRYPT SELECTED"><AppIcon name="solar:lock-bold" :size="13" /></button>
+      <button class="bulk-btn" @click="execBulk('compress')" title="COMPRESS ALL" aria-label="COMPRESS SELECTED"><AppIcon name="solar:archive-bold" :size="13" /></button>
+      <button class="bulk-btn" @click="execBulk('star')" title="STAR ALL" aria-label="STAR SELECTED"><AppIcon name="solar:star-bold" :size="13" /></button>
+      <button class="bulk-btn danger" @click="execBulk('delete')" title="DELETE ALL" aria-label="DELETE SELECTED"><AppIcon name="solar:trash-bin-trash-bold" :size="13" /></button>
+      <button class="bulk-btn" @click="clearSelection" aria-label="CLEAR SELECTION" title="CLEAR SELECTION"><AppIcon name="solar:close-square-bold" :size="13" /></button>
     </div>
 
     <div v-if="store.viewMode === 'grid'" class="grid-view" role="grid" aria-label="FILE GRID" @contextmenu.prevent="ctx.open($event, 'file_grid_bg')">
@@ -70,16 +70,16 @@
           <img :src="file.thumbnailPath" class="file-thumb" alt="" @error="(e) => { (e.target as HTMLImageElement).style.display = 'none' }" />
         </div>
         <div class="file-card-icon" v-else aria-hidden="true">
-          <span class="file-icon">{{ getIcon(file) }}</span>
+          <span class="file-icon"><AppIcon :name="getIcon(file)" :size="18" /></span>
         </div>
         <div class="file-card-name truncate" :title="file.name">{{ file.name }}</div>
         <div class="file-card-meta text-muted">{{ humanBytes(file.sizeBytes) }}</div>
         <div class="file-card-badges" aria-hidden="true">
-          <span v-if="file.encrypted" class="card-badge" title="ENCRYPTED">[E]</span>
-          <span v-if="file.compressionLayers && file.compressionLayers[0] && file.compressionLayers[0] !== 'none'" class="card-badge" title="COMPRESSED">[C]</span>
-          <span v-if="file.isStarred" class="card-badge" title="STARRED">[*]</span>
-          <span v-if="file.gpsLat" class="card-badge" title="HAS GPS">[G]</span>
-          <span v-if="file.faceGroupIds && file.faceGroupIds.length" class="card-badge" title="HAS FACES">[F]</span>
+          <span v-if="file.encrypted" class="card-badge" title="ENCRYPTED" aria-label="ENCRYPTED"><AppIcon name="solar:lock-bold" :size="10" /></span>
+          <span v-if="file.compressionLayers && file.compressionLayers[0] && file.compressionLayers[0] !== 'none'" class="card-badge" title="COMPRESSED" aria-label="COMPRESSED"><AppIcon name="solar:archive-bold" :size="10" /></span>
+          <span v-if="file.isStarred" class="card-badge" title="STARRED" aria-label="STARRED"><AppIcon name="solar:star-bold" :size="10" /></span>
+          <span v-if="file.gpsLat" class="card-badge" title="HAS GPS" aria-label="HAS GPS"><AppIcon name="solar:map-point-bold" :size="10" /></span>
+          <span v-if="file.faceGroupIds && file.faceGroupIds.length" class="card-badge" title="HAS FACES" aria-label="HAS FACES"><AppIcon name="solar:face-scan-circle-bold" :size="10" /></span>
         </div>
       </div>
       <div v-if="sortedFiles.length === 0 && !store.isLoading" class="empty-grid">
@@ -116,14 +116,14 @@
             <img :src="file.thumbnailPath" class="file-thumb" alt="" @error="(e) => { (e.target as HTMLImageElement).style.display = 'none' }" />
           </div>
           <div class="masonry-icon" v-else aria-hidden="true">
-            <span class="file-icon">{{ getIcon(file) }}</span>
+            <span class="file-icon"><AppIcon :name="getIcon(file)" :size="18" /></span>
           </div>
           <div class="masonry-name truncate" :title="file.name">{{ file.name }}</div>
           <div class="masonry-meta text-muted">{{ humanBytes(file.sizeBytes) }}</div>
           <div class="masonry-badges" aria-hidden="true">
-            <span v-if="file.encrypted" class="card-badge" title="ENCRYPTED">[E]</span>
-            <span v-if="file.compressionLayers && file.compressionLayers[0] && file.compressionLayers[0] !== 'none'" class="card-badge" title="COMPRESSED">[C]</span>
-            <span v-if="file.isStarred" class="card-badge" title="STARRED">[*]</span>
+            <span v-if="file.encrypted" class="card-badge" title="ENCRYPTED" aria-label="ENCRYPTED"><AppIcon name="solar:lock-bold" :size="10" /></span>
+            <span v-if="file.compressionLayers && file.compressionLayers[0] && file.compressionLayers[0] !== 'none'" class="card-badge" title="COMPRESSED" aria-label="COMPRESSED"><AppIcon name="solar:archive-bold" :size="10" /></span>
+            <span v-if="file.isStarred" class="card-badge" title="STARRED" aria-label="STARRED"><AppIcon name="solar:star-bold" :size="10" /></span>
           </div>
         </div>
       </div>
@@ -172,16 +172,16 @@
           <span v-if="file.thumbnailPath" class="thumb-sm" aria-hidden="true">
             <img :src="file.thumbnailPath" class="file-thumb-sm" alt="" @error="(e) => { (e.target as HTMLImageElement).style.display = 'none' }" />
           </span>
-          <span v-else class="file-icon-sm" aria-hidden="true">{{ getIcon(file) }}</span>
+          <span v-else class="file-icon-sm" aria-hidden="true"><AppIcon :name="getIcon(file)" :size="14" /></span>
           <span class="truncate">{{ file.name }}</span>
         </span>
         <span class="lc lc-size text-muted">{{ humanBytes(file.sizeBytes) }}</span>
         <span class="lc lc-type text-muted">{{ file.mimeType || (file.fileType === 'folder' ? 'FOLDER' : 'FILE') }}</span>
         <span class="lc lc-date text-muted">{{ formatDate(file.modifiedAt) }}</span>
         <span class="lc lc-status" aria-hidden="true">
-          <span v-if="file.encrypted" class="badge-sm">[E]</span>
-          <span v-if="file.compressionLayers && file.compressionLayers[0] && file.compressionLayers[0] !== 'none'" class="badge-sm">[C]</span>
-          <span v-if="file.isStarred" class="badge-sm">[*]</span>
+          <span v-if="file.encrypted" class="badge-sm" title="ENCRYPTED" aria-label="ENCRYPTED"><AppIcon name="solar:lock-bold" :size="10" /></span>
+          <span v-if="file.compressionLayers && file.compressionLayers[0] && file.compressionLayers[0] !== 'none'" class="badge-sm" title="COMPRESSED" aria-label="COMPRESSED"><AppIcon name="solar:archive-bold" :size="10" /></span>
+          <span v-if="file.isStarred" class="badge-sm" title="STARRED" aria-label="STARRED"><AppIcon name="solar:star-bold" :size="10" /></span>
         </span>
         <span class="lc lc-hash text-muted">{{ file.hashBlake3 ? file.hashBlake3.substring(0, 8) + '..' : '--' }}</span>
       </div>
@@ -208,8 +208,8 @@
             @keyup.escape="showRenameDialog = false"
           />
           <div class="rename-actions">
-            <button class="rename-btn" @click="showRenameDialog = false">[CANCEL]</button>
-            <button class="rename-btn rename-btn-primary" @click="handleRenameConfirm">[RENAME]</button>
+            <button class="rename-btn" @click="showRenameDialog = false"><AppIcon name="solar:close-bold" :size="13" /> CANCEL</button>
+            <button class="rename-btn rename-btn-primary" @click="handleRenameConfirm"><AppIcon name="solar:pen-bold" :size="13" /> RENAME</button>
           </div>
         </div>
       </div>
@@ -220,6 +220,7 @@
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { humanBytes } from '@/utils/format'
@@ -312,12 +313,12 @@ function handleClick(file: FileNode) {
 }
 
 function getIcon(file: FileNode): string {
-  if (file.fileType === 'folder') return '[+]'
-  if (file.encrypted) return '[@]'
-  if (file.compressionLayers && file.compressionLayers[0] && file.compressionLayers[0] !== 'none') return '[$]'
-  if (file.mimeType?.startsWith('image/')) return '[I]'
-  if (file.mimeType?.startsWith('text/') || file.mimeType?.includes('json') || file.mimeType?.includes('xml')) return '[T]'
-  return '[=]'
+  if (file.fileType === 'folder') return 'solar:folder-bold'
+  if (file.encrypted) return 'solar:lock-bold'
+  if (file.compressionLayers && file.compressionLayers[0] && file.compressionLayers[0] !== 'none') return 'solar:archive-bold'
+  if (file.mimeType?.startsWith('image/')) return 'solar:gallery-bold'
+  if (file.mimeType?.startsWith('text/') || file.mimeType?.includes('json') || file.mimeType?.includes('xml')) return 'solar:file-text-bold'
+  return 'solar:file-bold'
 }
 
 
@@ -368,68 +369,68 @@ function buildFileCtxEntries(file: FileNode) {
   let typeSpecific: any[] = []
   if (ft === 'folder') {
     typeSpecific = [
-      { id: 'open_in_new', label: 'OPEN IN NEW TAB', icon: '[T]', action: () => {} },
+      { id: 'open_in_new', label: 'OPEN IN NEW TAB', icon: 'solar:square-arrow-right-up-bold', action: () => {} },
       { id: 'div_f1', label: '', divider: true },
-      { id: 'paste_into', label: 'PASTE INTO', icon: '[P]', action: () => {} },
+      { id: 'paste_into', label: 'PASTE INTO', icon: 'solar:clipboard-paste-bold', action: () => {} },
       { id: 'div_f2', label: '', divider: true },
     ]
   } else if (mime.startsWith('image/')) {
     typeSpecific = [
-      { id: 'rotate_cw', label: 'ROTATE CW', icon: '[R]', action: () => store.notifySuccess('ROTATE CW: ' + file.name) },
-      { id: 'rotate_ccw', label: 'ROTATE CCW', icon: '[L]', action: () => store.notifySuccess('ROTATE CCW: ' + file.name) },
+      { id: 'rotate_cw', label: 'ROTATE CW', icon: 'solar:undo-right-round-bold', action: () => store.notifySuccess('ROTATE CW: ' + file.name) },
+      { id: 'rotate_ccw', label: 'ROTATE CCW', icon: 'solar:undo-left-round-bold', action: () => store.notifySuccess('ROTATE CCW: ' + file.name) },
       { id: 'div_i1', label: '', divider: true },
     ]
   } else if (mime.startsWith('audio/')) {
     typeSpecific = [
-      { id: 'play', label: 'PLAY', icon: '[P]', action: () => store.notifySuccess('PLAY: ' + file.name) },
+      { id: 'play', label: 'PLAY', icon: 'solar:play-bold', action: () => store.notifySuccess('PLAY: ' + file.name) },
       { id: 'div_a1', label: '', divider: true },
     ]
   } else if (mime.startsWith('video/')) {
     typeSpecific = [
-      { id: 'play', label: 'PLAY', icon: '[P]', action: () => store.notifySuccess('PLAY: ' + file.name) },
+      { id: 'play', label: 'PLAY', icon: 'solar:play-bold', action: () => store.notifySuccess('PLAY: ' + file.name) },
       { id: 'div_v1', label: '', divider: true },
     ]
   } else if (mime.includes('zip') || mime.includes('tar') || mime.includes('gz') || mime.includes('rar') || mime.includes('7z')) {
     typeSpecific = [
-      { id: 'extract', label: 'EXTRACT HERE', icon: '[X]', action: () => store.notifySuccess('EXTRACT: ' + file.name) },
+      { id: 'extract', label: 'EXTRACT HERE', icon: 'solar:box-bold', action: () => store.notifySuccess('EXTRACT: ' + file.name) },
       { id: 'div_ar1', label: '', divider: true },
     ]
   }
 
   const shared = [
-    { id: 'download', label: 'DOWNLOAD', icon: '[v]', action: () => store.notifySuccess('DOWNLOAD: ' + file.name) },
-    { id: 'star', label: file.isStarred ? 'UNSTAR' : 'STAR', icon: '[*]', action: () => store.toggleStar(file.id) },
-    { id: 'rename', label: 'RENAME', icon: '[R]', action: () => {
+    { id: 'download', label: 'DOWNLOAD', icon: 'solar:download-bold', action: () => store.notifySuccess('DOWNLOAD: ' + file.name) },
+    { id: 'star', label: file.isStarred ? 'UNSTAR' : 'STAR', icon: 'solar:star-bold', action: () => store.toggleStar(file.id) },
+    { id: 'rename', label: 'RENAME', icon: 'solar:pen-bold', action: () => {
       renameValue.value = file.name
       renamingFileId.value = file.id
       showRenameDialog.value = true
       setTimeout(() => renameInputRef.value?.focus(), 50)
     }},
-    { id: 'duplicate', label: 'DUPLICATE', icon: '[D]', action: () => store.duplicateFileContext?.(file.id) || store.notifySuccess('DUPLICATE: ' + file.name) },
+    { id: 'duplicate', label: 'DUPLICATE', icon: 'solar:copy-add-bold', action: () => store.duplicateFileContext?.(file.id) || store.notifySuccess('DUPLICATE: ' + file.name) },
   ]
   const transform: any[] = []
   if (file.encrypted) {
-    transform.push({ id: 'decrypt', label: 'DECRYPT', icon: '[@]', action: () => store.notifySuccess('DECRYPT: ' + file.name) })
+    transform.push({ id: 'decrypt', label: 'DECRYPT', icon: 'solar:lock-unlocked-bold', action: () => store.notifySuccess('DECRYPT: ' + file.name) })
   }
   if (!file.encrypted) {
-    transform.push({ id: 'compress', label: 'COMPRESS', icon: '[Z]', action: () => store.compressFile(file.id, 'zstd') })
-    transform.push({ id: 'encrypt', label: 'ENCRYPT', icon: '[#]', action: () => store.encryptFile(file.id, 'hybrid') })
+    transform.push({ id: 'compress', label: 'COMPRESS', icon: 'solar:archive-bold', action: () => store.compressFile(file.id, 'zstd') })
+    transform.push({ id: 'encrypt', label: 'ENCRYPT', icon: 'solar:lock-bold', action: () => store.encryptFile(file.id, 'hybrid') })
   }
   if (file.compressionLayers?.length) {
-    transform.push({ id: 'decompress', label: 'DECOMPRESS', icon: '[$]', action: () => store.notifySuccess('DECOMPRESS: ' + file.name) })
+    transform.push({ id: 'decompress', label: 'DECOMPRESS', icon: 'solar:archive-up-bold', action: () => store.notifySuccess('DECOMPRESS: ' + file.name) })
   }
 
   const base = [
-    { id: 'open', label: 'OPEN', icon: '[>]', action: () => { store.selectFile(file.id) } },
-    { id: 'preview', label: 'PREVIEW', icon: '[=]', action: () => { store.selectedFileId = file.id } },
+    { id: 'open', label: 'OPEN', icon: 'solar:folder-open-bold', action: () => { store.selectFile(file.id) } },
+    { id: 'preview', label: 'PREVIEW', icon: 'solar:eye-bold', action: () => { store.selectedFileId = file.id } },
     { id: 'div0', label: '', divider: true },
   ]
 
   const meta = [
-    { id: 'permissions', label: 'PERMISSIONS', icon: '[!]', action: () => { store.selectedFileId = file.id; store.showPermissionsPanel = true } },
-    { id: 'properties', label: 'PROPERTIES', icon: '[i]', action: () => store.notifySuccess('PROPS: ' + file.name + ' | SIZE: ' + humanBytes(file.sizeBytes) + ' | ' + (file.mimeType || '')) },
+    { id: 'permissions', label: 'PERMISSIONS', icon: 'solar:key-bold', action: () => { store.selectedFileId = file.id; store.showPermissionsPanel = true } },
+    { id: 'properties', label: 'PROPERTIES', icon: 'solar:info-circle-bold', action: () => store.notifySuccess('PROPS: ' + file.name + ' | SIZE: ' + humanBytes(file.sizeBytes) + ' | ' + (file.mimeType || '')) },
   ]
-  const deleteAction = { id: 'delete', label: 'DELETE', icon: '[X]', action: () => store.deleteFile(file.id) }
+  const deleteAction = { id: 'delete', label: 'DELETE', icon: 'solar:trash-bin-trash-bold', action: () => store.deleteFile(file.id) }
 
   return [...base, ...typeSpecific, ...shared, { id: 'div_t1', label: '', divider: true }, ...transform, { id: 'div_m1', label: '', divider: true }, ...meta, { id: 'div_d1', label: '', divider: true }, deleteAction]
 }

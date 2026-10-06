@@ -1,27 +1,82 @@
 <template>
   <div
+    ref="rootRef"
     class="app-window"
-    :class="{ minimized: win.minimized, focused: isFocused }"
+    :class="{
+      minimized: win.minimized,
+      focused: isFocused,
+      blurred: !isFocused,
+      maximized: isMaximized,
+      'app-window--narrow': isNarrow,
+    }"
     :style="windowStyle"
     @mousedown.prevent="onFocus"
   >
     <div
       class="window-titlebar"
+      :class="{ 'window-titlebar--narrow': isNarrow }"
       @mousedown.prevent="startDrag"
       @dblclick="toggleMaximize"
     >
-      <div class="titlebar-dots">
-        <span class="dot dot-close" @click.stop="onClose" title="Close"></span>
-        <span class="dot dot-minimize" @click.stop="onMinimize" title="Minimize"></span>
-        <span class="dot dot-maximize" @click.stop="toggleMaximize" title="Maximize"></span>
+      <div class="titlebar-dots" @mousedown.stop>
+        <button
+          class="dot dot-close"
+          type="button"
+          :aria-label="`Close ${win.title}`"
+          title="Close"
+          @click.stop="onClose"
+        >
+          <AppIcon name="solar:close-bold" :size="7" class="dot-glyph" />
+        </button>
+        <button
+          class="dot dot-minimize"
+          type="button"
+          :aria-label="`Minimize ${win.title}`"
+          title="Minimize"
+          @click.stop="onMinimize"
+        >
+          <AppIcon name="solar:minus-bold" :size="7" class="dot-glyph" />
+        </button>
+        <button
+          class="dot dot-maximize"
+          type="button"
+          :aria-label="`Maximize ${win.title}`"
+          :title="isMaximized ? 'Restore' : 'Maximize'"
+          @click.stop="toggleMaximize"
+        >
+          <AppIcon name="solar:maximize-bold" :size="7" class="dot-glyph" />
+        </button>
       </div>
-      <div class="titlebar-icon">{{ win.icon }}</div>
-      <div class="titlebar-label">{{ win.title }}</div>
+
+      <div class="titlebar-icon" aria-hidden="true">
+        <AppIcon :name="win.icon" :size="13" />
+      </div>
+
+      <div class="titlebar-label" :title="win.title">{{ win.title }}</div>
+
       <div class="titlebar-spacer" />
+
+      <div class="titlebar-status" :class="{ active: isFocused }" aria-hidden="true">
+        <span class="titlebar-status__dot" />
+        <span v-if="!isNarrow" class="titlebar-status__text">{{ isFocused ? 'FOCUS' : 'IDLE' }}</span>
+      </div>
+
+      <button
+        class="titlebar-action"
+        type="button"
+        :aria-label="isMaximized ? 'Restore window' : 'Maximize window'"
+        :title="isMaximized ? 'Restore' : 'Maximize'"
+        @mousedown.stop
+        @click.stop="toggleMaximize"
+      >
+        <AppIcon :name="isMaximized ? 'solar:minimize-bold' : 'solar:maximize-bold'" :size="11" />
+      </button>
     </div>
+
     <div class="window-content" ref="contentRef">
       <component :is="win.component" v-bind="win.props" @close="onClose" />
     </div>
+
     <div class="resize-handle n" @mousedown.prevent.stop="startResize('n')"></div>
     <div class="resize-handle s" @mousedown.prevent.stop="startResize('s')"></div>
     <div class="resize-handle e" @mousedown.prevent.stop="startResize('e')"></div>
@@ -34,8 +89,10 @@
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import type { WindowState } from '@/composables/useWindowManager'
+import { createWindowUi, provideWindowUi } from '@/composables/useWindowUi'
 
 const props = defineProps<{
   win: WindowState
@@ -51,9 +108,29 @@ const emit = defineEmits<{
 }>()
 
 const contentRef = ref<HTMLElement | null>(null)
+const rootRef = ref<HTMLElement | null>(null)
 const isFocused = computed(() => props.focused)
 const isMaximized = ref(false)
 const savedRect = ref({ x: 0, y: 0, width: 0, height: 0 })
+
+/**
+ * Window-aware context: everything rendered inside this window (via
+ * `useWindowUi()`) now knows its host window's live size, focus state and
+ * effective density, so panels can adapt as the window is resized.
+ */
+const winUi = provideWindowUi(
+  createWindowUi({
+    id: props.win.id,
+    panelType: props.win.panelType,
+    title: props.win.title,
+    icon: props.win.icon,
+    width: computed(() => props.win.width),
+    height: computed(() => props.win.height),
+    focused: isFocused,
+  })
+)
+
+const isNarrow = computed(() => winUi.isNarrow.value)
 
 const windowStyle = computed(() => {
   if (props.win.minimized) {
@@ -198,6 +275,8 @@ function handleGlobalKeydown(e: KeyboardEvent) {
 
 onMounted(() => {
   document.addEventListener('keydown', handleGlobalKeydown)
+  // Hand the live element to the window context so descendants get real geometry.
+  winUi.observe(rootRef.value)
 })
 
 onUnmounted(() => {
@@ -212,106 +291,285 @@ onUnmounted(() => {
   position: absolute;
   display: flex;
   flex-direction: column;
-  background: #141414;
-  border: 1px solid #2a2a2a;
-  border-radius: 8px;
+  background: var(--ui-window);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-lg);
   overflow: hidden;
+  backdrop-filter: blur(var(--ui-blur-strong)) saturate(var(--ui-saturate));
+  -webkit-backdrop-filter: blur(var(--ui-blur-strong)) saturate(var(--ui-saturate));
   box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.6),
-    0 2px 8px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  transition: box-shadow 0.15s, border-color 0.15s;
+    var(--ui-shadow-3),
+    inset 0 1px 0 var(--ui-glass-highlight);
+  transition:
+    box-shadow var(--ui-dur-slow) var(--ui-ease-out),
+    border-color var(--ui-dur-slow) var(--ui-ease-out),
+    background-color var(--ui-dur-slow) var(--ui-ease-out);
   min-width: 320px;
   min-height: 240px;
   will-change: left, top, width, height;
 }
 
 .app-window.focused {
-  border-color: #3a3a3a;
+  border-color: color-mix(in srgb, var(--ui-accent) 42%, var(--ui-border-strong));
+  background: var(--ui-window);
   box-shadow:
-    0 12px 48px rgba(0, 255, 65, 0.08),
-    0 4px 16px rgba(0, 0, 0, 0.5),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    var(--ui-shadow-3),
+    0 0 0 1px color-mix(in srgb, var(--ui-accent) 26%, transparent),
+    0 24px 64px color-mix(in srgb, var(--ui-accent) 12%, transparent),
+    inset 0 1px 0 var(--ui-glass-highlight);
+}
+
+.app-window.blurred {
+  background: var(--ui-window-idle);
+  box-shadow:
+    var(--ui-shadow-1),
+    inset 0 1px 0 var(--ui-glass-highlight);
+  filter: saturate(0.85);
 }
 
 .app-window.minimized {
   pointer-events: none;
 }
 
+.app-window.maximized {
+  border-radius: 0;
+}
+
+/* ── titlebar ─────────────────────────────────────────────────────────── */
+
 .window-titlebar {
   display: flex;
   align-items: center;
-  height: 34px;
+  height: var(--ui-titlebar-h);
+  min-height: 30px;
   padding: 0 10px;
-  background: #1a1a1a;
-  border-bottom: 1px solid #2a2a2a;
+  gap: 8px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--ui-surface-2) 92%, transparent),
+    color-mix(in srgb, var(--ui-surface) 75%, transparent)
+  );
+  border-bottom: 1px solid var(--ui-hairline);
   cursor: default;
   user-select: none;
   flex-shrink: 0;
-  gap: 8px;
+  position: relative;
+}
+
+.window-titlebar::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--ui-accent) 35%, transparent) 35%,
+    transparent
+  );
+  opacity: 0;
+  transition: opacity var(--ui-dur-slow) var(--ui-ease-out);
+  pointer-events: none;
+}
+
+.app-window.focused .window-titlebar::after {
+  opacity: 1;
 }
 
 .titlebar-dots {
   display: flex;
-  gap: 6px;
+  gap: 7px;
   flex-shrink: 0;
 }
 
 .dot {
-  width: 11px;
-  height: 11px;
+  position: relative;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: none;
   border-radius: 50%;
   cursor: pointer;
-  transition: filter 0.1s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: transparent;
+  transition:
+    transform var(--ui-dur-fast) var(--ui-ease-spring),
+    box-shadow var(--ui-dur) var(--ui-ease-out),
+    filter var(--ui-dur-fast) var(--ui-ease-out);
+  box-shadow: inset 0 -1px 2px rgba(0, 0, 0, 0.25);
 }
 
 .dot:hover {
-  filter: brightness(1.3);
+  transform: scale(1.18);
+  filter: brightness(1.12);
+}
+
+.dot:active {
+  transform: scale(0.94);
+}
+
+.dot:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ui-accent) 80%, transparent);
+  outline-offset: 2px;
+}
+
+.dot-glyph {
+  opacity: 0;
+  transform: scale(0.5);
+  transition:
+    opacity var(--ui-dur-fast) var(--ui-ease-out),
+    transform var(--ui-dur-fast) var(--ui-ease-spring);
+  color: rgba(0, 0, 0, 0.72);
+}
+
+.dot:hover .dot-glyph {
+  opacity: 1;
+  transform: scale(1);
 }
 
 .dot-close {
-  background: #ff5f57;
+  background: var(--ui-danger);
 }
 
 .dot-minimize {
-  background: #febc2e;
+  background: var(--ui-warning);
 }
 
 .dot-maximize {
-  background: #28c840;
+  background: var(--ui-success);
 }
 
 .titlebar-icon {
-  font-size: 11px;
-  margin-left: 4px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--ui-text-2);
   flex-shrink: 0;
+  transition: color var(--ui-dur) var(--ui-ease-out), transform var(--ui-dur) var(--ui-ease-spring);
+}
+
+.app-window.focused .titlebar-icon {
+  color: var(--ui-accent);
+}
+
+.app-window.focused .titlebar-icon:hover {
+  transform: rotate(-6deg) scale(1.1);
 }
 
 .titlebar-label {
-  font-family: 'Courier New', 'Fira Code', 'JetBrains Mono', monospace;
-  font-size: 11px;
-  font-weight: 600;
-  color: #ccc;
-  letter-spacing: 0.3px;
+  font-family: var(--ui-font);
+  font-size: var(--ui-fs-sm);
+  font-weight: 650;
+  color: var(--ui-text-2);
+  letter-spacing: 0.01em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 46ch;
+  transition: color var(--ui-dur) var(--ui-ease-out);
+}
+
+.app-window.focused .titlebar-label {
+  color: var(--ui-text);
+  text-shadow: 0 0 18px color-mix(in srgb, var(--ui-accent) 35%, transparent);
 }
 
 .titlebar-spacer {
   flex: 1;
 }
 
+.titlebar-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: var(--ui-radius-full);
+  background: color-mix(in srgb, var(--ui-text) 6%, transparent);
+  border: 1px solid var(--ui-hairline);
+  flex-shrink: 0;
+}
+
+.titlebar-status__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ui-text-faint);
+  transition:
+    background-color var(--ui-dur) var(--ui-ease-out),
+    box-shadow var(--ui-dur) var(--ui-ease-out);
+}
+
+.titlebar-status.active .titlebar-status__dot {
+  background: var(--ui-accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--ui-accent) 80%, transparent);
+  animation: bw-pulse 2.4s ease-in-out infinite;
+}
+
+.titlebar-status__text {
+  font-family: var(--ui-font-mono);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--ui-text-3);
+}
+
+.titlebar-status.active .titlebar-status__text {
+  color: var(--ui-accent);
+}
+
+.titlebar-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  border-radius: var(--ui-radius-xs);
+  color: var(--ui-text-3);
+  background: transparent;
+  border: 1px solid transparent;
+  flex-shrink: 0;
+  transition:
+    background-color var(--ui-dur-fast) var(--ui-ease-out),
+    color var(--ui-dur-fast) var(--ui-ease-out),
+    border-color var(--ui-dur-fast) var(--ui-ease-out);
+}
+
+.titlebar-action:hover {
+  background: var(--ui-accent-softer);
+  border-color: color-mix(in srgb, var(--ui-accent) 30%, transparent);
+  color: var(--ui-accent);
+}
+
+.titlebar-action:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ui-accent) 80%, transparent);
+  outline-offset: 1px;
+}
+
+.window-titlebar--narrow {
+  gap: 6px;
+  padding: 0 8px;
+}
+
+.window-titlebar--narrow .titlebar-label {
+  font-size: var(--ui-fs-xs);
+  max-width: 18ch;
+}
+
+/* ── content ──────────────────────────────────────────────────────────── */
+
 .window-content {
   flex: 1;
   overflow: auto;
   position: relative;
-  background: #111;
+  background: color-mix(in srgb, var(--ui-content) 96%, transparent);
 }
 
 .window-content > :deep(*) {
   height: 100%;
 }
+
+/* ── resize handles ───────────────────────────────────────────────────── */
 
 .resize-handle {
   position: absolute;

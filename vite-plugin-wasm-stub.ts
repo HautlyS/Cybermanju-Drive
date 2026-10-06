@@ -20,6 +20,8 @@ export const db_open = unavailable
 export const db_dispatch = unavailable
 export const db_snapshot = unavailable
 export const db_restore = unavailable
+export const agent_catalog = unavailable
+export const agent_prompt = unavailable
 export default function init() {
   return Promise.resolve()
 }

@@ -2,10 +2,10 @@
   <div class="perms-panel">
     <div class="panel-header">
       <div class="header-left">
-        <span class="icon-perms">[!]</span>
+        <span class="icon-perms"><AppIcon name="solar:key-bold" /></span>
         <h2 class="panel-title">FILE PERMISSIONS</h2>
       </div>
-      <button class="close-btn" @click="$emit('close')" aria-label="CLOSE">[X]</button>
+      <button class="close-btn" @click="$emit('close')" aria-label="CLOSE" title="CLOSE"><AppIcon name="solar:close-bold" :size="14" /></button>
     </div>
 
     <div v-if="!store.selectedFile" class="empty-state">
@@ -19,28 +19,28 @@
       </div>
 
       <div class="section">
-        <h3 class="section-title">[PERMISSIONS] ACCESS CONTROL</h3>
+        <h3 class="section-title"><AppIcon name="solar:key-bold" :size="13" /> ACCESS CONTROL</h3>
         <div v-if="permissions.length === 0" class="text-muted" style="font-size:10px;">NO PERMISSIONS SET</div>
         <div v-else class="perms-list">
           <div v-for="(perm, idx) in permissions" :key="perm.userId + idx" class="perm-row">
             <span class="perm-user">{{ perm.username }}</span>
             <span class="perm-access">{{ perm.access.toUpperCase() }}</span>
-            <button class="perm-revoke" @click="handleRevoke(perm)" title="REVOKE ACCESS">[X]</button>
+            <button class="perm-revoke" @click="handleRevoke(perm)" title="REVOKE ACCESS" aria-label="REVOKE ACCESS"><AppIcon name="solar:close-bold" :size="12" /></button>
           </div>
         </div>
       </div>
 
       <div class="section grant-section">
-        <h3 class="section-title">[SHARE] SHARE LINK</h3>
+        <h3 class="section-title"><AppIcon name="solar:share-bold" :size="13" /> SHARE LINK</h3>
         <div class="share-row">
           <input :value="shareLink" class="bw-input" readonly style="flex:1;" @click="($event.target as HTMLInputElement).select()" />
-          <button class="bw-btn" @click="copyShareLink" :disabled="!shareLink">[COPY]</button>
+          <button class="bw-btn" @click="copyShareLink" :disabled="!shareLink" title="COPY LINK" aria-label="COPY LINK"><AppIcon name="solar:copy-bold" :size="13" /></button>
         </div>
         <div v-if="shareCopied" class="share-copied text-muted">LINK COPIED TO CLIPBOARD</div>
       </div>
 
       <div class="section grant-section">
-        <h3 class="section-title">[+] GRANT ACCESS</h3>
+        <h3 class="section-title"><AppIcon name="solar:add-bold" :size="13" /> GRANT ACCESS</h3>
         <div class="grant-row">
           <select v-model="grantUserId" class="bw-input" style="flex:1;">
             <option value="" disabled>SELECT USER</option>
@@ -53,7 +53,7 @@
             <option value="write">WRITE</option>
             <option value="admin">ADMIN</option>
           </select>
-          <button class="bw-btn" @click="handleGrant" :disabled="!grantUserId">[GRANT]</button>
+          <button class="bw-btn" @click="handleGrant" :disabled="!grantUserId" title="GRANT ACCESS" aria-label="GRANT ACCESS"><AppIcon name="solar:user-plus-bold" :size="13" /></button>
         </div>
       </div>
     </template>
@@ -61,6 +61,7 @@
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { ref, computed, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { invoke } from '@/composables/useTauri'

@@ -2,13 +2,13 @@
   <div class="storage-panel">
     <div class="panel-header">
       <div class="header-left">
-        <span class="icon-storage">[$]</span>
+        <span class="icon-storage"><AppIcon name="solar:database-bold" /></span>
         <h2 class="panel-title">STORAGE DASHBOARD</h2>
       </div>
     </div>
 
     <div class="section">
-      <h3 class="section-title">[SUMMARY] FILE COUNTS</h3>
+      <h3 class="section-title"><AppIcon name="solar:checklist-bold" :size="13" /> FILE COUNTS</h3>
       <div class="stats-grid">
         <div class="stat-card">
           <span class="stat-value">{{ store.files.length }}</span>
@@ -38,7 +38,7 @@
     </div>
 
     <div class="section">
-      <h3 class="section-title">[SIZE] TOTAL BY TYPE</h3>
+      <h3 class="section-title"><AppIcon name="solar:ruler-bold" :size="13" /> TOTAL BY TYPE</h3>
       <div class="type-breakdown">
         <div v-for="entry in byType" :key="entry.label" class="type-row">
           <span class="type-label">{{ entry.label }}</span>
@@ -49,7 +49,7 @@
     </div>
 
     <div class="section">
-      <h3 class="section-title">[DATA] STORAGE FOOTPRINT</h3>
+      <h3 class="section-title"><AppIcon name="solar:database-bold" :size="13" /> STORAGE FOOTPRINT</h3>
       <div class="info-card">
         <div class="info-row"><span class="info-key text-muted">TOTAL SIZE</span><span class="info-value">{{ totalSizeFormatted }}</span></div>
         <div class="info-row"><span class="info-key text-muted">LARGEST FILE</span><span class="info-value">{{ largestFile }}</span></div>
@@ -60,7 +60,7 @@
     </div>
 
     <div class="section">
-      <h3 class="section-title">[VOLUME] MERGED DISKS ({{ df ? df.diskCount : 0 }})</h3>
+      <h3 class="section-title"><AppIcon name="solar:ssd-square-bold" :size="13" /> MERGED DISKS ({{ df ? df.diskCount : 0 }})</h3>
       <div class="df-bar" role="img" :aria-label="`Volume ${usedPct.toFixed(1)} percent used`">
         <div class="df-used" :style="{ width: usedPct + '%' }"></div>
       </div>
@@ -76,6 +76,7 @@
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { computed, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { useWindowManager } from '@/composables/useWindowManager'

@@ -12,4 +12,8 @@ declare module 'cybermanju-drive-wasm' {
   export function db_dispatch(op: string, argsJson: string): string;
   export function db_snapshot(): unknown;
   export function db_restore(data: Uint8Array): string;
+  /** Provider presets from the shared Rust core (pure, no network). */
+  export function agent_catalog(): string;
+  /** ONE provider turn over browser `fetch`; JSON in, JSON out. */
+  export function agent_prompt(reqJson: string): Promise<string>;
 }

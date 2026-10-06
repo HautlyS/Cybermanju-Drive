@@ -2,13 +2,13 @@
   <div class="settings-panel">
     <div class="panel-header">
       <div class="header-left">
-        <span class="icon-settings">[@]</span>
+        <span class="icon-settings"><AppIcon name="solar:settings-bold" /></span>
         <h2 class="panel-title">SETTINGS</h2>
       </div>
     </div>
 
     <div class="section">
-      <h3 class="section-title">[DISPLAY] VIEW PREFERENCES</h3>
+      <h3 class="section-title"><AppIcon name="solar:monitor-bold" :size="13" /> VIEW PREFERENCES</h3>
       <div class="setting-row">
         <span class="setting-label text-muted">DEFAULT VIEW</span>
         <select v-model="store.viewMode" class="bw-input" style="flex:1;">
@@ -20,7 +20,7 @@
       <div class="setting-row">
         <span class="setting-label text-muted">MATRIX RAIN</span>
         <button class="bw-btn" :class="{ 'bw-btn-inverse': store.matrixRainEnabled }" @click="store.matrixRainEnabled = !store.matrixRainEnabled">
-          {{ store.matrixRainEnabled ? '[ON]' : '[OFF]' }}
+          <AppIcon :name="store.matrixRainEnabled ? 'solar:check-circle-bold' : 'solar:close-circle-bold'" :size="14" />
         </button>
       </div>
       <div class="setting-row">
@@ -32,7 +32,7 @@
     </div>
 
     <div class="section">
-      <h3 class="section-title">[INFO] ABOUT</h3>
+      <h3 class="section-title"><AppIcon name="solar:info-circle-bold" :size="13" /> ABOUT</h3>
       <div class="info-card">
         <div class="info-row"><span class="info-key text-muted">VERSION</span><span class="info-value">0.1.0</span></div>
         <div class="info-row"><span class="info-key text-muted">FRAMEWORK</span><span class="info-value">VUE 3 + PINIA</span></div>
@@ -44,7 +44,7 @@
     </div>
 
     <div class="section">
-      <h3 class="section-title">[SERVER] CONNECTION</h3>
+      <h3 class="section-title"><AppIcon name="solar:server-bold" :size="13" /> CONNECTION</h3>
       <div class="setting-row">
         <span class="setting-label text-muted">MODE</span>
         <span class="info-value">{{ activeTransport }}</span>
@@ -65,8 +65,8 @@
               aria-label="Remote dashboard URL"
               @keyup.enter="saveServerUrl"
             />
-            <button class="bw-btn" @click="saveServerUrl">[SET]</button>
-            <button v-if="serverUrlDraft || currentServerUrl" class="bw-btn" @click="clearServerUrl" title="Forget the remote dashboard">[X]</button>
+            <button class="bw-btn" @click="saveServerUrl" title="SAVE" aria-label="SAVE SERVER URL"><AppIcon name="solar:diskette-bold" :size="13" /></button>
+            <button v-if="serverUrlDraft || currentServerUrl" class="bw-btn" @click="clearServerUrl" title="Forget the remote dashboard" aria-label="CLEAR SERVER URL"><AppIcon name="solar:close-bold" :size="13" /></button>
           </div>
           <p class="text-muted" style="font-size:9px;margin:0;">STATIC BUILD + YOUR OWN SERVER = FULL OAUTH, SYNC + QUOTA HERE. PAGE RELOADS TO RECONNECT.</p>
         </div>
@@ -74,7 +74,7 @@
     </div>
 
     <div class="section">
-      <h3 class="section-title">[OAUTH] SUPABASE BROKER</h3>
+      <h3 class="section-title"><AppIcon name="solar:key-bold" :size="13" /> SUPABASE BROKER</h3>
       <div class="setting-row">
         <span class="setting-label text-muted">STATUS</span>
         <span class="info-value">{{ supabaseStatus }}</span>
@@ -103,8 +103,8 @@
               aria-label="Supabase anon key"
               autocomplete="off"
             />
-            <button class="bw-btn" @click="saveSupabase">[SET]</button>
-            <button v-if="supabaseConfiguredNow" class="bw-btn" @click="clearSupabase" title="Forget Supabase config">[X]</button>
+            <button class="bw-btn" @click="saveSupabase" title="SAVE" aria-label="SAVE SUPABASE CONFIG"><AppIcon name="solar:diskette-bold" :size="13" /></button>
+            <button v-if="supabaseConfiguredNow" class="bw-btn" @click="clearSupabase" title="Forget Supabase config" aria-label="CLEAR SUPABASE CONFIG"><AppIcon name="solar:close-bold" :size="13" /></button>
           </div>
           <p class="text-muted" style="font-size:9px;margin:0;">STATIC BUILD OAUTH BROKER: GITHUB / GOOGLE / GITLAB LOGIN WITHOUT YOUR OWN SERVER. ENABLE THE PROVIDERS IN SUPABASE → AUTHENTICATION → SIGN-IN, AND ADD THIS PAGE'S URL TO REDIRECT URLS.</p>
         </div>
@@ -112,7 +112,7 @@
     </div>
 
     <div class="section">
-      <h3 class="section-title">[REFRESH] AUTO-REFRESH</h3>
+      <h3 class="section-title"><AppIcon name="solar:refresh-bold" :size="13" /> AUTO-REFRESH</h3>
       <div class="setting-row">
         <span class="setting-label text-muted">INTERVAL</span>
         <select v-model.number="store.autoRefreshInterval" class="bw-input" style="flex:1;">
@@ -126,13 +126,13 @@
     </div>
 
     <div class="section">
-      <h3 class="section-title">[DATA] MANAGE</h3>
+      <h3 class="section-title"><AppIcon name="solar:database-bold" :size="13" /> MANAGE</h3>
       <button class="bw-btn" style="width:100%;" @click="handleRefresh">[REFRESH ALL DATA]</button>
       <p class="text-muted" style="font-size:9px;margin-top:4px;">RE-FETCH FILES, ACCOUNTS, COLLECTIONS, FACE GROUPS, AND SYNC CONFIGS.</p>
     </div>
 
     <div class="section" v-if="touchConfig">
-      <h3 class="section-title">[TOUCH] GESTURES</h3>
+      <h3 class="section-title"><AppIcon name="solar:cursor-square-bold" :size="13" /> GESTURES</h3>
       <p class="text-muted" style="font-size:9px;margin-bottom:6px;">DEVICE: {{ touchConfig.state.touchSupported ? 'TOUCH ENABLED' : 'NO TOUCH' }} | {{ touchConfig.state.isMobile ? 'MOBILE' : 'DESKTOP' }}</p>
       <div class="gesture-table">
         <div v-for="gesture in touchConfig.getAllGestures()" :key="gesture" class="gesture-row">
@@ -144,7 +144,7 @@
           >
             <option v-for="a in touchConfig.getAllActions()" :key="a" :value="a">{{ touchConfig.getActionLabel(a) }}</option>
           </select>
-          <button class="gesture-reset" @click="onGestureReset(gesture)" title="RESET">[R]</button>
+          <button class="gesture-reset" @click="onGestureReset(gesture)" title="RESET" aria-label="RESET GESTURE"><AppIcon name="solar:undo-left-round-bold" :size="13" /></button>
         </div>
       </div>
       <div class="gesture-settings">
@@ -167,14 +167,14 @@
       </div>
       <div class="gesture-actions">
         <button class="bw-btn" @click="touchConfig.resetAll()">[RESET ALL GESTURES]</button>
-        <button class="bw-btn" @click="exportTouchConfig">[EXPORT GESTURES]</button>
-        <button class="bw-btn" @click="importTouchConfig">[IMPORT GESTURES]</button>
+        <button class="bw-btn" @click="exportTouchConfig"><AppIcon name="solar:download-bold" :size="13" /> EXPORT GESTURES</button>
+        <button class="bw-btn" @click="importTouchConfig"><AppIcon name="solar:upload-bold" :size="13" /> IMPORT GESTURES</button>
       </div>
       <input ref="touchImportRef" type="file" accept=".json" style="display:none" @change="handleTouchImport" />
     </div>
 
     <div class="section" v-if="shortcuts">
-      <h3 class="section-title">[SHORTCUTS] KEYBOARD BINDINGS</h3>
+      <h3 class="section-title"><AppIcon name="solar:keyboard-bold" :size="13" /> KEYBOARD BINDINGS</h3>
       <div class="shortcuts-table">
         <div v-for="sc in shortcuts.getAllShortcuts()" :key="sc.action" class="sc-row">
           <span class="sc-action text-muted">{{ sc.description }}</span>
@@ -188,14 +188,14 @@
               :placeholder="sc.keys"
               readonly
             />
-            <button class="sc-reset" @click="resetBinding(sc.action)" title="RESET TO DEFAULT">[R]</button>
+            <button class="sc-reset" @click="resetBinding(sc.action)" title="RESET TO DEFAULT" aria-label="RESET TO DEFAULT"><AppIcon name="solar:undo-left-round-bold" :size="13" /></button>
           </div>
         </div>
       </div>
       <div class="sc-actions">
-        <button class="bw-btn" @click="exportKeymap">[EXPORT KEYMAP]</button>
-        <button class="bw-btn" @click="importKeymap">[IMPORT KEYMAP]</button>
-        <button class="bw-btn" @click="resetAllBindings">[RESET ALL]</button>
+        <button class="bw-btn" @click="exportKeymap"><AppIcon name="solar:download-bold" :size="13" /> EXPORT KEYMAP</button>
+        <button class="bw-btn" @click="importKeymap"><AppIcon name="solar:upload-bold" :size="13" /> IMPORT KEYMAP</button>
+        <button class="bw-btn" @click="resetAllBindings"><AppIcon name="solar:undo-left-round-bold" :size="13" /> RESET ALL</button>
       </div>
       <input
         ref="importInputRef"
@@ -209,6 +209,7 @@
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { ref, inject, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { isWebMode, isTauri, getServerUrl, setServerUrl } from '@/composables/useTauri'

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { ref, provide, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { useKeyboardShortcuts, getGlobalShortcuts } from '@/composables/useKeyboardShortcuts'
@@ -145,48 +146,48 @@ shortcuts.on('go_home', () => { store.currentPanel = 'landing' })
 
 function fileTypeContextMenu(file: any) {
   const base = [
-    { id: 'open', label: 'OPEN', icon: '[>]', shortcut: shortcuts.getShortcut('open'), action: () => file?.select?.() },
-    { id: 'preview', label: 'PREVIEW', icon: '[=]', shortcut: shortcuts.getShortcut('preview'), action: () => file?.preview?.() },
+    { id: 'open', label: 'OPEN', icon: 'solar:folder-open-bold', shortcut: shortcuts.getShortcut('open'), action: () => file?.select?.() },
+    { id: 'preview', label: 'PREVIEW', icon: 'solar:eye-bold', shortcut: shortcuts.getShortcut('preview'), action: () => file?.preview?.() },
     { id: 'div0', label: '', divider: true },
   ]
   const typeActions: Record<string, any[]> = {
     image: [
-      { id: 'rotate_cw', label: 'ROTATE CW', icon: '[R]', shortcut: shortcuts.getShortcut('rotate_cw'), action: () => file?.rotate?.('cw') },
-      { id: 'rotate_ccw', label: 'ROTATE CCW', icon: '[L]', shortcut: shortcuts.getShortcut('rotate_ccw'), action: () => file?.rotate?.('ccw') },
+      { id: 'rotate_cw', label: 'ROTATE CW', icon: 'solar:undo-right-round-bold', shortcut: shortcuts.getShortcut('rotate_cw'), action: () => file?.rotate?.('cw') },
+      { id: 'rotate_ccw', label: 'ROTATE CCW', icon: 'solar:undo-left-round-bold', shortcut: shortcuts.getShortcut('rotate_ccw'), action: () => file?.rotate?.('ccw') },
       { id: 'div_i1', label: '', divider: true },
     ],
     audio: [
-      { id: 'play', label: 'PLAY', icon: '[P]', action: () => file?.play?.() },
+      { id: 'play', label: 'PLAY', icon: 'solar:play-bold', action: () => file?.play?.() },
       { id: 'div_a1', label: '', divider: true },
     ],
     video: [
-      { id: 'play', label: 'PLAY', icon: '[P]', action: () => file?.play?.() },
+      { id: 'play', label: 'PLAY', icon: 'solar:play-bold', action: () => file?.play?.() },
       { id: 'div_v1', label: '', divider: true },
     ],
     archive: [
-      { id: 'extract', label: 'EXTRACT HERE', icon: '[X]', action: () => file?.extract?.() },
+      { id: 'extract', label: 'EXTRACT HERE', icon: 'solar:box-bold', action: () => file?.extract?.() },
       { id: 'div_ar1', label: '', divider: true },
     ],
     folder: [
-      { id: 'open_in_new', label: 'OPEN IN NEW TAB', icon: '[T]', action: () => file?.openNew?.() },
+      { id: 'open_in_new', label: 'OPEN IN NEW TAB', icon: 'solar:square-arrow-right-up-bold', action: () => file?.openNew?.() },
       { id: 'div_f1', label: '', divider: true },
-      { id: 'paste_into', label: 'PASTE INTO', icon: '[P]', action: () => file?.pasteInto?.() },
+      { id: 'paste_into', label: 'PASTE INTO', icon: 'solar:clipboard-paste-bold', action: () => file?.pasteInto?.() },
       { id: 'div_f2', label: '', divider: true },
     ],
   }
   const ft = file?.fileType || 'file'
   const typeSpecific = typeActions[ft] || []
-  const download = { id: 'download', label: 'DOWNLOAD', icon: '[v]', shortcut: shortcuts.getShortcut('download'), action: () => file?.download?.() }
-  const star = { id: 'star', label: file?.isStarred ? 'UNSTAR' : 'STAR', icon: '[*]', shortcut: shortcuts.getShortcut('star_file'), action: () => file?.star?.() }
-  const rename = { id: 'rename', label: 'RENAME', icon: '[R]', shortcut: shortcuts.getShortcut('rename'), action: () => file?.rename?.() }
-  const duplicate = { id: 'duplicate', label: 'DUPLICATE', icon: '[D]', shortcut: shortcuts.getShortcut('duplicate'), action: () => file?.duplicate?.() }
-  const compress = { id: 'compress', label: 'COMPRESS', icon: '[Z]', shortcut: shortcuts.getShortcut('compress'), action: () => file?.compress?.() }
-  const encrypt = { id: 'encrypt', label: 'ENCRYPT', icon: '[#]', shortcut: shortcuts.getShortcut('encrypt'), action: () => file?.encrypt?.() }
-  const decrypt = { id: 'decrypt', label: 'DECRYPT', icon: '[@]', action: () => file?.decrypt?.() }
-  const decompress = { id: 'decompress', label: 'DECOMPRESS', icon: '[$]', action: () => file?.decompress?.() }
-  const permissions = { id: 'permissions', label: 'PERMISSIONS', icon: '[!]', shortcut: shortcuts.getShortcut('show_permissions'), action: () => file?.permissions?.() }
-  const properties = { id: 'properties', label: 'PROPERTIES', icon: '[i]', shortcut: shortcuts.getShortcut('file_properties'), action: () => file?.properties?.() }
-  const deleteAction = { id: 'delete', label: 'DELETE', icon: '[X]', shortcut: shortcuts.getShortcut('delete'), action: () => file?.delete?.() }
+  const download = { id: 'download', label: 'DOWNLOAD', icon: 'solar:download-bold', shortcut: shortcuts.getShortcut('download'), action: () => file?.download?.() }
+  const star = { id: 'star', label: file?.isStarred ? 'UNSTAR' : 'STAR', icon: 'solar:star-bold', shortcut: shortcuts.getShortcut('star_file'), action: () => file?.star?.() }
+  const rename = { id: 'rename', label: 'RENAME', icon: 'solar:pen-bold', shortcut: shortcuts.getShortcut('rename'), action: () => file?.rename?.() }
+  const duplicate = { id: 'duplicate', label: 'DUPLICATE', icon: 'solar:copy-add-bold', shortcut: shortcuts.getShortcut('duplicate'), action: () => file?.duplicate?.() }
+  const compress = { id: 'compress', label: 'COMPRESS', icon: 'solar:archive-bold', shortcut: shortcuts.getShortcut('compress'), action: () => file?.compress?.() }
+  const encrypt = { id: 'encrypt', label: 'ENCRYPT', icon: 'solar:lock-bold', shortcut: shortcuts.getShortcut('encrypt'), action: () => file?.encrypt?.() }
+  const decrypt = { id: 'decrypt', label: 'DECRYPT', icon: 'solar:lock-unlocked-bold', action: () => file?.decrypt?.() }
+  const decompress = { id: 'decompress', label: 'DECOMPRESS', icon: 'solar:archive-up-bold', action: () => file?.decompress?.() }
+  const permissions = { id: 'permissions', label: 'PERMISSIONS', icon: 'solar:key-bold', shortcut: shortcuts.getShortcut('show_permissions'), action: () => file?.permissions?.() }
+  const properties = { id: 'properties', label: 'PROPERTIES', icon: 'solar:info-circle-bold', shortcut: shortcuts.getShortcut('file_properties'), action: () => file?.properties?.() }
+  const deleteAction = { id: 'delete', label: 'DELETE', icon: 'solar:trash-bin-trash-bold', shortcut: shortcuts.getShortcut('delete'), action: () => file?.delete?.() }
   const transformDivider = { id: 'div_t1', label: '', divider: true }
   const metaDivider = { id: 'div_m1', label: '', divider: true }
   const dangerDivider = { id: 'div_d1', label: '', divider: true }
@@ -211,140 +212,140 @@ function fileTypeContextMenu(file: any) {
 }
 
 ctx.registerContext('file_grid_item', [
-  { id: 'open', label: 'OPEN', icon: '[>]', shortcut: shortcuts.getShortcut('open'), action: (d) => d?.select?.() },
-  { id: 'preview', label: 'PREVIEW', icon: '[=]', shortcut: shortcuts.getShortcut('preview'), action: (d) => d?.preview?.() },
+  { id: 'open', label: 'OPEN', icon: 'solar:folder-open-bold', shortcut: shortcuts.getShortcut('open'), action: (d) => d?.select?.() },
+  { id: 'preview', label: 'PREVIEW', icon: 'solar:eye-bold', shortcut: shortcuts.getShortcut('preview'), action: (d) => d?.preview?.() },
   { id: 'div0', label: '', divider: true },
-  { id: 'download', label: 'DOWNLOAD', icon: '[v]', shortcut: shortcuts.getShortcut('download'), action: (d) => d?.download?.() },
-  { id: 'star', label: 'STAR', icon: '[*]', shortcut: shortcuts.getShortcut('star_file'), action: (d) => d?.star?.() },
-  { id: 'rename', label: 'RENAME', icon: '[R]', shortcut: shortcuts.getShortcut('rename'), action: (d) => d?.rename?.() },
-  { id: 'duplicate', label: 'DUPLICATE', icon: '[D]', shortcut: shortcuts.getShortcut('duplicate'), action: (d) => d?.duplicate?.() },
+  { id: 'download', label: 'DOWNLOAD', icon: 'solar:download-bold', shortcut: shortcuts.getShortcut('download'), action: (d) => d?.download?.() },
+  { id: 'star', label: 'STAR', icon: 'solar:star-bold', shortcut: shortcuts.getShortcut('star_file'), action: (d) => d?.star?.() },
+  { id: 'rename', label: 'RENAME', icon: 'solar:pen-bold', shortcut: shortcuts.getShortcut('rename'), action: (d) => d?.rename?.() },
+  { id: 'duplicate', label: 'DUPLICATE', icon: 'solar:copy-add-bold', shortcut: shortcuts.getShortcut('duplicate'), action: (d) => d?.duplicate?.() },
   { id: 'div1', label: '', divider: true },
-  { id: 'compress', label: 'COMPRESS', icon: '[Z]', shortcut: shortcuts.getShortcut('compress'), action: (d) => d?.compress?.() },
-  { id: 'encrypt', label: 'ENCRYPT', icon: '[#]', shortcut: shortcuts.getShortcut('encrypt'), action: (d) => d?.encrypt?.() },
-  { id: 'decrypt', label: 'DECRYPT', icon: '[@]', action: (d) => d?.decrypt?.() },
+  { id: 'compress', label: 'COMPRESS', icon: 'solar:archive-bold', shortcut: shortcuts.getShortcut('compress'), action: (d) => d?.compress?.() },
+  { id: 'encrypt', label: 'ENCRYPT', icon: 'solar:lock-bold', shortcut: shortcuts.getShortcut('encrypt'), action: (d) => d?.encrypt?.() },
+  { id: 'decrypt', label: 'DECRYPT', icon: 'solar:lock-unlocked-bold', action: (d) => d?.decrypt?.() },
   { id: 'div2', label: '', divider: true },
-  { id: 'permissions', label: 'PERMISSIONS', icon: '[!]', shortcut: shortcuts.getShortcut('show_permissions'), action: (d) => d?.permissions?.() },
-  { id: 'properties', label: 'PROPERTIES', icon: '[i]', shortcut: shortcuts.getShortcut('file_properties'), action: (d) => d?.properties?.() },
+  { id: 'permissions', label: 'PERMISSIONS', icon: 'solar:key-bold', shortcut: shortcuts.getShortcut('show_permissions'), action: (d) => d?.permissions?.() },
+  { id: 'properties', label: 'PROPERTIES', icon: 'solar:info-circle-bold', shortcut: shortcuts.getShortcut('file_properties'), action: (d) => d?.properties?.() },
   { id: 'div3', label: '', divider: true },
-  { id: 'delete', label: 'DELETE', icon: '[X]', shortcut: shortcuts.getShortcut('delete'), action: (d) => d?.delete?.() },
+  { id: 'delete', label: 'DELETE', icon: 'solar:trash-bin-trash-bold', shortcut: shortcuts.getShortcut('delete'), action: (d) => d?.delete?.() },
 ])
 
 ctx.registerContext('file_grid_bg', [
-  { id: 'new_folder', label: 'NEW FOLDER', icon: '[+]', shortcut: shortcuts.getShortcut('new_folder'), action: () => { store.createFolderPromptOpen = true } },
-  { id: 'paste', label: 'PASTE', icon: '[P]', shortcut: shortcuts.getShortcut('paste'), action: () => {} },
+  { id: 'new_folder', label: 'NEW FOLDER', icon: 'solar:add-folder-bold', shortcut: shortcuts.getShortcut('new_folder'), action: () => { store.createFolderPromptOpen = true } },
+  { id: 'paste', label: 'PASTE', icon: 'solar:clipboard-paste-bold', shortcut: shortcuts.getShortcut('paste'), action: () => {} },
   { id: 'div1', label: '', divider: true },
   {
-    id: 'sort', label: 'SORT BY', icon: '[S]', submenu: [
-      { id: 'sort_name', label: 'NAME', icon: '[N]', action: () => { (store as any).sortBy = 'name' } },
-      { id: 'sort_date', label: 'DATE', icon: '[D]', action: () => { (store as any).sortBy = 'date' } },
-      { id: 'sort_size', label: 'SIZE', icon: '[S]', action: () => { (store as any).sortBy = 'size' } },
-      { id: 'sort_type', label: 'TYPE', icon: '[T]', action: () => { (store as any).sortBy = 'type' } },
+    id: 'sort', label: 'SORT BY', icon: 'solar:sort-bold', submenu: [
+      { id: 'sort_name', label: 'NAME', icon: 'solar:sort-alphabetically-bold', action: () => { (store as any).sortBy = 'name' } },
+      { id: 'sort_date', label: 'DATE', icon: 'solar:calendar-bold', action: () => { (store as any).sortBy = 'date' } },
+      { id: 'sort_size', label: 'SIZE', icon: 'solar:sort-from-top-to-bottom-bold', action: () => { (store as any).sortBy = 'size' } },
+      { id: 'sort_type', label: 'TYPE', icon: 'solar:file-type-bold', action: () => { (store as any).sortBy = 'type' } },
     ]
   },
   {
-    id: 'view', label: 'VIEW MODE', icon: '[V]', submenu: [
-      { id: 'view_grid', label: 'GRID', icon: '[#]', action: () => { wm.open('files'); store.viewMode = 'grid' } },
-      { id: 'view_list', label: 'LIST', icon: '[@]', action: () => { wm.open('files'); store.viewMode = 'list' } },
-      { id: 'view_masonry', label: 'MASONRY', icon: '[*]', action: () => { wm.open('files'); store.viewMode = 'masonry' } },
+    id: 'view', label: 'VIEW MODE', icon: 'solar:grid-2x2-bold', submenu: [
+      { id: 'view_grid', label: 'GRID', icon: 'solar:grid-3x3-bold', action: () => { wm.open('files'); store.viewMode = 'grid' } },
+      { id: 'view_list', label: 'LIST', icon: 'solar:list-bold', action: () => { wm.open('files'); store.viewMode = 'list' } },
+      { id: 'view_masonry', label: 'MASONRY', icon: 'solar:columns-3-bold', action: () => { wm.open('files'); store.viewMode = 'masonry' } },
     ]
   },
   { id: 'div2', label: '', divider: true },
-  { id: 'select_all', label: 'SELECT ALL', icon: '[A]', shortcut: shortcuts.getShortcut('select_all'), action: () => { store.selectedFileIds = [...store.files.map(f => f.id)] } },
-  { id: 'deselect', label: 'DESELECT', icon: '[C]', shortcut: shortcuts.getShortcut('deselect'), action: () => { store.selectedFileIds = [] } },
+  { id: 'select_all', label: 'SELECT ALL', icon: 'solar:check-square-bold', shortcut: shortcuts.getShortcut('select_all'), action: () => { store.selectedFileIds = [...store.files.map(f => f.id)] } },
+  { id: 'deselect', label: 'DESELECT', icon: 'solar:close-square-bold', shortcut: shortcuts.getShortcut('deselect'), action: () => { store.selectedFileIds = [] } },
   { id: 'div3', label: '', divider: true },
   {
-    id: 'go_to', label: 'GO TO', icon: '[G]', submenu: [
-      { id: 'go_home', label: 'HOME', icon: '[H]', action: () => { store.currentPanel = 'landing' } },
-      { id: 'go_trash', label: 'TRASH', icon: '[T]', action: () => { wm.open('trash'); store.fetchTrashItems() } },
-      { id: 'go_recent', label: 'RECENT', icon: '[R]', action: () => { wm.open('recent') } },
-      { id: 'go_favorites', label: 'FAVORITES', icon: '[*]', action: () => { wm.open('favorites') } },
+    id: 'go_to', label: 'GO TO', icon: 'solar:point-on-map-bold', submenu: [
+      { id: 'go_home', label: 'HOME', icon: 'solar:house-bold', action: () => { store.currentPanel = 'landing' } },
+      { id: 'go_trash', label: 'TRASH', icon: 'solar:trash-bin-trash-bold', action: () => { wm.open('trash'); store.fetchTrashItems() } },
+      { id: 'go_recent', label: 'RECENT', icon: 'solar:history-bold', action: () => { wm.open('recent') } },
+      { id: 'go_favorites', label: 'FAVORITES', icon: 'solar:star-bold', action: () => { wm.open('favorites') } },
     ]
   },
   { id: 'div4', label: '', divider: true },
-  { id: 'refresh', label: 'REFRESH', icon: '[R]', shortcut: shortcuts.getShortcut('refresh'), action: () => store.fetchFiles() },
+  { id: 'refresh', label: 'REFRESH', icon: 'solar:refresh-bold', shortcut: shortcuts.getShortcut('refresh'), action: () => store.fetchFiles() },
 ])
 
 ctx.registerContext('sidebar_node', [
-  { id: 'open', label: 'OPEN', icon: '[>]', action: (d) => d?.select?.() },
-  { id: 'open_new_tab', label: 'OPEN IN NEW TAB', icon: '[T]', action: (d) => d?.openNewTab?.() },
+  { id: 'open', label: 'OPEN', icon: 'solar:folder-open-bold', action: (d) => d?.select?.() },
+  { id: 'open_new_tab', label: 'OPEN IN NEW TAB', icon: 'solar:square-arrow-right-up-bold', action: (d) => d?.openNewTab?.() },
   { id: 'div1', label: '', divider: true },
-  { id: 'new_subfolder', label: 'NEW SUBFOLDER', icon: '[+]', action: (d) => d?.newSubfolder?.() },
-  { id: 'rename', label: 'RENAME', icon: '[R]', action: (d) => d?.rename?.() },
-  { id: 'duplicate', label: 'DUPLICATE', icon: '[D]', action: (d) => d?.duplicate?.() },
+  { id: 'new_subfolder', label: 'NEW SUBFOLDER', icon: 'solar:add-folder-bold', action: (d) => d?.newSubfolder?.() },
+  { id: 'rename', label: 'RENAME', icon: 'solar:pen-bold', action: (d) => d?.rename?.() },
+  { id: 'duplicate', label: 'DUPLICATE', icon: 'solar:copy-add-bold', action: (d) => d?.duplicate?.() },
   { id: 'div2', label: '', divider: true },
-  { id: 'paste_into', label: 'PASTE INTO', icon: '[P]', action: (d) => d?.pasteInto?.() },
+  { id: 'paste_into', label: 'PASTE INTO', icon: 'solar:clipboard-paste-bold', action: (d) => d?.pasteInto?.() },
   { id: 'div3', label: '', divider: true },
-  { id: 'expand', label: 'EXPAND ALL', icon: '[+]', action: (d) => d?.expandAll?.() },
-  { id: 'collapse', label: 'COLLAPSE ALL', icon: '[-]', action: (d) => d?.collapseAll?.() },
+  { id: 'expand', label: 'EXPAND ALL', icon: 'solar:chevrons-up-down-bold', action: (d) => d?.expandAll?.() },
+  { id: 'collapse', label: 'COLLAPSE ALL', icon: 'solar:chevrons-down-up-bold', action: (d) => d?.collapseAll?.() },
   { id: 'div4', label: '', divider: true },
-  { id: 'delete', label: 'DELETE', icon: '[X]', action: (d) => d?.delete?.() },
+  { id: 'delete', label: 'DELETE', icon: 'solar:trash-bin-trash-bold', action: (d) => d?.delete?.() },
 ])
 
 ctx.registerContext('sidebar_bg', [
-  { id: 'new_folder', label: 'NEW FOLDER', icon: '[+]', shortcut: shortcuts.getShortcut('new_folder'), action: () => { store.createFolderPromptOpen = true } },
-  { id: 'refresh', label: 'REFRESH', icon: '[R]', shortcut: shortcuts.getShortcut('refresh'), action: () => store.fetchFiles() },
+  { id: 'new_folder', label: 'NEW FOLDER', icon: 'solar:add-folder-bold', shortcut: shortcuts.getShortcut('new_folder'), action: () => { store.createFolderPromptOpen = true } },
+  { id: 'refresh', label: 'REFRESH', icon: 'solar:refresh-bold', shortcut: shortcuts.getShortcut('refresh'), action: () => store.fetchFiles() },
   { id: 'div1', label: '', divider: true },
-  { id: 'expand', label: 'EXPAND ALL', icon: '[+]', action: () => {} },
-  { id: 'collapse', label: 'COLLAPSE ALL', icon: '[-]', action: () => {} },
+  { id: 'expand', label: 'EXPAND ALL', icon: 'solar:chevrons-up-down-bold', action: () => {} },
+  { id: 'collapse', label: 'COLLAPSE ALL', icon: 'solar:chevrons-down-up-bold', action: () => {} },
   { id: 'div2', label: '', divider: true },
-  { id: 'show_trash', label: 'SHOW TRASH', icon: '[T]', action: () => { wm.open('trash'); store.fetchTrashItems() } },
-  { id: 'show_storage', label: 'STORAGE DASHBOARD', icon: '[@]', action: () => { wm.open('storage') } },
+  { id: 'show_trash', label: 'SHOW TRASH', icon: 'solar:trash-bin-trash-bold', action: () => { wm.open('trash'); store.fetchTrashItems() } },
+  { id: 'show_storage', label: 'STORAGE DASHBOARD', icon: 'solar:database-bold', action: () => { wm.open('storage') } },
 ])
 
 ctx.registerContext('search_result', [
-  { id: 'open', label: 'OPEN', icon: '[>]', action: (d) => d?.select?.() },
-  { id: 'preview', label: 'PREVIEW', icon: '[=]', action: (d) => d?.preview?.() },
-  { id: 'download', label: 'DOWNLOAD', icon: '[v]', action: (d) => d?.download?.() },
-  { id: 'star', label: 'STAR', icon: '[*]', action: (d) => d?.star?.() },
+  { id: 'open', label: 'OPEN', icon: 'solar:folder-open-bold', action: (d) => d?.select?.() },
+  { id: 'preview', label: 'PREVIEW', icon: 'solar:eye-bold', action: (d) => d?.preview?.() },
+  { id: 'download', label: 'DOWNLOAD', icon: 'solar:download-bold', action: (d) => d?.download?.() },
+  { id: 'star', label: 'STAR', icon: 'solar:star-bold', action: (d) => d?.star?.() },
   { id: 'div1', label: '', divider: true },
-  { id: 'copy_path', label: 'COPY PATH', icon: '[C]', action: (d) => d?.copyPath?.() },
-  { id: 'show_in_folder', label: 'SHOW IN FOLDER', icon: '[F]', action: (d) => d?.showInFolder?.() },
+  { id: 'copy_path', label: 'COPY PATH', icon: 'solar:copy-bold', action: (d) => d?.copyPath?.() },
+  { id: 'show_in_folder', label: 'SHOW IN FOLDER', icon: 'solar:folder-search-bold', action: (d) => d?.showInFolder?.() },
   { id: 'div2', label: '', divider: true },
-  { id: 'properties', label: 'PROPERTIES', icon: '[i]', action: (d) => d?.properties?.() },
+  { id: 'properties', label: 'PROPERTIES', icon: 'solar:info-circle-bold', action: (d) => d?.properties?.() },
 ])
 
 ctx.registerContext('collection_item', [
-  { id: 'open', label: 'OPEN COLLECTION', icon: '[>]', action: (d) => d?.open?.() },
-  { id: 'rename', label: 'RENAME', icon: '[R]', action: (d) => d?.rename?.() },
+  { id: 'open', label: 'OPEN COLLECTION', icon: 'solar:folder-open-bold', action: (d) => d?.open?.() },
+  { id: 'rename', label: 'RENAME', icon: 'solar:pen-bold', action: (d) => d?.rename?.() },
   { id: 'div1', label: '', divider: true },
-  { id: 'add_files', label: 'ADD FILES', icon: '[+]', action: (d) => d?.addFiles?.() },
-  { id: 'remove_files', label: 'REMOVE FILES', icon: '[-]', action: (d) => d?.removeFiles?.() },
+  { id: 'add_files', label: 'ADD FILES', icon: 'solar:file-add-bold', action: (d) => d?.addFiles?.() },
+  { id: 'remove_files', label: 'REMOVE FILES', icon: 'solar:file-minus-bold', action: (d) => d?.removeFiles?.() },
   { id: 'div2', label: '', divider: true },
-  { id: 'share', label: 'SHARE', icon: '[@]', action: (d) => d?.share?.() },
-  { id: 'delete', label: 'DELETE COLLECTION', icon: '[X]', action: (d) => d?.delete?.() },
+  { id: 'share', label: 'SHARE', icon: 'solar:share-bold', action: (d) => d?.share?.() },
+  { id: 'delete', label: 'DELETE COLLECTION', icon: 'solar:trash-bin-trash-bold', action: (d) => d?.delete?.() },
 ])
 
 ctx.registerContext('face_item', [
-  { id: 'rename', label: 'RENAME', icon: '[R]', action: (d) => d?.rename?.() },
-  { id: 'merge', label: 'MERGE WITH...', icon: '[+]', action: (d) => d?.merge?.() },
+  { id: 'rename', label: 'RENAME', icon: 'solar:pen-bold', action: (d) => d?.rename?.() },
+  { id: 'merge', label: 'MERGE WITH...', icon: 'solar:git-branch-bold', action: (d) => d?.merge?.() },
   { id: 'div1', label: '', divider: true },
-  { id: 'show_files', label: 'SHOW FILES', icon: '[F]', action: (d) => d?.showFiles?.() },
-  { id: 'delete', label: 'DELETE GROUP', icon: '[X]', action: (d) => d?.delete?.() },
+  { id: 'show_files', label: 'SHOW FILES', icon: 'solar:folder-with-files-bold', action: (d) => d?.showFiles?.() },
+  { id: 'delete', label: 'DELETE GROUP', icon: 'solar:trash-bin-trash-bold', action: (d) => d?.delete?.() },
 ])
 
 ctx.registerContext('trash_item', [
-  { id: 'restore', label: 'RESTORE', icon: '[R]', action: (d) => d?.restore?.() },
+  { id: 'restore', label: 'RESTORE', icon: 'solar:undo-left-round-bold', action: (d) => d?.restore?.() },
   { id: 'div1', label: '', divider: true },
-  { id: 'delete_perm', label: 'DELETE PERMANENTLY', icon: '[X]', action: (d) => d?.deletePermanently?.() },
+  { id: 'delete_perm', label: 'DELETE PERMANENTLY', icon: 'solar:trash-bin-trash-bold', action: (d) => d?.deletePermanently?.() },
 ])
 
 ctx.registerContext('activity_item', [
-  { id: 'copy_details', label: 'COPY DETAILS', icon: '[C]', action: (d) => d?.copyDetails?.() },
-  { id: 'show_file', label: 'SHOW FILE', icon: '[F]', action: (d) => d?.showFile?.() },
+  { id: 'copy_details', label: 'COPY DETAILS', icon: 'solar:copy-bold', action: (d) => d?.copyDetails?.() },
+  { id: 'show_file', label: 'SHOW FILE', icon: 'solar:file-search-bold', action: (d) => d?.showFile?.() },
 ])
 
 ctx.registerContext('favorite_item', [
-  { id: 'open', label: 'OPEN', icon: '[>]', action: (d) => d?.open?.() },
-  { id: 'unstar', label: 'UNSTAR', icon: '[*]', action: (d) => d?.unstar?.() },
+  { id: 'open', label: 'OPEN', icon: 'solar:folder-open-bold', action: (d) => d?.open?.() },
+  { id: 'unstar', label: 'UNSTAR', icon: 'solar:star-off-bold', action: (d) => d?.unstar?.() },
   { id: 'div1', label: '', divider: true },
-  { id: 'show_in_folder', label: 'SHOW IN FOLDER', icon: '[F]', action: (d) => d?.showInFolder?.() },
+  { id: 'show_in_folder', label: 'SHOW IN FOLDER', icon: 'solar:folder-search-bold', action: (d) => d?.showInFolder?.() },
 ])
 
 ctx.registerContext('recent_item', [
-  { id: 'open', label: 'OPEN', icon: '[>]', action: (d) => d?.open?.() },
-  { id: 'star', label: 'STAR', icon: '[*]', action: (d) => d?.star?.() },
+  { id: 'open', label: 'OPEN', icon: 'solar:folder-open-bold', action: (d) => d?.open?.() },
+  { id: 'star', label: 'STAR', icon: 'solar:star-bold', action: (d) => d?.star?.() },
   { id: 'div1', label: '', divider: true },
-  { id: 'show_in_folder', label: 'SHOW IN FOLDER', icon: '[F]', action: (d) => d?.showInFolder?.() },
+  { id: 'show_in_folder', label: 'SHOW IN FOLDER', icon: 'solar:folder-search-bold', action: (d) => d?.showInFolder?.() },
 ])
 
 const pathHistory = ref<string[]>([])
@@ -478,7 +479,7 @@ onBeforeUnmount(() => {
       </DesktopShell>
 
       <div v-if="store.lastError" class="error-banner" @click="store.clearError()">
-      <span class="error-icon">[!]</span>
+      <span class="error-icon"><AppIcon name="solar:danger-circle-bold" /></span>
       <span class="error-text">{{ store.lastError }}</span>
       <span class="error-dismiss">X</span>
     </div>
@@ -496,8 +497,8 @@ onBeforeUnmount(() => {
             @keyup.enter="handleCreateFolder"
           />
           <div class="mini-actions">
-            <button class="bw-btn" @click="store.createFolderPromptOpen = false">[CANCEL]</button>
-            <button class="bw-btn bw-btn-inverse" @click="handleCreateFolder">[CREATE]</button>
+            <button class="bw-btn" @click="store.createFolderPromptOpen = false"><AppIcon name="solar:close-bold" :size="13" /> CANCEL</button>
+            <button class="bw-btn bw-btn-inverse" @click="handleCreateFolder"><AppIcon name="solar:add-bold" :size="13" /> CREATE</button>
           </div>
         </div>
       </div>

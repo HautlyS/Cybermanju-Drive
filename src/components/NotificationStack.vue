@@ -9,9 +9,9 @@
           :class="'notif-' + n.type"
           @click="dismiss(n.id)"
         >
-          <span class="notif-icon">{{ ICONS[n.type] }}</span>
+          <span class="notif-icon"><AppIcon :name="ICONS[n.type]" :size="14" /></span>
           <span class="notif-msg">{{ n.message }}</span>
-          <button class="notif-close" @click.stop="dismiss(n.id)">X</button>
+          <button class="notif-close" @click.stop="dismiss(n.id)" aria-label="CLOSE"><AppIcon name="solar:close-bold" :size="13" /></button>
         </div>
       </TransitionGroup>
     </div>
@@ -19,15 +19,16 @@
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { useNotifications, type NotificationType } from '@/composables/useNotifications'
 
 const { notifications, dismiss } = useNotifications()
 
 const ICONS: Record<NotificationType, string> = {
-  success: '[$]',
-  error: '[!]',
-  warning: '[?]',
-  info: '[*]',
+  success: 'solar:check-circle-bold',
+  error: 'solar:close-circle-bold',
+  warning: 'solar:danger-triangle-bold',
+  info: 'solar:info-circle-bold',
 }
 </script>
 

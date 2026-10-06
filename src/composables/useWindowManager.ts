@@ -150,7 +150,7 @@ export function useWindowManager() {
       return existing.id
     }
 
-    const meta = MODULE_METADATA[panelType] || { label: panelType.toUpperCase(), icon: '[*]' }
+    const meta = MODULE_METADATA[panelType] || { label: panelType.toUpperCase(), icon: 'solar:grid-2x2-bold' }
     const size = defaultSizes[panelType] || { width: 520, height: 440 }
     const pos = cascadePosition(windows.value.length)
     const id = `win-${++windowCounter}`

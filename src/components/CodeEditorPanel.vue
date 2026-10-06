@@ -2,7 +2,7 @@
   <div class="editor-panel">
     <div class="panel-header">
       <div class="header-left">
-        <span class="icon-editor">[E]</span>
+        <span class="icon-editor"><AppIcon name="solar:file-code-bold" /></span>
         <h2 class="panel-title">EDITOR</h2>
         <span class="text-muted transport-tag">{{ transportLabel }}</span>
         <span
@@ -14,12 +14,12 @@
       </div>
       <div class="header-actions">
         <button class="bw-btn-sm" :disabled="!activeTab || saving" @click="saveActive">
-          {{ saving ? '[SAVING…]' : '[SAVE Ctrl+S]' }}
+          <AppIcon name="solar:diskette-bold" :size="13" /> {{ saving ? 'SAVING…' : 'SAVE Ctrl+S' }}
         </button>
         <button class="bw-btn-sm" :disabled="!activeTab" @click="showOutline = !showOutline">
-          {{ showOutline ? '[OUTLINE✓]' : '[OUTLINE]' }}
+          <AppIcon name="solar:folder-tree-bold" :size="13" /> OUTLINE <AppIcon v-if="showOutline" name="solar:check-bold" :size="11" />
         </button>
-        <button class="bw-btn-sm" :disabled="!activeTab" @click="showFind = !showFind">[FIND]</button>
+        <button class="bw-btn-sm" :disabled="!activeTab" @click="showFind = !showFind" title="FIND" aria-label="FIND"><AppIcon name="solar:magnifier-bold" :size="13" /></button>
       </div>
     </div>
 
@@ -27,17 +27,17 @@
       <!-- Explorer -->
       <div class="explorer">
         <div class="explorer-head">
-          <span class="section-title">{{ isWasm ? '[VOLUME] WASM FILES' : '[FILES] EDITABLE' }}</span>
-          <button class="ghost-btn" @click="refreshExplorer" title="REFRESH">↻</button>
+          <span class="section-title"><AppIcon :name="isWasm ? 'solar:ssd-square-bold' : 'solar:folder-bold'" :size="13" /> {{ isWasm ? 'WASM FILES' : 'EDITABLE' }}</span>
+          <button class="ghost-btn" @click="refreshExplorer" title="REFRESH" aria-label="REFRESH EXPLORER"><AppIcon name="solar:refresh-bold" :size="13" /></button>
         </div>
         <input v-model="explorerFilter" class="bw-input explorer-search" placeholder="FILTER…" spellcheck="false" />
         <div v-if="isWasm" class="wasm-nav">
-          <button class="ghost-btn" :disabled="wasmCwd === '/'" @click="wasmUp">↑</button>
+          <button class="ghost-btn" :disabled="wasmCwd === '/'" @click="wasmUp" title="UP ONE LEVEL" aria-label="UP ONE LEVEL"><AppIcon name="solar:arrow-up-bold" :size="13" /></button>
           <span class="text-muted wasm-path">{{ wasmCwd }}</span>
         </div>
         <div v-if="isWasm" class="wasm-new">
           <input v-model="newFileName" class="bw-input" placeholder="new-file.txt" spellcheck="false" @keyup.enter="createWasmFile" />
-          <button class="bw-btn-sm" :disabled="!newFileName.trim()" @click="createWasmFile">[+]</button>
+          <button class="bw-btn-sm" :disabled="!newFileName.trim()" @click="createWasmFile" title="NEW FILE" aria-label="NEW FILE"><AppIcon name="solar:add-bold" :size="13" /></button>
         </div>
         <div class="explorer-list">
           <div
@@ -48,7 +48,7 @@
             @click="entry.isDir ? navigateWasm(entry.path) : openEntry(entry)"
             @dblclick="entry.isDir ? navigateWasm(entry.path) : openEntry(entry)"
           >
-            <span class="explorer-icon">{{ entry.isDir ? '▸' : '·' }}</span>
+            <span class="explorer-icon"><AppIcon :name="entry.isDir ? 'solar:alt-arrow-right-bold' : 'solar:file-bold'" :size="12" /></span>
             <span class="explorer-name">{{ entry.label }}</span>
             <span v-if="!entry.isDir && entry.sub" class="explorer-sub text-muted">{{ entry.sub }}</span>
           </div>
@@ -69,9 +69,9 @@
             :class="{ active: tab.key === activeKey, dirty: tab.dirty }"
             @click="activeKey = tab.key"
           >
-            <span class="tab-dot" v-if="tab.dirty">●</span>
+            <span class="tab-dot" v-if="tab.dirty" aria-label="UNSAVED"><AppIcon name="solar:circle-dot-bold" :size="8" /></span>
             <span class="tab-label">{{ tab.label }}</span>
-            <button class="tab-x" @click.stop="closeTab(tab.key)" title="CLOSE">×</button>
+            <button class="tab-x" @click.stop="closeTab(tab.key)" title="CLOSE" aria-label="CLOSE TAB"><AppIcon name="solar:close-bold" :size="12" /></button>
           </div>
         </div>
 
@@ -84,8 +84,8 @@
             @keyup.enter="findNext(1)"
           />
           <span class="text-muted find-count">{{ findCount ? `${findIndex + 1}/${findCount}` : findQuery ? '0/0' : '' }}</span>
-          <button class="bw-btn-sm" @click="findNext(1)">[↓]</button>
-          <button class="bw-btn-sm" @click="findNext(-1)">[↑]</button>
+          <button class="bw-btn-sm" @click="findNext(1)" title="FIND NEXT" aria-label="FIND NEXT"><AppIcon name="solar:arrow-down-bold" :size="13" /></button>
+          <button class="bw-btn-sm" @click="findNext(-1)" title="FIND PREVIOUS" aria-label="FIND PREVIOUS"><AppIcon name="solar:arrow-up-bold" :size="13" /></button>
         </div>
 
         <div v-if="!activeTab" class="empty-editor">
@@ -123,7 +123,7 @@
           <span>{{ activeTab.language }}</span>
           <span class="text-muted">Ln {{ cursorLine }}, Col {{ cursorCol }}</span>
           <span class="text-muted">{{ activeTab.content.length }} B · {{ lineCount }} LINES</span>
-          <span v-if="activeTab.dirty" class="dirty-tag">● UNSAVED</span>
+          <span v-if="activeTab.dirty" class="dirty-tag"><AppIcon name="solar:circle-dot-bold" :size="8" /> UNSAVED</span>
           <span v-else class="text-muted">SAVED</span>
           <span class="text-muted">{{ outlineStatus }}</span>
         </div>
@@ -131,9 +131,9 @@
         <!-- Outline -->
         <div v-if="activeTab && showOutline" class="outline">
           <div class="outline-head">
-            <span class="section-title">[OUTLINE] {{ outlineSymbols.length }} SYMBOLS</span>
+            <span class="section-title"><AppIcon name="solar:folder-tree-bold" :size="13" /> OUTLINE {{ outlineSymbols.length }} SYMBOLS</span>
             <button class="ghost-btn" :disabled="parsingOutline" @click="reparseActive">
-              {{ parsingOutline ? '…' : '↻' }}
+              <AppIcon :name="parsingOutline ? 'solar:loader-bold' : 'solar:refresh-bold'" :size="13" />
             </button>
           </div>
           <input v-model="outlineFilter" class="bw-input outline-search" placeholder="FILTER OUTLINE…" spellcheck="false" />
@@ -158,6 +158,7 @@
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { ref, computed, nextTick, onBeforeUnmount, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { invoke, isTauri, isStaticHost } from '@/composables/useTauri'

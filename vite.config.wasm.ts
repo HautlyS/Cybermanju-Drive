@@ -48,7 +48,7 @@ export default defineConfig({
         manualChunks: {
           "vendor-vue": ["vue", "pinia"],
           "vendor-map": ["maplibre-gl"],
-          "vendor-icons": ["lucide-vue-next"],
+          "vendor-icons": ["@iconify/vue"],
         },
       },
     },

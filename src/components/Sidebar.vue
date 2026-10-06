@@ -17,7 +17,7 @@
         role="tab"
         @click="store.sidebarSection = tab.id as SidebarSection; if (tab.id === 'landing') store.currentPanel = 'landing'"
       >
-        <span class="tab-icon">{{ tab.icon }}</span>
+        <span class="tab-icon"><AppIcon :name="tab.icon" :size="14" /></span>
         <span v-if="!store.sidebarCollapsed" class="tab-label">{{ tab.label }}</span>
       </button>
     </div>
@@ -26,12 +26,12 @@
       <div v-if="store.sidebarSection === 'landing'" class="sidebar-section">
         <div class="section-header">QUICK LINKS</div>
         <div class="quick-links">
-          <button class="ql-item" @click="wm.open('files')">[IN] FILE BROWSER</button>
-          <button class="ql-item" @click="wm.open('sync')">[CL] CLOUD SYNC</button>
+          <button class="ql-item" @click="wm.open('files')"><AppIcon name="solar:folder-open-bold" :size="12" /> FILE BROWSER</button>
+          <button class="ql-item" @click="wm.open('sync')"><AppIcon name="solar:cloud-bold" :size="12" /> CLOUD SYNC</button>
           <button class="ql-item" @click="wm.open('terminal')">[&gt;] TERMINAL (cybsh)</button>
-          <button class="ql-item" @click="wm.open('disks')">[=] DISKS &amp; VOLUME</button>
-          <a href="https://github.com/hautlythird211/Cybermanju-Drive" target="_blank" class="ql-item">[GH] SOURCE CODE</a>
-          <a href="https://github.com/hautlythird211/Cybermanju-Drive/blob/main/README.md" target="_blank" class="ql-item">[DOC] DOCS</a>
+          <button class="ql-item" @click="wm.open('disks')"><AppIcon name="solar:ssd-square-bold" :size="12" /> DISKS &amp; VOLUME</button>
+          <a href="https://github.com/hautlythird211/Cybermanju-Drive" target="_blank" class="ql-item"><AppIcon name="solar:code-square-bold" :size="12" /> SOURCE CODE</a>
+          <a href="https://github.com/hautlythird211/Cybermanju-Drive/blob/main/README.md" target="_blank" class="ql-item"><AppIcon name="solar:book-bold" :size="12" /> DOCS</a>
         </div>
       </div>
 
@@ -140,7 +140,7 @@
         <div class="section-header" @click="wm.open('users')">USER ACCESS &gt;</div>
         <div class="section-body">
           <p class="text-muted" style="font-size:10px;padding:8px 0;">PER-FILE USERNAME + PASSWORD AUTH WITH ARGON2</p>
-          <button class="bw-btn" style="width:100%;font-size:10px;" @click="wm.open('users')">[OPEN] USER MGMT</button>
+          <button class="bw-btn" style="width:100%;font-size:10px;" @click="wm.open('users')"><AppIcon name="solar:square-arrow-right-up-bold" :size="12" /> USER MGMT</button>
         </div>
       </div>
 
@@ -156,8 +156,8 @@
               </div>
             </div>
           </div>
-          <button class="bw-btn" style="width:100%;font-size:10px;margin-top:6px;" @click="wm.open('sync')">[OPEN] SYNC PANEL</button>
-          <button class="bw-btn" style="width:100%;font-size:10px;margin-top:4px;" @click="wm.open('accounts')">[OPEN] ACCOUNTS + OAUTH</button>
+          <button class="bw-btn" style="width:100%;font-size:10px;margin-top:6px;" @click="wm.open('sync')"><AppIcon name="solar:square-arrow-right-up-bold" :size="12" /> SYNC PANEL</button>
+          <button class="bw-btn" style="width:100%;font-size:10px;margin-top:4px;" @click="wm.open('accounts')"><AppIcon name="solar:square-arrow-right-up-bold" :size="12" /> ACCOUNTS + OAUTH</button>
         </div>
       </div>
 
@@ -168,7 +168,7 @@
           <div class="bw-card" style="padding:6px;margin-bottom:6px;">
             <code style="font-size:10px;color:#000;">{{ dashboardUrl }}</code>
           </div>
-          <button class="bw-btn" style="width:100%;font-size:10px;" @click="wm.open('dashboard')">[OPEN] DASHBOARD</button>
+          <button class="bw-btn" style="width:100%;font-size:10px;" @click="wm.open('dashboard')"><AppIcon name="solar:square-arrow-right-up-bold" :size="12" /> DASHBOARD</button>
         </div>
       </div>
 
@@ -176,22 +176,22 @@
         <div class="section-header">TOOLS</div>
         <div class="tools-list">
           <button class="ql-item" @click="wm.open('terminal')" aria-label="OPEN TERMINAL">[&gt;] TERMINAL (cybsh)</button>
-          <button class="ql-item" @click="wm.open('processes')" aria-label="OPEN TASKS">[%] TASKS (ps/top)</button>
-          <button class="ql-item" @click="wm.open('disks')" aria-label="OPEN DISKS">[=] DISKS &amp; VOLUME</button>
-          <button class="ql-item" @click="wm.open('favorites')" aria-label="OPEN FAVORITES">[*] FAVORITES ({{ store.starredFiles.length }})</button>
-          <button class="ql-item" @click="wm.open('recent')" aria-label="OPEN RECENT FILES">[T] RECENT FILES</button>
-          <button class="ql-item" @click="wm.open('activity'); store.fetchAuditLog()" aria-label="OPEN ACTIVITY LOG">[~] ACTIVITY LOG</button>
-          <button class="ql-item" @click="wm.open('storage')" aria-label="OPEN STORAGE DASHBOARD">[$] STORAGE</button>
-          <button class="ql-item" @click="wm.open('settings')" aria-label="OPEN SETTINGS">[@] SETTINGS</button>
-          <button class="ql-item" @click="wm.open('trash'); store.fetchTrashItems()" aria-label="OPEN TRASH">[%] TRASH</button>
+          <button class="ql-item" @click="wm.open('processes')" aria-label="OPEN TASKS"><AppIcon name="solar:cpu-bold" :size="12" /> TASKS (ps/top)</button>
+          <button class="ql-item" @click="wm.open('disks')" aria-label="OPEN DISKS"><AppIcon name="solar:ssd-square-bold" :size="12" /> DISKS &amp; VOLUME</button>
+          <button class="ql-item" @click="wm.open('favorites')" aria-label="OPEN FAVORITES"><AppIcon name="solar:star-bold" :size="12" /> FAVORITES ({{ store.starredFiles.length }})</button>
+          <button class="ql-item" @click="wm.open('recent')" aria-label="OPEN RECENT FILES"><AppIcon name="solar:history-bold" :size="12" /> RECENT FILES</button>
+          <button class="ql-item" @click="wm.open('activity'); store.fetchAuditLog()" aria-label="OPEN ACTIVITY LOG"><AppIcon name="solar:pulse-bold" :size="12" /> ACTIVITY LOG</button>
+          <button class="ql-item" @click="wm.open('storage')" aria-label="OPEN STORAGE DASHBOARD"><AppIcon name="solar:database-bold" :size="12" /> STORAGE</button>
+          <button class="ql-item" @click="wm.open('settings')" aria-label="OPEN SETTINGS"><AppIcon name="solar:settings-bold" :size="12" /> SETTINGS</button>
+          <button class="ql-item" @click="wm.open('trash'); store.fetchTrashItems()" aria-label="OPEN TRASH"><AppIcon name="solar:trash-bin-trash-bold" :size="12" /> TRASH</button>
         </div>
       </div>
     </div>
 
     <div v-if="!store.sidebarCollapsed" class="sidebar-bottom">
-      <button class="qa-btn" @click="store.fetchGeoFiles(); wm.open('map')" aria-label="OPEN MAP VIEW">[MAP]</button>
-      <button class="qa-btn" @click="store.fetchCollections(); store.sidebarSection = 'collections'" aria-label="OPEN COLLECTIONS">[COL]</button>
-      <button class="qa-btn" @click="store.detectFaces(store.selectedFileId || '')" aria-label="DETECT FACES">[FACE]</button>
+      <button class="qa-btn" @click="store.fetchGeoFiles(); wm.open('map')" aria-label="OPEN MAP VIEW" title="MAP"><AppIcon name="solar:map-bold" :size="16" /></button>
+      <button class="qa-btn" @click="store.fetchCollections(); store.sidebarSection = 'collections'" aria-label="OPEN COLLECTIONS" title="COLLECTIONS"><AppIcon name="solar:library-bold" :size="16" /></button>
+      <button class="qa-btn" @click="store.detectFaces(store.selectedFileId || '')" aria-label="DETECT FACES" title="DETECT FACES"><AppIcon name="solar:face-scan-circle-bold" :size="16" /></button>
     </div>
 
     <button class="collapse-btn" @click="store.sidebarCollapsed = !store.sidebarCollapsed" :aria-label="store.sidebarCollapsed ? 'EXPAND SIDEBAR' : 'COLLAPSE SIDEBAR'">
@@ -203,6 +203,7 @@
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { ref, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { useWindowManager } from '@/composables/useWindowManager'
@@ -232,19 +233,19 @@ const allTags = computed<string[]>(() => {
 const sectionTabs = computed(() => {
   const tabs: { id: string; label: string; icon: string }[] = []
   if (isWebMode()) {
-    tabs.push({ id: 'landing', label: 'HOME', icon: '[~]' })
+    tabs.push({ id: 'landing', label: 'HOME', icon: 'solar:house-bold' })
   }
   tabs.push(
-    { id: 'tree', label: 'TREE', icon: '[#]' },
-    { id: 'locations', label: 'LOCS', icon: '[@]' },
-    { id: 'collections', label: 'COLS', icon: '[*]' },
-    { id: 'people', label: 'PEOPLE', icon: '[+]' },
-    { id: 'styles', label: 'TAGS', icon: '[&]' },
-    { id: 'loose', label: 'LOOSE', icon: '[%]' },
-    { id: 'sync', label: 'SYNC', icon: '[~]' },
-    { id: 'users', label: 'USERS', icon: '[!]' },
-    { id: 'dashboard', label: 'REMOTE', icon: '[@]' },
-    { id: 'tools', label: 'TOOLS', icon: '[@]' },
+    { id: 'tree', label: 'TREE', icon: 'solar:folder-tree-bold' },
+    { id: 'locations', label: 'LOCS', icon: 'solar:map-point-bold' },
+    { id: 'collections', label: 'COLS', icon: 'solar:library-bold' },
+    { id: 'people', label: 'PEOPLE', icon: 'solar:face-scan-circle-bold' },
+    { id: 'styles', label: 'TAGS', icon: 'solar:tag-bold' },
+    { id: 'loose', label: 'LOOSE', icon: 'solar:users-group-two-rounded-bold' },
+    { id: 'sync', label: 'SYNC', icon: 'solar:refresh-bold' },
+    { id: 'users', label: 'USERS', icon: 'solar:users-group-rounded-bold' },
+    { id: 'dashboard', label: 'REMOTE', icon: 'solar:globe-bold' },
+    { id: 'tools', label: 'TOOLS', icon: 'solar:toolbox-bold' },
   )
   return tabs
 })

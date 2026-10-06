@@ -2,18 +2,18 @@
   <div class="face-panel">
     <div class="panel-header">
       <div class="header-left">
-        <span class="icon-face">[+]</span>
+        <span class="icon-face"><AppIcon name="solar:face-scan-circle-bold" /></span>
         <h2 class="panel-title">FACE GROUPING</h2>
       </div>
     </div>
 
     <div class="section">
-      <h3 class="section-title">[SCAN] DETECT FACES</h3>
-      <button class="bw-btn" style="width:100%;" @click="handleBatchDetect">[BATCH DETECT]</button>
+      <h3 class="section-title"><AppIcon name="solar:face-scan-circle-bold" :size="13" /> DETECT FACES</h3>
+      <button class="bw-btn" style="width:100%;" @click="handleBatchDetect"><AppIcon name="solar:face-scan-circle-bold" :size="13" /> BATCH DETECT</button>
     </div>
 
     <div class="section" v-if="lastResult">
-      <h3 class="section-title">[STATS] LAST SCAN</h3>
+      <h3 class="section-title"><AppIcon name="solar:chart-bold" :size="13" /> LAST SCAN</h3>
       <div class="stats-card">
         <div class="stat-row"><span class="stat-key text-muted">CLUSTERS</span><span class="stat-value">{{ lastResult.clustersCreated }}</span></div>
         <div class="stat-row"><span class="stat-key text-muted">FACES</span><span class="stat-value">{{ lastResult.totalFaces }}</span></div>
@@ -23,7 +23,7 @@
     </div>
 
     <div class="section">
-      <h3 class="section-title">[GROUP] PEOPLE ({{ faceGroups.length }})</h3>
+      <h3 class="section-title"><AppIcon name="solar:users-group-two-rounded-bold" :size="13" /> PEOPLE ({{ faceGroups.length }})</h3>
       <div class="group-list">
         <div v-for="group in faceGroups" :key="group.id" class="group-card">
           <div class="group-header">
@@ -40,6 +40,7 @@
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { ref, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
 

@@ -196,6 +196,8 @@ fn open_all_tables(db: &RedbDatabase) -> Result<(), String> {
             .map_err(|e| e.to_string())?;
         txn.open_table(DbDefs::get_shell_history_table())
             .map_err(|e| e.to_string())?;
+        txn.open_table(DbDefs::get_kv_table())
+            .map_err(|e| e.to_string())?;
     }
     txn.commit().map_err(|e| e.to_string())?;
     Ok(())
@@ -344,6 +346,24 @@ fn opt_arg(args: &serde_json::Value, name: &str) -> Option<String> {
             None
         }
     })
+}
+
+/// One kv entry: ≤ 64 MiB (fits a photo, stays far below wasm OOM),
+/// namespace-per-key (`secret:`, `config:`, `content:<id>`, `volume:<path>`).
+const MAX_KV_BYTES: usize = 64 * 1024 * 1024;
+
+fn kv_key(args: &serde_json::Value) -> Result<String, String> {
+    let key = arg(args, "key")?.trim().to_string();
+    if key.is_empty() {
+        return Err("invalid: key is required".to_string());
+    }
+    if key.len() > 512 {
+        return Err("invalid: key must be at most 512 characters".to_string());
+    }
+    if key.chars().any(|c| c.is_control()) {
+        return Err("invalid: key must not contain control characters".to_string());
+    }
+    Ok(key)
 }
 
 // ─── validation (mirrors crates/web/src/security.rs bounds) ──────────
@@ -777,6 +797,50 @@ pub fn db_dispatch(op: &str, args_json: &str) -> String {
                 "disks": attached,
             }))
         }
+        // ── kv (secrets, config, file content, volume mirror) ──
+        "kv.get" => {
+            let key = kv_key(&args)?;
+            match read_one(DbDefs::get_kv_table(), &key)? {
+                Some(value) => Ok(serde_json::json!({
+                    "key": key,
+                    "value": value,
+                    "bytes": value.len(),
+                })),
+                None => Ok(serde_json::Value::Null),
+            }
+        }
+        "kv.set" => {
+            let key = kv_key(&args)?;
+            let value = args
+                .get("value")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "invalid: missing string argument 'value'".to_string())?;
+            if value.len() > MAX_KV_BYTES {
+                return Err(format!(
+                    "invalid: value is {} bytes (limit {MAX_KV_BYTES})",
+                    value.len()
+                ));
+            }
+            write_one(DbDefs::get_kv_table(), &key, value)?;
+            Ok(serde_json::json!({ "key": key, "bytes": value.len() }))
+        }
+        "kv.delete" => Ok(serde_json::Value::Bool(delete_one(
+            DbDefs::get_kv_table(),
+            &kv_key(&args)?,
+        )?)),
+        // Keys + sizes only — fetching a secret list must not stream every
+        // secret body through the worker bridge; use `kv.get` for values.
+        "kv.list" => {
+            let prefix = opt_arg(&args, "prefix").unwrap_or_default();
+            let mut out = Vec::new();
+            for (k, v) in read_all(DbDefs::get_kv_table())? {
+                if k.starts_with(&prefix) {
+                    out.push(serde_json::json!({ "key": k, "bytes": v.len() }));
+                }
+            }
+            Ok(serde_json::Value::Array(out))
+        }
+
         // ── files (metadata only in the demo) ──
         "files.list" => Ok(serde_json::Value::Array(
             read_all(DbDefs::get_files_table())?
@@ -818,6 +882,103 @@ pub fn db_dispatch(op: &str, args_json: &str) -> String {
                 "createdAt": now,
                 "modifiedAt": now,
             });
+            write_one(DbDefs::get_files_table(), &id, &node.to_string())?;
+            Ok(node)
+        }
+        "files.create" => {
+            let name = arg(&args, "name")?.trim().to_string();
+            if name.is_empty() {
+                return Err("invalid: file name is required".to_string());
+            }
+            let content = opt_arg(&args, "content");
+            let content_bytes = content.as_deref().map(str::len).unwrap_or(0);
+            if content_bytes > MAX_KV_BYTES {
+                return Err(format!(
+                    "invalid: content is {content_bytes} bytes (limit {MAX_KV_BYTES})"
+                ));
+            }
+            let id = new_id();
+            let declared = args
+                .get("sizeBytes")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0)
+                .min(u64::from(u32::MAX)) as usize;
+            let size_bytes = content_bytes.max(declared);
+            let node = serde_json::json!({
+                "id": id,
+                "name": name,
+                "fileType": opt_arg(&args, "fileType").unwrap_or_else(|| "file".to_string()),
+                "parentId": opt_arg(&args, "parentId").map(serde_json::Value::String).unwrap_or(serde_json::Value::Null),
+                "sizeBytes": size_bytes,
+                "mimeType": opt_arg(&args, "mimeType").map(serde_json::Value::String).unwrap_or(serde_json::Value::Null),
+                "hashBlake3": opt_arg(&args, "hashBlake3").map(serde_json::Value::String).unwrap_or(serde_json::Value::Null),
+                "encrypted": args.get("encrypted").and_then(|v| v.as_bool()).unwrap_or(false),
+                "encryptionAlgorithm": opt_arg(&args, "encryptionAlgorithm").map(serde_json::Value::String).unwrap_or(serde_json::Value::Null),
+                "compressionLayers": args.get("compressionLayers").cloned().unwrap_or_else(|| serde_json::json!([])),
+                "thumbnailPath": serde_json::Value::Null,
+                "contextData": args.get("contextData").cloned().unwrap_or(serde_json::Value::Null),
+                "tags": args.get("tags").cloned().unwrap_or_else(|| serde_json::json!([])),
+                "collectionIds": serde_json::json!([]),
+                "faceGroupIds": serde_json::json!([]),
+                "looseGroupIds": serde_json::json!([]),
+                "gpsLat": args.get("gpsLat").cloned().unwrap_or(serde_json::Value::Null),
+                "gpsLon": args.get("gpsLon").cloned().unwrap_or(serde_json::Value::Null),
+                "createdAt": now,
+                "modifiedAt": now,
+            });
+            write_one(DbDefs::get_files_table(), &id, &node.to_string())?;
+            if let Some(body) = content {
+                write_one(DbDefs::get_kv_table(), &format!("content:{id}"), &body)?;
+            }
+            Ok(node)
+        }
+        "files.patch" => {
+            let id = arg(&args, "fileId")?.to_string();
+            let raw = read_one(DbDefs::get_files_table(), &id)?
+                .ok_or_else(|| format!("not_found: file {id}"))?;
+            let mut node: serde_json::Value =
+                serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+            let patch = args
+                .get("patch")
+                .and_then(|v| v.as_object())
+                .ok_or_else(|| "invalid: missing 'patch' object".to_string())?;
+            // Whitelist: identity, size, encryption and tagging travel — ids,
+            // timestamps and type never do.
+            const PATCHABLE: [&str; 15] = [
+                "name",
+                "parentId",
+                "sizeBytes",
+                "mimeType",
+                "hashBlake3",
+                "encrypted",
+                "encryptionAlgorithm",
+                "compressionLayers",
+                "tags",
+                "contextData",
+                "thumbnailPath",
+                "collectionIds",
+                "gpsLat",
+                "gpsLon",
+                "fileType",
+            ];
+            let mut applied = 0usize;
+            for (k, v) in patch {
+                if PATCHABLE.contains(&k.as_str()) {
+                    node[k.as_str()] = v.clone();
+                    applied += 1;
+                }
+            }
+            if applied == 0 {
+                return Err("invalid: patch contains no supported fields".to_string());
+            }
+            if let Some(name) = node.get("name").and_then(|v| v.as_str()) {
+                let name = name.trim();
+                if name.is_empty() {
+                    return Err("invalid: file name must not be empty".to_string());
+                }
+                node["name"] = serde_json::Value::String(name.to_string());
+            }
+            node["modifiedAt"] = serde_json::Value::String(now.to_string());
             write_one(DbDefs::get_files_table(), &id, &node.to_string())?;
             Ok(node)
         }

@@ -2,7 +2,7 @@
   <div class="sync-panel">
     <div class="panel-header">
       <div class="header-left">
-        <span class="icon-sync">[~]</span>
+        <span class="icon-sync"><AppIcon name="solar:refresh-bold" /></span>
         <h2 class="panel-title">STORAGE SYNC</h2>
       </div>
       <button class="bw-btn small" @click="showWizard = !showWizard">{{ showWizard ? 'CLOSE' : '+ CONFIG' }}</button>
@@ -10,7 +10,7 @@
 
     <!-- Config wizard -->
     <div v-if="showWizard" class="section wizard">
-      <h3 class="section-title">[NEW] PROVIDER CONFIG</h3>
+      <h3 class="section-title"><AppIcon name="solar:add-bold" :size="13" /> PROVIDER CONFIG</h3>
       <label class="w-label">BACKEND
         <select v-model="form.backendType" class="bw-input">
           <option v-for="(info, key) in SYNC_BACKEND_INFO" :key="key" :value="key">{{ info.name }}</option>
@@ -55,7 +55,7 @@
     </div>
 
     <div class="section">
-      <h3 class="section-title">[CFG] SYNC CONFIGS ({{ syncConfigs.length }})</h3>
+      <h3 class="section-title"><AppIcon name="solar:settings-minimalistic-bold" :size="13" /> SYNC CONFIGS ({{ syncConfigs.length }})</h3>
       <div class="config-list">
         <div v-for="cfg in syncConfigs" :key="cfg.id" class="config-card">
           <div class="cfg-header">
@@ -82,7 +82,7 @@
     </div>
 
     <div class="section">
-      <h3 class="section-title">[RUN] START / MONITOR</h3>
+      <h3 class="section-title"><AppIcon name="solar:play-bold" :size="13" /> START / MONITOR</h3>
       <div class="w-row">
         <select v-model="runConfigId" class="bw-input">
           <option value="">SELECT CONFIG</option>
@@ -96,7 +96,7 @@
     </div>
 
     <div class="section" v-if="syncProgress">
-      <h3 class="section-title">[PROG] SYNC PROGRESS</h3>
+      <h3 class="section-title"><AppIcon name="solar:speedometer-max-bold" :size="13" /> SYNC PROGRESS</h3>
       <div class="progress-card">
         <div class="p-row"><span class="p-key text-muted">STATUS</span><span class="p-value">{{ syncProgress.status }}</span></div>
         <div class="p-row"><span class="p-key text-muted">FILES</span><span class="p-value">{{ syncProgress.processedFiles }}/{{ syncProgress.totalFiles }}</span></div>
@@ -108,7 +108,7 @@
     </div>
 
     <div v-if="syncRuns.length" class="section">
-      <h3 class="section-title">[HIST] LAST RUNS ({{ syncRuns.length }})</h3>
+      <h3 class="section-title"><AppIcon name="solar:history-bold" :size="13" /> LAST RUNS ({{ syncRuns.length }})</h3>
       <div v-for="r in syncRuns.slice(0, 5)" :key="r.runId" class="run-card">
         <span class="text-muted">{{ r.runId.slice(0, 18) }}</span>
         <span>{{ r.status }}</span>
@@ -117,7 +117,7 @@
     </div>
 
     <div class="section">
-      <h3 class="section-title">[RESTORE] DOWNLOAD / DELETE REMOTE</h3>
+      <h3 class="section-title"><AppIcon name="solar:undo-left-round-bold" :size="13" /> DOWNLOAD / DELETE REMOTE</h3>
       <div class="w-row">
         <input v-model="restoreFileId" class="bw-input" placeholder="FILE ID (optional if path given)" />
       </div>
@@ -139,6 +139,7 @@
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { computed, reactive, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { SYNC_BACKEND_INFO, describeSyncError, isOauthCapable } from '@/types'

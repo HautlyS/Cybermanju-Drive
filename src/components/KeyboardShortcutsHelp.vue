@@ -8,7 +8,7 @@
       <div class="ks-help-modal" role="dialog" aria-label="Keyboard shortcuts">
         <div class="ks-help-header">
           <h2>KEYBOARD SHORTCUTS</h2>
-          <button class="close-btn" @click="store.showShortcutsHelp = false">X</button>
+          <button class="close-btn" @click="store.showShortcutsHelp = false" aria-label="CLOSE"><AppIcon name="solar:close-bold" :size="13" /></button>
         </div>
         <div class="ks-help-body">
           <div v-for="group in groupedShortcuts" :key="group.label" class="ks-group">
@@ -25,6 +25,7 @@
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { computed, inject } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { ShortcutsKey } from '@/composables/shortcutsKey'

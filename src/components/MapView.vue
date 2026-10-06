@@ -2,13 +2,13 @@
   <div class="map-view">
     <div class="panel-header">
       <div class="header-left">
-        <span class="icon-map">[@]</span>
+        <span class="icon-map"><AppIcon name="solar:map-point-bold" /></span>
         <h2 class="panel-title">GEOGRAPHY VIEW</h2>
       </div>
       <div class="header-actions">
-        <button class="refresh-btn" @click="toggleFullscreen" title="FULLSCREEN (F)">[F]</button>
+        <button class="refresh-btn" @click="toggleFullscreen" title="FULLSCREEN (F)" aria-label="FULLSCREEN"><AppIcon name="solar:maximize-bold" :size="13" /></button>
         <button class="refresh-btn" :class="{ active: mapStyle === 'satellite' }" @click="toggleMapStyle" title="TOGGLE MAP STYLE">[{{ mapStyle === 'satellite' ? 'SAT' : 'OSM' }}]</button>
-        <button class="refresh-btn" @click="handleRefresh" title="REFRESH">[R]</button>
+        <button class="refresh-btn" @click="handleRefresh" title="REFRESH" aria-label="REFRESH MAP"><AppIcon name="solar:refresh-bold" :size="13" /></button>
       </div>
     </div>
 
@@ -20,7 +20,7 @@
         @keyup.enter="handleLocationSearch"
         aria-label="SEARCH LOCATION"
       />
-      <button class="refresh-btn" @click="handleLocationSearch" title="SEARCH">[G]</button>
+      <button class="refresh-btn" @click="handleLocationSearch" title="SEARCH LOCATION" aria-label="SEARCH LOCATION"><AppIcon name="solar:target-bold" :size="13" /></button>
     </div>
 
     <div class="map-container" v-if="geoMarkers.length > 0">
@@ -40,10 +40,10 @@
     </div>
 
     <div class="section" v-if="geoMarkers.length > 0">
-      <h3 class="section-title">[LIST] GEOTAGGED FILES ({{ geoMarkers.length }})</h3>
+      <h3 class="section-title"><AppIcon name="solar:list-bold" :size="13" /> GEOTAGGED FILES ({{ geoMarkers.length }})</h3>
       <div class="geo-list">
         <div v-for="marker in geoMarkers" :key="'list-' + marker.fileId" class="geo-list-item" @click="flyToMarker(marker)">
-          <span class="geo-list-pin">[@]</span>
+          <span class="geo-list-pin"><AppIcon name="solar:map-point-bold" :size="14" /></span>
           <div class="geo-list-info">
             <span class="geo-list-name">{{ marker.fileName }}</span>
             <span class="geo-list-address text-muted" v-if="marker.address">{{ marker.address }}</span>
@@ -60,9 +60,15 @@
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useAppStore } from '@/stores/app'
 import type { GeoMarker } from '@/types'
+// maplibre-gl v6 is ESM-only and loads its worker from a file next to the
+// bundled module, which Vite does not emit. Bundle the worker ourselves and
+// point maplibre at it (must happen before the first Map is constructed).
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url'
+import 'maplibre-gl/dist/maplibre-gl.css'
 
 const store = useAppStore()
 const emit = defineEmits<{ close: [] }>()
@@ -98,6 +104,7 @@ async function initMap() {
   if (!mapContainer.value || map) return
   try {
     maplibreglModule = await import('maplibre-gl')
+    maplibreglModule.setWorkerUrl(maplibreWorkerUrl)
     const center = getMapCenter()
     map = new maplibreglModule.Map({
       container: mapContainer.value,

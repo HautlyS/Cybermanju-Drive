@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 // Cybermanju Drive — disk / volume manager (AGENT-8, item 9)
 //
 // One merged `df` bar over every `.cybermanju` disk, per-provider cards with
@@ -81,7 +82,7 @@ onMounted(refresh)
   <div class="disk-panel">
     <div class="panel-header">
       <div class="header-left">
-        <span class="icon-disks">[=]</span>
+        <span class="icon-disks"><AppIcon name="solar:ssd-square-bold" /></span>
         <h2 class="panel-title">DISKS &amp; VOLUME</h2>
         <span class="text-muted">{{ df ? `${df.diskCount} DISKS` : '…' }}</span>
       </div>
@@ -91,7 +92,7 @@ onMounted(refresh)
     </div>
 
     <div class="section">
-      <h3 class="section-title">[DF] MERGED VOLUME</h3>
+      <h3 class="section-title"><AppIcon name="solar:layers-bold" :size="13" /> MERGED VOLUME</h3>
       <div class="df-bar" role="img" :aria-label="`Volume ${usedPct.toFixed(1)} percent used`">
         <div class="df-used" :style="{ width: `${usedPct}%` }"></div>
       </div>
@@ -105,7 +106,7 @@ onMounted(refresh)
     </div>
 
     <div class="section">
-      <h3 class="section-title">[NEW] CREATE DISK</h3>
+      <h3 class="section-title"><AppIcon name="solar:add-bold" :size="13" /> CREATE DISK</h3>
       <div class="create-row">
         <label class="field">
           <span class="text-muted">PROVIDER</span>
@@ -140,7 +141,7 @@ onMounted(refresh)
     </div>
 
     <div class="section">
-      <h3 class="section-title">[CARDS] PER-PROVIDER DISKS ({{ store.disks.length }})</h3>
+      <h3 class="section-title"><AppIcon name="solar:ssd-square-bold" :size="13" /> PER-PROVIDER DISKS ({{ store.disks.length }})</h3>
 
       <div v-if="store.disks.length" class="cards">
         <article v-for="disk in store.disks" :key="disk.id" class="card">

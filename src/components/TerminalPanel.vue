@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 // Cybermanju Drive — cybsh terminal (AGENT-8)
 //
 // Transport-agnostic: everything goes through the store, which calls
@@ -224,7 +225,7 @@ onMounted(async () => {
   <div class="terminal-panel" @click="focusInput">
     <div class="panel-header">
       <div class="header-left">
-        <span class="icon-terminal">[>]</span>
+        <span class="icon-terminal"><AppIcon name="solar:file-terminal-bold" /></span>
         <h2 class="panel-title">CYBSH</h2>
         <span class="job-badge" :class="{ on: running }">{{ running ? 'BUSY' : 'IDLE' }}</span>
       </div>

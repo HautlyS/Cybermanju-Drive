@@ -99,10 +99,35 @@ export async function wasmOsDispatch(cmd: string, args: Record<string, unknown> 
   if (!mod) throw new Error('wasm backend unavailable')
   const payload = JSON.stringify({ args: argsToArgList(cmd, args) })
   const raw = mod.os_dispatch(cmd, payload)
+  fireOsDispatchHooks()
   try {
     return JSON.parse(raw)
   } catch {
     return raw
+  }
+}
+
+// Hooks let other composables react to *any* volume mutation without the
+// terminal (or `exec`'s internal write/touch/rm) knowing they exist — the
+// volume mirror is the only subscriber today.
+type OsDispatchHook = () => void
+const osDispatchHooks: OsDispatchHook[] = []
+
+export function addOsDispatchHook(fn: OsDispatchHook): () => void {
+  osDispatchHooks.push(fn)
+  return () => {
+    const i = osDispatchHooks.indexOf(fn)
+    if (i >= 0) osDispatchHooks.splice(i, 1)
+  }
+}
+
+function fireOsDispatchHooks() {
+  for (const fn of [...osDispatchHooks]) {
+    try {
+      fn()
+    } catch {
+      // A hook must never turn a successful command into a failure.
+    }
   }
 }
 
@@ -207,7 +232,15 @@ function dbRejectAll(err: Error) {
 let mainDbOpen: Promise<unknown> | null = null
 
 async function mainThreadDbDispatch(op: string, args: Record<string, unknown>): Promise<unknown> {
-  if (op === '_status') return { backend: 'memory', file: 'cybermanju.db' }
+  if (op === '_status') return { backend: 'memory', file: 'cybermanju.db', disk: { attached: false } }
+  if (op === '_detach') return { attached: false, name: '', savedAt: 0, savedBytes: 0, dirty: false }
+  if (op === '_attach' || op === '_save' || op === '_export') {
+    // `db_snapshot`/`db_restore` need the OPFS-backed database, which only
+    // exists inside the worker — say so instead of half-working.
+    throw new Error(
+      'the .cybermanju file needs the database worker (OPFS is worker-only in this browser)',
+    )
+  }
   const mod = await loadWasm()
   if (!mod || typeof (mod as unknown as { db_dispatch?: unknown }).db_dispatch !== 'function') {
     throw new Error('wasm database unavailable')
@@ -285,4 +318,96 @@ export async function wasmDbDispatch(
 
   // Main-thread fallback: same module, in-memory database.
   return mainThreadDbDispatch(op, args)
+}
+
+// ── `.cybermanju` file (File System Access API) ───────────────────────────
+// The picked `FileSystemFileHandle` is structured-cloneable, so it is posted
+// to the worker once and every save writes back to *that* file. redb keeps
+// running on OPFS (the only synchronous browser primitive); the user's file
+// is the durable, encrypted, shareable copy.
+
+export interface WasmDiskStatus {
+  attached: boolean
+  name: string
+  savedAt: number
+  savedBytes: number
+  dirty: boolean
+  lastError?: string | null
+  backend?: string
+  file?: string
+}
+
+export interface AttachDiskRequest {
+  /** `null` = import without a bound file (session-only, save via EXPORT). */
+  handle: FileSystemFileHandle | null
+  name: string
+  /** Raw container bytes (already read by the caller); null for a new file. */
+  bytes: Uint8Array | null
+  passphrase: string
+}
+
+export async function wasmDiskStatus(): Promise<WasmDiskStatus> {
+  const raw = (await wasmDbDispatch('_status', {}, 60000)) as Partial<WasmDiskStatus> | null
+  return {
+    attached: !!raw?.attached,
+    name: String(raw?.name ?? ''),
+    savedAt: Number(raw?.savedAt ?? 0),
+    savedBytes: Number(raw?.savedBytes ?? 0),
+    dirty: !!raw?.dirty,
+    lastError: raw?.lastError ?? null,
+    backend: raw?.backend,
+    file: raw?.file,
+  }
+}
+
+export async function wasmAttachDisk(req: AttachDiskRequest): Promise<WasmDiskStatus> {
+  const raw = (await wasmDbDispatch(
+    '_attach',
+    { handle: req.handle, name: req.name, bytes: req.bytes, passphrase: req.passphrase },
+    60000,
+  )) as Partial<WasmDiskStatus> | null
+  return {
+    attached: !!raw?.attached,
+    name: String(raw?.name ?? req.name),
+    savedAt: Number(raw?.savedAt ?? 0),
+    savedBytes: Number(raw?.savedBytes ?? 0),
+    dirty: !!raw?.dirty,
+    lastError: raw?.lastError ?? null,
+  }
+}
+
+export async function wasmSaveDisk(): Promise<WasmDiskStatus> {
+  const raw = (await wasmDbDispatch('_save', {}, 120000)) as Partial<WasmDiskStatus> | null
+  return {
+    attached: !!raw?.attached,
+    name: String(raw?.name ?? ''),
+    savedAt: Number(raw?.savedAt ?? 0),
+    savedBytes: Number(raw?.savedBytes ?? 0),
+    dirty: !!raw?.dirty,
+    lastError: raw?.lastError ?? null,
+  }
+}
+
+export async function wasmExportDisk(
+  passphrase?: string,
+): Promise<{ bytes: Uint8Array; name: string }> {
+  const raw = (await wasmDbDispatch('_export', { passphrase: passphrase ?? '' }, 120000)) as {
+    bytes: Uint8Array
+    name?: string
+  } | null
+  return {
+    bytes: raw?.bytes ?? new Uint8Array(),
+    name: String(raw?.name ?? 'cybermanju.cybermanju'),
+  }
+}
+
+export async function wasmDetachDisk(): Promise<WasmDiskStatus> {
+  const raw = (await wasmDbDispatch('_detach', {})) as Partial<WasmDiskStatus> | null
+  return {
+    attached: !!raw?.attached,
+    name: String(raw?.name ?? ''),
+    savedAt: Number(raw?.savedAt ?? 0),
+    savedBytes: Number(raw?.savedBytes ?? 0),
+    dirty: !!raw?.dirty,
+  }
 }

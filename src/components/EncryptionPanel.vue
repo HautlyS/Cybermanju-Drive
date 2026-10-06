@@ -2,10 +2,10 @@
   <div class="encryption-panel">
     <div class="panel-header">
       <div class="header-left">
-        <span class="icon-shield">[##]</span>
+        <span class="icon-shield"><AppIcon name="solar:shield-check-bold" /></span>
         <h2 class="panel-title">QUANTUM SHIELD</h2>
       </div>
-      <button class="close-btn" @click="$emit('close')">X</button>
+      <button class="close-btn" @click="$emit('close')" aria-label="CLOSE"><AppIcon name="solar:close-bold" :size="13" /></button>
     </div>
 
     <div class="status-card" :class="{ protected: encryptionStatus?.isEncrypted }">
@@ -51,7 +51,7 @@
     </div>
 
     <div class="section">
-      <h3 class="section-title">[KEY] GENERATE KEYPAIR</h3>
+      <h3 class="section-title"><AppIcon name="solar:key-bold" :size="13" /> GENERATE KEYPAIR</h3>
       <div class="algo-buttons">
         <button v-for="(info, algo) in ENCRYPTION_INFO" :key="algo" class="algo-btn" :disabled="webLocked" :title="webLocked ? 'Desktop app only' : 'Generate ' + info.name" @click="handleGenerate(algo as EncryptionAlgo)">
           <div class="algo-top">
@@ -64,7 +64,7 @@
     </div>
 
     <div class="section" v-if="encryptionKeys.length > 0">
-      <h3 class="section-title">[KEY] ACTIVE KEYS ({{ encryptionKeys.length }})</h3>
+      <h3 class="section-title"><AppIcon name="solar:key-bold" :size="13" /> ACTIVE KEYS ({{ encryptionKeys.length }})</h3>
       <div class="keys-list">
         <div v-for="key in encryptionKeys" :key="key.id" class="key-card">
           <div class="key-header">
@@ -78,19 +78,20 @@
     </div>
 
     <div class="section" v-if="selectedFile">
-      <h3 class="section-title">[LOCK] ENCRYPT SELECTED FILE</h3>
+      <h3 class="section-title"><AppIcon name="solar:lock-bold" :size="13" /> ENCRYPT SELECTED FILE</h3>
       <p class="selected-file-name">{{ selectedFile.name }}</p>
       <div class="encrypt-actions">
         <select v-model="selectedAlgo" class="encrypt-select">
           <option v-for="(info, algo) in ENCRYPTION_INFO" :key="algo" :value="algo">{{ info.name }} (L{{ info.nistLevel }})</option>
         </select>
-        <button class="encrypt-btn" :disabled="webLocked" :title="webLocked ? 'Desktop app only' : 'Encrypt file'" @click="handleEncrypt">[ENC]</button>
+        <button class="encrypt-btn" :disabled="webLocked" :title="webLocked ? 'Desktop app only' : 'Encrypt file'" @click="handleEncrypt"><AppIcon name="solar:lock-bold" :size="14" /></button>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { ref, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { isWebMode } from '@/composables/useTauri'

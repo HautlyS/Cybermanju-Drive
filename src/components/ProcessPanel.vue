@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 // Cybermanju Drive — process table (AGENT-8, item 10)
 //
 // Fed by `GET /api/os/ps` and `GET /api/os/top`; every control goes through
@@ -65,7 +66,7 @@ onBeforeUnmount(() => {
   <div class="process-panel">
     <div class="panel-header">
       <div class="header-left">
-        <span class="icon-processes">[%]</span>
+        <span class="icon-processes"><AppIcon name="solar:cpu-bold" /></span>
         <h2 class="panel-title">TASKS</h2>
         <span class="text-muted">{{ counts ? `${counts.running} RUNNING / ${counts.total} TOTAL` : '…' }}</span>
       </div>
@@ -102,7 +103,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="section">
-      <h3 class="section-title">[PS] PROCESS TABLE</h3>
+      <h3 class="section-title"><AppIcon name="solar:cpu-bold" :size="13" /> PROCESS TABLE</h3>
       <table v-if="tasks.length" class="task-table">
         <thead>
           <tr>
@@ -147,7 +148,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="section">
-      <h3 class="section-title">[FANOUT] COMPUTE JOBS</h3>
+      <h3 class="section-title"><AppIcon name="solar:server-square-bold" :size="13" /> COMPUTE JOBS</h3>
       <div class="jobs">
         <div v-for="job in store.osJobs" :key="job.name" class="job">
           <div class="job-info">

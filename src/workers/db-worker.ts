@@ -12,6 +12,7 @@
 // everywhere, so no Atomics/spinlock ferry is needed (those only exist for
 // callers that insist on *synchronous* calls from the main thread).
 import init, { db_dispatch, db_open, db_restore, db_snapshot } from 'cybermanju-drive-wasm'
+import { decodeContainer, encodeContainer } from '../utils/container'
 
 interface DbRequest {
   id: number
@@ -22,10 +23,40 @@ interface DbRequest {
 const DB_FILE = 'cybermanju.db'
 const BACKUP_FILE = 'cybermanju.backup.db'
 const SNAPSHOT_MS = 5 * 60 * 1000
+const AUTOSAVE_MS = 2000
 
 let opened: Promise<{ backend: string }> | null = null
 let dirty = false
 let snapshotTimer = 0
+
+// ── the user's `.cybermanju` file (File System Access API handle) ─────────
+// The handle is structured-cloneable, so the main thread posts it here once
+// and every save writes the encoded container back to *that* file. redb keeps
+// living in OPFS (sync handle); the picked file is the durable, shareable
+// copy the user actually sees on their disk.
+interface DiskState {
+  handle: { createWritable(): Promise<{ write(data: Uint8Array): Promise<void>; close(): Promise<void> }> }
+  name: string
+  passphrase: string
+  savedAt: number
+  savedBytes: number
+  lastError: string | null
+}
+
+let disk: DiskState | null = null
+let saveTimer = 0
+let saving = false
+
+function diskStatus() {
+  return {
+    attached: !!disk,
+    name: disk?.name ?? '',
+    savedAt: disk?.savedAt ?? 0,
+    savedBytes: disk?.savedBytes ?? 0,
+    dirty,
+    lastError: disk?.lastError ?? null,
+  }
+}
 
 // Read-only ops never dirty the database.
 function isReadOnly(op: string): boolean {
@@ -128,6 +159,48 @@ function ensureOpen(): Promise<{ backend: string }> {
   return opened
 }
 
+/** Encode the live redb image and write it to the user's `.cybermanju` file. */
+async function flushToDisk(): Promise<{ bytes: number; name: string }> {
+  if (!disk) throw new Error('no .cybermanju file attached')
+  const image = db_snapshot() as unknown as Uint8Array
+  const payload = await encodeContainer(image, disk.passphrase)
+  const writable = await disk.handle.createWritable()
+  await writable.write(payload)
+  await writable.close()
+  dirty = false
+  disk.savedAt = Date.now()
+  disk.savedBytes = payload.byteLength
+  disk.lastError = null
+  return { bytes: payload.byteLength, name: disk.name }
+}
+
+/** Debounced write-back after every mutating op (2 s of quiet). */
+function scheduleAutoSave() {
+  if (!disk || saveTimer) return
+  saveTimer = self.setTimeout(() => {
+    saveTimer = 0
+    if (!disk || !dirty || saving) return
+    saving = true
+    flushToDisk()
+      .catch((e) => {
+        if (disk) disk.lastError = e instanceof Error ? e.message : String(e)
+      })
+      .finally(() => {
+        saving = false
+      })
+  }, AUTOSAVE_MS)
+}
+
+// Last-ditch flush when the tab goes away — the 5-minute OPFS backup and the
+// debounced autosave are the real durability; this is the bonus.
+self.addEventListener('pagehide', () => {
+  if (disk && dirty && !saving) {
+    void flushToDisk().catch(() => {
+      /* page is going away regardless */
+    })
+  }
+})
+
 self.onmessage = async (ev: MessageEvent<DbRequest>) => {
   const { id, op, args } = ev.data ?? ({} as DbRequest)
   const post = (msg: Record<string, unknown>) => {
@@ -136,7 +209,59 @@ self.onmessage = async (ev: MessageEvent<DbRequest>) => {
   try {
     const info = await ensureOpen()
     if (op === '_status') {
-      post({ ok: true, data: { backend: info.backend, file: 'cybermanju.db' } })
+      post({ ok: true, data: { backend: info.backend, file: 'cybermanju.db', disk: diskStatus() } })
+      return
+    }
+    // ── `.cybermanju` file attach / save / detach ─────────────────────────
+    if (op === '_attach') {
+      const handle = (args?.handle ?? null) as DiskState['handle'] | null
+      const passphrase = String(args?.passphrase ?? '')
+      const bytes = (args?.bytes ?? null) as Uint8Array | null
+      const name = String(args?.name ?? 'cybermanju.cybermanju')
+      // Load the picked file first — a wrong passphrase must not clobber
+      // the live database with a half-restored image.
+      if (bytes && bytes.byteLength > 0) {
+        const { image } = await decodeContainer(bytes, passphrase)
+        const out = db_restore(image) as string
+        const env = JSON.parse(out) as { ok: boolean; data?: unknown; error?: string }
+        if (!env.ok) throw new Error(String(env.error ?? 'restore failed'))
+      }
+      disk = handle
+        ? {
+            handle,
+            name,
+            passphrase,
+            savedAt: Date.now(),
+            savedBytes: bytes?.byteLength ?? 0,
+            lastError: null,
+          }
+        : null
+      dirty = false
+      post({ ok: true, data: diskStatus() })
+      return
+    }
+    if (op === '_save') {
+      if (!disk) throw new Error('no .cybermanju file attached — open or create one first')
+      const saved = await flushToDisk()
+      post({ ok: true, data: { ...diskStatus(), ...saved } })
+      return
+    }
+    if (op === '_export') {
+      // Same bytes a save would write, handed back for a download — this is
+      // the fallback path where the browser has no File System Access API.
+      const passphrase = String(args?.passphrase ?? disk?.passphrase ?? '')
+      const image = db_snapshot() as unknown as Uint8Array
+      const payload = await encodeContainer(image, passphrase)
+      post({ ok: true, data: { bytes: payload, name: disk?.name ?? 'cybermanju.cybermanju' } })
+      return
+    }
+    if (op === '_detach') {
+      disk = null
+      if (saveTimer) {
+        self.clearTimeout(saveTimer)
+        saveTimer = 0
+      }
+      post({ ok: true, data: diskStatus() })
       return
     }
     if (op === '_snapshot') {
@@ -160,7 +285,10 @@ self.onmessage = async (ev: MessageEvent<DbRequest>) => {
       }
       return
     }
-    if (!isReadOnly(op)) dirty = true
+    if (!isReadOnly(op)) {
+      dirty = true
+      scheduleAutoSave()
+    }
     const out = db_dispatch(
       op,
       JSON.stringify({ ...(args ?? {}), now: new Date().toISOString() }),

@@ -3,7 +3,7 @@
     <div class="dash-content">
       <div class="dash-header">
         <h2>WEB DASHBOARD</h2>
-        <button class="close-btn" @click="$emit('close')">X</button>
+        <button class="close-btn" @click="$emit('close')" aria-label="CLOSE"><AppIcon name="solar:close-bold" :size="13" /></button>
       </div>
       <div class="dash-body">
         <p class="text-muted">WEB DASHBOARD. ACCESS FROM ANY DEVICE ON YOUR NETWORK.</p>
@@ -23,9 +23,9 @@
           <span class="mono">{{ store.dashboardStatus.url }}</span>
         </div>
         <div style="display:flex;gap:6px;margin-top:8px;">
-          <button class="bw-btn" style="flex:1;" @click="store.startDashboard()" :disabled="store.dashboardStatus.running">[START]</button>
-          <button class="bw-btn" style="flex:1;" @click="store.stopDashboard()" :disabled="!store.dashboardStatus.running">[STOP]</button>
-          <button class="bw-btn" style="flex:1;" @click="store.fetchDashboardStatus()">[REFRESH]</button>
+          <button class="bw-btn" style="flex:1;" @click="store.startDashboard()" :disabled="store.dashboardStatus.running" title="START DASHBOARD"><AppIcon name="solar:play-bold" :size="12" /> START</button>
+          <button class="bw-btn" style="flex:1;" @click="store.stopDashboard()" :disabled="!store.dashboardStatus.running" title="STOP DASHBOARD"><AppIcon name="solar:close-square-bold" :size="12" /> STOP</button>
+          <button class="bw-btn" style="flex:1;" @click="store.fetchDashboardStatus()"><AppIcon name="solar:refresh-bold" :size="13" /> REFRESH</button>
         </div>
       </div>
     </div>
@@ -33,6 +33,7 @@
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { useAppStore } from '@/stores/app'
 
 const store = useAppStore()

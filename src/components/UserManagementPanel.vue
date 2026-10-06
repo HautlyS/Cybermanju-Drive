@@ -2,13 +2,13 @@
   <div class="user-panel">
     <div class="panel-header">
       <div class="header-left">
-        <span class="icon-user">[!]</span>
+        <span class="icon-user"><AppIcon name="solar:users-group-rounded-bold" /></span>
         <h2 class="panel-title">USER MANAGEMENT</h2>
       </div>
     </div>
 
     <div class="section">
-      <h3 class="section-title">[USERS] REGISTERED USERS</h3>
+      <h3 class="section-title"><AppIcon name="solar:users-group-rounded-bold" :size="13" /> REGISTERED USERS</h3>
       <p class="text-muted" style="margin-bottom:8px;font-size:10px;">PER-FILE USERNAME + PASSWORD AUTH WITH ARGON2 HASHING. ROLE-BASED ACCESS: ADMIN, USER, VIEWER.</p>
       <div v-if="store.users.length === 0" class="text-muted" style="font-size:10px;">NO USERS REGISTERED</div>
       <div class="user-list">
@@ -18,8 +18,8 @@
             <span class="user-role">{{ user.role }}</span>
             <span class="user-active" :class="{ on: user.isActive }">{{ user.isActive ? 'ACTIVE' : 'INACTIVE' }}</span>
             <div class="user-actions">
-              <button class="user-action-btn" @click="handleRole(user.id, user.role === 'admin' ? 'user' : 'admin')">[ROLE]</button>
-              <button class="user-action-btn" @click="handleDelete(user.id)">[DEL]</button>
+              <button class="user-action-btn" @click="handleRole(user.id, user.role === 'admin' ? 'user' : 'admin')" title="TOGGLE ROLE" aria-label="TOGGLE ROLE"><AppIcon name="solar:user-check-bold" :size="13" /></button>
+              <button class="user-action-btn" @click="handleDelete(user.id)" title="DELETE USER" aria-label="DELETE USER"><AppIcon name="solar:trash-bin-trash-bold" :size="13" /></button>
             </div>
           </div>
         </div>
@@ -27,7 +27,7 @@
     </div>
 
     <div class="create-section" v-if="showCreate">
-      <h3 class="section-title">[+] CREATE USER</h3>
+      <h3 class="section-title"><AppIcon name="solar:add-bold" :size="13" /> CREATE USER</h3>
       <input v-model="newUsername" class="bw-input" placeholder="USERNAME" @keyup.enter="handleCreate" />
       <input v-model="newPassword" class="bw-input" type="password" placeholder="PASSWORD" @keyup.enter="handleCreate" />
       <select v-model="newRole" class="bw-input" style="appearance:none;">
@@ -35,13 +35,14 @@
         <option value="admin">ADMIN</option>
         <option value="viewer">VIEWER</option>
       </select>
-      <button class="bw-btn" @click="handleCreate">[CREATE]</button>
+      <button class="bw-btn" @click="handleCreate"><AppIcon name="solar:add-bold" :size="13" /> CREATE</button>
     </div>
     <button v-else class="bw-btn" @click="showCreate = true">[+ ADD USER]</button>
   </div>
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { ref, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
 

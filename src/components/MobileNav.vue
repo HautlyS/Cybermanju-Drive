@@ -1,14 +1,15 @@
 <template>
   <nav class="mobile-nav" role="navigation" aria-label="MOBILE NAVIGATION">
-    <button class="mn-btn" @click="wm.open('files')" aria-label="FILES">[#]</button>
-    <button class="mn-btn" @click="wm.open('search')" aria-label="SEARCH">[S]</button>
+    <button class="mn-btn" @click="wm.open('files')" aria-label="FILES" title="FILES"><AppIcon name="solar:folder-bold" :size="18" /></button>
+    <button class="mn-btn" @click="wm.open('search')" aria-label="SEARCH" title="SEARCH"><AppIcon name="solar:magnifier-bold" :size="18" /></button>
     <button class="mn-btn" @click="wm.open('terminal')" aria-label="TERMINAL">[&gt;]</button>
-    <button class="mn-btn" @click="wm.open('favorites')" aria-label="FAVORITES">[*]</button>
-    <button class="mn-btn" @click="wm.open('settings')" aria-label="SETTINGS">[@]</button>
+    <button class="mn-btn" @click="wm.open('favorites')" aria-label="FAVORITES" title="FAVORITES"><AppIcon name="solar:star-bold" :size="18" /></button>
+    <button class="mn-btn" @click="wm.open('settings')" aria-label="SETTINGS" title="SETTINGS"><AppIcon name="solar:settings-bold" :size="18" /></button>
   </nav>
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { useWindowManager } from '@/composables/useWindowManager'
 const wm = useWindowManager()
 </script>

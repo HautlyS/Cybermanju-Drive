@@ -30,10 +30,10 @@
             @mouseenter="onItemHover(i, item)"
             @click="onItemClick(item)"
           >
-            <span class="ctx-icon">{{ item.icon || '' }}</span>
+            <span class="ctx-icon"><AppIcon :name="item.icon" :size="13" /></span>
             <span class="ctx-label">{{ item.label }}</span>
             <span class="ctx-shortcut text-muted">{{ item.shortcut || '' }}</span>
-            <span v-if="item.submenu?.length" class="ctx-arrow">^</span>
+            <span v-if="item.submenu?.length" class="ctx-arrow"><AppIcon name="solar:alt-arrow-right-bold" :size="11" /></span>
           </div>
           <!-- submenu -->
           <Teleport to="body" v-if="item.submenu?.length && openSubmenuId === item.id">
@@ -55,7 +55,7 @@
                   :aria-disabled="sub.disabled"
                   @click="onItemClick(sub)"
                 >
-                  <span class="ctx-icon">{{ sub.icon || '' }}</span>
+                  <span class="ctx-icon"><AppIcon :name="sub.icon" :size="13" /></span>
                   <span class="ctx-label">{{ sub.label }}</span>
                   <span class="ctx-shortcut text-muted">{{ sub.shortcut || '' }}</span>
                 </div>
@@ -69,6 +69,7 @@
 </template>
 
 <script setup lang="ts">
+import AppIcon from '@/components/AppIcon.vue'
 import { computed, ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useContextMenu, type ContextMenuEntry } from '@/composables/useContextMenu'
 
@@ -248,8 +249,8 @@ onUnmounted(() => {
 
 .ctx-arrow {
   flex-shrink: 0;
-  font-size: 9px;
-  transform: rotate(90deg);
+  display: flex;
+  align-items: center;
 }
 
 .ctx-divider {

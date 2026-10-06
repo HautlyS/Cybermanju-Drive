@@ -24,6 +24,14 @@ export function db_restore() {
   throw new Error('cybermanju-drive-wasm is not bundled in this build')
 }
 
+export function agent_catalog() {
+  throw new Error('cybermanju-drive-wasm is not bundled in this build')
+}
+
+export async function agent_prompt() {
+  throw new Error('cybermanju-drive-wasm is not bundled in this build')
+}
+
 export default function init() {
   return Promise.resolve()
 }
