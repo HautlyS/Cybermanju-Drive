@@ -281,16 +281,24 @@ watch(() => store.commandPaletteOpen, async (v: boolean) => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 12px;
+  padding: 7px 12px;
+  margin: 1px 6px;
+  border-radius: var(--ui-radius-sm);
   cursor: pointer;
   font-family: var(--ui-font);
   font-size: 11px;
-  color: var(--ui-text);
+  color: var(--ui-text-2);
+  border: 1px solid transparent;
+  transition:
+    background-color var(--ui-dur-fast) var(--ui-ease-out),
+    border-color var(--ui-dur-fast) var(--ui-ease-out),
+    color var(--ui-dur-fast) var(--ui-ease-out);
 }
 
 .cp-item:hover,
 .cp-item.active {
-  background: var(--ui-surface);
+  background: var(--ui-accent-softer);
+  border-color: color-mix(in srgb, var(--ui-accent) 40%, transparent);
   color: var(--ui-text);
 }
 
@@ -299,6 +307,13 @@ watch(() => store.commandPaletteOpen, async (v: boolean) => {
   width: 20px;
   text-align: center;
   flex-shrink: 0;
+  color: var(--ui-text-3);
+  transition: color var(--ui-dur-fast) var(--ui-ease-out);
+}
+
+.cp-item:hover .cp-item-icon,
+.cp-item.active .cp-item-icon {
+  color: var(--ui-accent);
 }
 
 .cp-item-label {
@@ -306,6 +321,7 @@ watch(() => store.commandPaletteOpen, async (v: boolean) => {
 }
 
 .cp-item-shortcut {
+  font-family: var(--ui-font-mono);
   font-size: 9px;
   color: color-mix(in srgb, var(--ui-text) 40%, transparent);
   margin-left: 12px;
@@ -313,7 +329,7 @@ watch(() => store.commandPaletteOpen, async (v: boolean) => {
 
 .cp-item:hover .cp-item-shortcut,
 .cp-item.active .cp-item-shortcut {
-  color: color-mix(in srgb, var(--ui-text) 50%, transparent);
+  color: var(--ui-text-3);
 }
 
 .cp-empty {

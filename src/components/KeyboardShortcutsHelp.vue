@@ -106,23 +106,32 @@ const groupedShortcuts = computed(() => {
 }
 
 .close-btn {
-  background: none;
+  background: transparent;
   border: 1px solid var(--ui-border);
-  color: var(--ui-text);
-  width: 24px;
-  height: 24px;
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-2);
+  width: 26px;
+  height: 26px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   font-family: var(--ui-font);
-  font-size: 10px;
-  font-weight: 700;
+  transition:
+    background-color var(--ui-dur-fast) var(--ui-ease-out),
+    border-color var(--ui-dur-fast) var(--ui-ease-out),
+    color var(--ui-dur-fast) var(--ui-ease-out);
 }
 
 .close-btn:hover {
   background: var(--ui-glass-2);
+  border-color: var(--ui-border-hover);
   color: var(--ui-text);
+}
+
+.close-btn:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ui-accent) 75%, transparent);
+  outline-offset: 2px;
 }
 
 .ks-help-body {
@@ -153,15 +162,18 @@ const groupedShortcuts = computed(() => {
 }
 
 .ks-key {
-  font-family: var(--ui-font);
+  font-family: var(--ui-font-mono);
   font-size: 10px;
   font-weight: 700;
   color: var(--ui-text);
-  background: color-mix(in srgb, var(--ui-bg-deep) 4%, transparent);
-  padding: 1px 6px;
+  background: color-mix(in srgb, var(--ui-surface) 55%, transparent);
   border: 1px solid var(--ui-border-strong);
+  border-radius: var(--ui-radius-sm);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--ui-text) 8%, transparent);
+  padding: 2px 8px;
   min-width: 100px;
   text-align: center;
+  letter-spacing: 0.04em;
 }
 
 .ks-desc {

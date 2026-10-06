@@ -6,7 +6,9 @@
         <h2 class="panel-title">AI AGENT</h2>
         <span class="text-muted transport-tag">{{ transportLabel }}</span>
       </div>
-      <button class="bw-btn small" @click="showSetup = !showSetup">{{ showSetup ? 'HIDE SETUP' : 'SETUP' }}</button>
+      <UiButton size="sm" :icon="showSetup ? 'solar:close-bold' : 'solar:settings-bold'" @click="showSetup = !showSetup">
+        {{ showSetup ? 'HIDE SETUP' : 'SETUP' }}
+      </UiButton>
     </div>
 
     <!-- Provider + config setup -->
@@ -27,72 +29,135 @@
         </button>
       </div>
 
-      <label class="w-label">CONFIG NAME <input v-model="form.name" class="bw-input" placeholder="MY AGENT" /></label>
+      <div class="w-field">
+        <span class="w-label text-muted">CONFIG NAME</span>
+        <UiInput v-model="form.name" placeholder="MY AGENT" aria-label="Config name" />
+      </div>
       <div class="w-row">
-        <label class="w-label">MODEL
-          <span class="model-row">
-            <input v-model="form.model" class="bw-input" placeholder="MODEL ID" list="agent-models" />
-            <button class="bw-btn small" :disabled="modelBusy || !form.providerId" @click="refreshModels" title="REFRESH MODEL LIST FROM PROVIDER" aria-label="REFRESH MODEL LIST"><AppIcon name="solar:refresh-bold" :size="13" /></button>
-          </span>
+        <div class="w-field">
+          <span class="w-label text-muted">MODEL</span>
+          <div class="model-row">
+            <UiInput
+              v-model="form.model"
+              placeholder="MODEL ID"
+              list="agent-models"
+              aria-label="Model id"
+            />
+            <UiButton
+              size="sm"
+              icon="solar:refresh-bold"
+              icon-only
+              :disabled="modelBusy || !form.providerId"
+              :loading="modelBusy"
+              title="REFRESH MODEL LIST FROM PROVIDER"
+              aria-label="REFRESH MODEL LIST"
+              @click="refreshModels"
+            />
+          </div>
           <datalist id="agent-models">
             <option v-for="m in models" :key="m" :value="m" />
           </datalist>
-        </label>
-        <label class="w-label">KIND
-          <select v-model="form.agentKind" class="bw-input">
-            <option value="build">BUILD (FULL ACCESS)</option>
-            <option value="plan">PLAN (READ-ONLY)</option>
-          </select>
-        </label>
+        </div>
+        <div class="w-field">
+          <span class="w-label text-muted">KIND</span>
+          <UiSelect
+            :model-value="form.agentKind"
+            :options="[
+              { label: 'BUILD (FULL ACCESS)', value: 'build' },
+              { label: 'PLAN (READ-ONLY)', value: 'plan' },
+            ]"
+            @update:model-value="form.agentKind = $event as 'build' | 'plan'"
+          />
+        </div>
       </div>
-      <label class="w-label">ENDPOINT OVERRIDE (OPTIONAL)
-        <input v-model="form.baseUrlOverride" class="bw-input" :placeholder="presetBase" />
-      </label>
+      <div class="w-field">
+        <span class="w-label text-muted">ENDPOINT OVERRIDE (OPTIONAL)</span>
+        <UiInput v-model="form.baseUrlOverride" :placeholder="presetBase" aria-label="Endpoint override" />
+      </div>
       <div v-if="isCustom" class="w-row">
-        <label class="w-label">DIALECT
-          <select v-model="form.dialectOverride" class="bw-input">
-            <option value="openAi">OPENAI-COMPATIBLE</option>
-            <option value="anthropic">ANTHROPIC</option>
-          </select>
-        </label>
-        <label class="w-label">AUTH
-          <select v-model="form.authSchemeOverride" class="bw-input">
-            <option value="bearer">BEARER</option>
-            <option value="header">HEADER</option>
-            <option value="query">QUERY (?key=)</option>
-            <option value="none">NONE</option>
-          </select>
-        </label>
-        <label v-if="form.authSchemeOverride === 'header' || form.authSchemeOverride === 'query'" class="w-label">AUTH NAME
-          <input v-model="form.authNameOverride" class="bw-input" placeholder="x-api-key" />
-        </label>
+        <div class="w-field">
+          <span class="w-label text-muted">DIALECT</span>
+          <UiSelect
+            :model-value="form.dialectOverride"
+            :options="[
+              { label: 'OPENAI-COMPATIBLE', value: 'openAi' },
+              { label: 'ANTHROPIC', value: 'anthropic' },
+            ]"
+            @update:model-value="form.dialectOverride = $event as 'openAi' | 'anthropic'"
+          />
+        </div>
+        <div class="w-field">
+          <span class="w-label text-muted">AUTH</span>
+          <UiSelect
+            :model-value="form.authSchemeOverride"
+            :options="[
+              { label: 'BEARER', value: 'bearer' },
+              { label: 'HEADER', value: 'header' },
+              { label: 'QUERY (?key=)', value: 'query' },
+              { label: 'NONE', value: 'none' },
+            ]"
+            @update:model-value="form.authSchemeOverride = $event as 'bearer' | 'header' | 'query' | 'none'"
+          />
+        </div>
+        <div v-if="form.authSchemeOverride === 'header' || form.authSchemeOverride === 'query'" class="w-field">
+          <span class="w-label text-muted">AUTH NAME</span>
+          <UiInput v-model="form.authNameOverride" placeholder="x-api-key" aria-label="Auth header name" />
+        </div>
       </div>
       <div class="w-row">
-        <label class="w-label">WORKING DIR (VOLUME-RELATIVE, EMPTY = ROOT)
-          <input v-model="form.workingDir" class="bw-input" placeholder="/" />
-        </label>
-        <label class="w-label">MAX TURNS
-          <input v-model.number="form.maxTurns" class="bw-input" type="number" min="1" max="50" />
-        </label>
+        <div class="w-field">
+          <span class="w-label text-muted">WORKING DIR (VOLUME-RELATIVE, EMPTY = ROOT)</span>
+          <UiInput v-model="form.workingDir" placeholder="/" aria-label="Working directory" />
+        </div>
+        <div class="w-field">
+          <span class="w-label text-muted">MAX TURNS</span>
+          <UiInput
+            :model-value="String(form.maxTurns)"
+            type="number"
+            :min="1"
+            :max="50"
+            aria-label="Max turns"
+            @update:model-value="form.maxTurns = Number($event)"
+          />
+        </div>
       </div>
       <div class="w-row">
-        <label class="w-label">PERMISSIONS
-          <select v-model="permPreset" class="bw-input">
-            <option value="strict">STRICT (ASK EVERYTHING)</option>
-            <option value="balanced">BALANCED (READS AUTO, MUTATIONS ASK)</option>
-            <option value="yolo">YOLO (AUTO, DENY NEVER BYPASSED)</option>
-          </select>
-        </label>
-        <label class="w-check"><input type="checkbox" v-model="form.autoApprove" /> AUTO-APPROVE ASKS</label>
+        <div class="w-field">
+          <span class="w-label text-muted">PERMISSIONS</span>
+          <UiSelect
+            :model-value="permPreset"
+            :options="[
+              { label: 'STRICT (ASK EVERYTHING)', value: 'strict' },
+              { label: 'BALANCED (READS AUTO, MUTATIONS ASK)', value: 'balanced' },
+              { label: 'YOLO (AUTO, DENY NEVER BYPASSED)', value: 'yolo' },
+            ]"
+            @update:model-value="permPreset = $event as 'strict' | 'balanced' | 'yolo'"
+          />
+        </div>
+        <div class="w-field check-field">
+          <UiCheckbox v-model="form.autoApprove" label="AUTO-APPROVE ASKS" />
+        </div>
       </div>
-      <label class="w-label">{{ wasmMode ? 'API KEY (MEMORY ONLY — CLEARED ON RELOAD)' : 'API KEY (SEALED server-side, NEVER SHOWN BACK)' }}
-        <span class="model-row">
-          <input v-model="keyInput" type="password" class="bw-input" placeholder="PASTE KEY" autocomplete="off" />
-          <button class="bw-btn small" :disabled="!savedConfigId || !keyInput || keyBusy" @click="saveKey">SEAL KEY</button>
-        </span>
-      </label>
+      <div class="w-field">
+        <span class="w-label text-muted">{{ wasmMode ? 'API KEY (MEMORY ONLY — CLEARED ON RELOAD)' : 'API KEY (SEALED server-side, NEVER SHOWN BACK)' }}</span>
+        <div class="model-row">
+          <UiInput
+            v-model="keyInput"
+            type="password"
+            placeholder="PASTE KEY"
+            aria-label="API key"
+            autocomplete="off"
+          />
+          <UiButton
+            size="sm"
+            :disabled="!savedConfigId || !keyInput || keyBusy"
+            :loading="keyBusy"
+            @click="saveKey"
+          >SEAL KEY</UiButton>
+        </div>
+      </div>
       <div class="w-actions">
-        <button class="bw-btn small primary" :disabled="busy || !canSave" @click="saveConfig">SAVE CONFIG</button>
+        <UiButton size="sm" variant="primary" :disabled="busy || !canSave" :loading="busy" @click="saveConfig">SAVE CONFIG</UiButton>
       </div>
       <div v-if="setupMsg" class="w-msg">{{ setupMsg }}</div>
       <p class="text-muted hint">CUSTOM PROVIDER: pick the CUSTOM preset, set endpoint + dialect + auth. MODEL LIST refresh needs a saved key (Anthropic has no list API — enter manually).</p>
@@ -105,15 +170,23 @@
           <div class="cfg-header">
             <span class="cfg-name">{{ cfg.name }}</span>
             <span class="cfg-type text-muted">{{ cfg.providerId }}/{{ cfg.model }}</span>
-            <span class="cfg-status" :class="{ on: cfg.hasKey || isKeyless(cfg) }">{{ cfg.hasKey || isKeyless(cfg) ? 'READY' : 'NO KEY' }}</span>
+            <UiBadge :tone="cfg.hasKey || isKeyless(cfg) ? 'accent' : 'neutral'" size="sm">
+              {{ cfg.hasKey || isKeyless(cfg) ? 'READY' : 'NO KEY' }}
+            </UiBadge>
             <span class="cfg-type text-muted">{{ cfg.agentKind.toUpperCase() }}</span>
           </div>
           <div class="cfg-actions">
-            <button class="bw-btn xs danger" @click.stop="removeCfg(cfg.id)">DEL</button>
+            <UiButton size="xs" variant="danger" @click.stop="removeCfg(cfg.id)">DEL</UiButton>
           </div>
         </div>
       </div>
-      <div v-if="!configs.length" class="empty text-muted">No configs — open SETUP, pick a preset, save.</div>
+      <UiEmpty
+        v-if="!configs.length"
+        size="sm"
+        icon="solar:bot-bold"
+        title="No agent configs"
+        description="Open SETUP, pick a preset, save a config."
+      />
     </div>
 
     <div v-if="chatConfig" class="section">
@@ -129,41 +202,37 @@
             <span v-else>{{ m.cfg.url }}</span>
           </div>
           <div class="cfg-actions">
-            <button class="bw-btn xs danger" @click="removeMcp(m.name)">DETACH</button>
+            <UiButton size="xs" variant="danger" @click="removeMcp(m.name)">DETACH</UiButton>
           </div>
         </div>
       </div>
       <div class="w-row">
-        <input v-model="mcpForm.name" class="bw-input" placeholder="server-name" spellcheck="false" />
-        <select v-model="mcpForm.transport" class="bw-input">
-          <option value="stdio">STDIO (LOCAL CMD)</option>
-          <option value="http">HTTP (STREAMABLE)</option>
-        </select>
+        <div class="w-field grow">
+          <UiInput v-model="mcpForm.name" placeholder="server-name" aria-label="MCP server name" spellcheck="false" />
+        </div>
+        <div class="w-field grow">
+          <UiSelect
+            :model-value="mcpForm.transport"
+            :options="[
+              { label: 'STDIO (LOCAL CMD)', value: 'stdio' },
+              { label: 'HTTP (STREAMABLE)', value: 'http' },
+            ]"
+            @update:model-value="mcpForm.transport = $event"
+          />
+        </div>
       </div>
       <div class="w-row">
-        <input
-          v-if="mcpForm.transport === 'stdio'"
-          v-model="mcpForm.command"
-          class="bw-input"
-          placeholder="command on PATH (e.g. npx)"
-          spellcheck="false"
-        />
-        <input
-          v-if="mcpForm.transport === 'stdio'"
-          v-model="mcpForm.args"
-          class="bw-input"
-          placeholder="args, space-separated"
-          spellcheck="false"
-        />
-        <input
-          v-if="mcpForm.transport === 'http'"
-          v-model="mcpForm.url"
-          class="bw-input"
-          placeholder="https://…/mcp"
-          spellcheck="false"
-        />
-        <button class="bw-btn small" :disabled="mcpBusy || !mcpForm.name.trim()" @click="addMcp">ATTACH</button>
-        <button class="bw-btn small" :disabled="mcpBusy || !chatConfigId" @click="refreshMcpTools">LIST TOOLS</button>
+        <div v-if="mcpForm.transport === 'stdio'" class="w-field grow">
+          <UiInput v-model="mcpForm.command" placeholder="command on PATH (e.g. npx)" aria-label="MCP command" spellcheck="false" />
+        </div>
+        <div v-if="mcpForm.transport === 'stdio'" class="w-field grow">
+          <UiInput v-model="mcpForm.args" placeholder="args, space-separated" aria-label="MCP args" spellcheck="false" />
+        </div>
+        <div v-if="mcpForm.transport === 'http'" class="w-field grow">
+          <UiInput v-model="mcpForm.url" placeholder="https://…/mcp" aria-label="MCP URL" spellcheck="false" />
+        </div>
+        <UiButton size="sm" :disabled="mcpBusy || !mcpForm.name.trim()" :loading="mcpBusy" @click="addMcp">ATTACH</UiButton>
+        <UiButton size="sm" :disabled="mcpBusy || !chatConfigId" @click="refreshMcpTools">LIST TOOLS</UiButton>
       </div>
       <div v-if="mcpTools.length" class="remote-list">
         <div v-for="t in mcpTools" :key="t.name" class="remote-row">
@@ -177,15 +246,21 @@
     <div class="section">
       <h3 class="section-title"><AppIcon name="solar:chat-square-bold" :size="13" /> SESSIONS ({{ sessions.length }})</h3>
       <div class="w-row">
-        <select v-model="chatConfigId" class="bw-input">
-          <option value="">SELECT CONFIG</option>
-          <option v-for="c in configs" :key="c.id" :value="c.id">{{ c.name }} ({{ c.model }})</option>
-        </select>
-        <button class="bw-btn small" :disabled="!chatConfigId" @click="newSession">+ NEW</button>
-        <button class="bw-btn small" :disabled="!chatConfigId || jobActive" @click="initRepo" title="Analyze the repo and write AGENTS.md with a detached run">
-          INIT REPO
-        </button>
-        <button class="bw-btn small" @click="importClick">IMPORT</button>
+        <div class="w-field grow">
+          <UiSelect
+            :model-value="chatConfigId"
+            :options="sessionConfigOptions"
+            @update:model-value="chatConfigId = $event"
+          />
+        </div>
+        <UiButton size="sm" icon="solar:add-bold" :disabled="!chatConfigId" @click="newSession">NEW</UiButton>
+        <UiButton
+          size="sm"
+          :disabled="!chatConfigId || jobActive"
+          title="Analyze the repo and write AGENTS.md with a detached run"
+          @click="initRepo"
+        >INIT REPO</UiButton>
+        <UiButton size="sm" icon="solar:download-bold" @click="importClick">IMPORT</UiButton>
         <input ref="importEl" type="file" accept="application/json" hidden @change="importFile" />
       </div>
       <div class="session-list">
@@ -198,8 +273,23 @@
         >
           <span class="session-title">{{ s.title }}</span>
           <span class="text-muted session-meta">{{ s.messages.length }} msgs</span>
-          <button class="bw-btn xs" @click.stop="exportSession(s.id)" title="EXPORT SESSION" aria-label="EXPORT SESSION"><AppIcon name="solar:download-bold" :size="13" /></button>
-          <button class="bw-btn xs danger" @click.stop="removeSession(s.id)" aria-label="CLOSE"><AppIcon name="solar:close-bold" :size="13" /></button>
+          <UiButton
+            size="xs"
+            icon="solar:download-bold"
+            icon-only
+            title="EXPORT SESSION"
+            aria-label="EXPORT SESSION"
+            @click.stop="exportSession(s.id)"
+          />
+          <UiButton
+            size="xs"
+            variant="danger"
+            icon="solar:close-bold"
+            icon-only
+            title="CLOSE SESSION"
+            aria-label="CLOSE"
+            @click.stop="removeSession(s.id)"
+          />
         </div>
       </div>
     </div>
@@ -207,9 +297,12 @@
     <div v-if="viewing" class="section thread">
       <h3 class="section-title"><AppIcon name="solar:chat-square-bold" :size="13" /> {{ viewing.title }}</h3>
       <div class="w-actions thread-actions">
-        <button class="bw-btn xs" :disabled="!viewing.messages.length || jobActive" @click="compactThread" title="Summarize into a fresh session (old kept)">
-          COMPACT
-        </button>
+        <UiButton
+          size="xs"
+          :disabled="!viewing.messages.length || jobActive"
+          title="Summarize into a fresh session (old kept)"
+          @click="compactThread"
+        >COMPACT</UiButton>
       </div>
       <div class="usage text-muted" v-if="threadUsage">TOKENS IN {{ threadUsage.inputTokens }} / OUT {{ threadUsage.outputTokens }}</div>
       <div class="messages">
@@ -228,21 +321,30 @@
         <div class="approval-title"><AppIcon :name="pendingApproval.question ? 'solar:question-circle-bold' : 'solar:shield-check-bold'" :size="13" /> {{ pendingApproval.question ? 'NEEDS YOUR ANSWER' : 'AGENT WAITS' }}</div>
         <div class="approval-text">{{ pendingApproval.question || pendingApproval.summary }}</div>
         <div v-if="pendingApproval.question" class="w-row">
-          <input v-model="answerInput" class="bw-input" placeholder="TYPE ANSWER…" @keyup.enter="answerApproval(true)" />
+          <div class="w-field grow">
+            <UiInput
+              v-model="answerInput"
+              placeholder="TYPE ANSWER…"
+              aria-label="Approval answer"
+              @enter="answerApproval(true)"
+            />
+          </div>
         </div>
         <div class="w-actions">
-          <button class="bw-btn small primary" @click="answerApproval(true)">ALLOW</button>
-          <button class="bw-btn small" @click="answerApproval(true, true)" title="Allow this tool for the rest of the config (stored as an explicit rule)">
-            ALLOW ALWAYS
-          </button>
-          <button class="bw-btn small danger" @click="answerApproval(false)">DENY</button>
+          <UiButton size="sm" variant="primary" @click="answerApproval(true)">ALLOW</UiButton>
+          <UiButton
+            size="sm"
+            title="Allow this tool for the rest of the config (stored as an explicit rule)"
+            @click="answerApproval(true, true)"
+          >ALLOW ALWAYS</UiButton>
+          <UiButton size="sm" variant="danger" @click="answerApproval(false)">DENY</UiButton>
         </div>
       </div>
 
       <div class="prompt-row">
         <textarea
           v-model="promptInput"
-          class="bw-input prompt-box"
+          class="prompt-box"
           placeholder="ASK THE AGENT… (Ctrl+Enter to send)"
           rows="3"
           @keydown.ctrl.enter="sendPrompt"
@@ -250,8 +352,8 @@
         />
       </div>
       <div class="w-actions">
-        <button class="bw-btn small primary" :disabled="!canSend" @click="sendPrompt">SEND</button>
-        <button v-if="jobActive" class="bw-btn small danger" @click="abortJob">ABORT</button>
+        <UiButton size="sm" variant="primary" :disabled="!canSend" @click="sendPrompt">SEND</UiButton>
+        <UiButton v-if="jobActive" size="sm" variant="danger" @click="abortJob">ABORT</UiButton>
       </div>
       <div v-if="jobLine" class="w-msg">{{ jobLine }}</div>
       <div v-if="jobError" class="w-msg err" :title="jobHint">{{ jobError }}</div>
@@ -261,6 +363,12 @@
 
 <script setup lang="ts">
 import AppIcon from '@/components/AppIcon.vue'
+import UiBadge from '@/components/ui/UiBadge.vue'
+import UiButton from '@/components/ui/UiButton.vue'
+import UiCheckbox from '@/components/ui/UiCheckbox.vue'
+import UiEmpty from '@/components/ui/UiEmpty.vue'
+import UiInput from '@/components/ui/UiInput.vue'
+import UiSelect from '@/components/ui/UiSelect.vue'
 import { computed, reactive, ref, watch, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { isStaticHost } from '@/composables/useTauri'
@@ -336,6 +444,11 @@ const answerInput = ref('')
 const importEl = ref<HTMLInputElement | null>(null)
 
 const chatConfig = computed(() => configs.value.find(c => c.id === chatConfigId.value) ?? null)
+
+const sessionConfigOptions = computed(() => [
+  { label: 'SELECT CONFIG', value: '' },
+  ...configs.value.map(c => ({ label: `${c.name} (${c.model})`, value: c.id })),
+])
 
 // ─── MCP attach/detach/discover (selected config) ───
 const mcpTools = ref<Array<{ server: string; name: string; description: string }>>([])
@@ -1083,16 +1196,26 @@ onMounted(async () => {
   margin: 0 0 8px;
 }
 
-.wizard { border: 2px dashed var(--ui-border-strong); padding: 10px; }
+.wizard {
+  border: 1px dashed color-mix(in srgb, var(--ui-border-strong) 80%, transparent);
+  border-radius: var(--ui-radius-md);
+  padding: 12px;
+  background: color-mix(in srgb, var(--ui-glass) 70%, transparent);
+  backdrop-filter: blur(calc(var(--ui-blur) * 0.6));
+  -webkit-backdrop-filter: blur(calc(var(--ui-blur) * 0.6));
+}
+
 .preset-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 6px;
   margin-bottom: 10px;
 }
+
 .preset-card {
-  background: var(--ui-surface);
+  background: color-mix(in srgb, var(--ui-surface) 55%, transparent);
   border: 1px solid var(--ui-hairline);
+  border-radius: var(--ui-radius-sm);
   color: var(--ui-text);
   padding: 6px 8px;
   text-align: left;
@@ -1101,40 +1224,62 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  transition:
+    border-color var(--ui-dur-fast) var(--ui-ease-out),
+    background-color var(--ui-dur-fast) var(--ui-ease-out),
+    box-shadow var(--ui-dur) var(--ui-ease-out);
 }
-.preset-card.on { border-color: var(--ui-border-strong); background: color-mix(in srgb, var(--ui-text) 6%, transparent); }
+
+.preset-card:hover {
+  border-color: var(--ui-border-hover);
+  background: var(--ui-glass-2);
+}
+
+.preset-card:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--ui-accent) 75%, transparent);
+  outline-offset: 2px;
+}
+
+.preset-card.on {
+  border-color: color-mix(in srgb, var(--ui-accent) 55%, transparent);
+  background: var(--ui-accent-softer);
+  box-shadow: var(--ui-glow-soft);
+}
+
 .preset-name { font-size: 11px; font-weight: 700; }
 .preset-meta { font-size: 9px; }
 .preset-free { font-size: 8px; color: var(--ui-accent); }
 
-.w-label { display: flex; flex-direction: column; gap: 4px; font-size: 10px; margin-bottom: 8px; flex: 1; }
-.bw-input { background: var(--ui-surface); color: var(--ui-text); border: 1px solid var(--ui-border-strong); padding: 6px 8px; font-size: 11px; font-family: inherit; }
+.w-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; min-width: 0; flex: 1; }
+.w-field.grow { flex: 1; min-width: 140px; }
+.w-field.check-field { justify-content: flex-end; padding-bottom: 6px; flex: 0 0 auto; }
+.w-label { font-size: 10px; font-weight: 700; letter-spacing: 0.06em; }
 .w-row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; align-items: flex-end; }
-.w-row .w-label { min-width: 140px; }
-.w-check { font-size: 10px; display: flex; gap: 4px; align-items: center; padding-bottom: 8px; }
 .w-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .w-msg { font-size: 10px; margin-top: 6px; color: color-mix(in srgb, var(--ui-text) 70%, transparent); }
 .w-msg.err { color: var(--ui-danger); }
 .hint { font-size: 9px; }
 .model-row { display: flex; gap: 6px; }
-.model-row .bw-input { flex: 1; }
-
-.bw-btn { background: var(--ui-surface); color: var(--ui-text); border: 2px solid var(--ui-border-strong); padding: 6px 10px; font-size: 10px; font-weight: 700; cursor: pointer; font-family: inherit; }
-.bw-btn.small { font-size: 10px; }
-.bw-btn.xs { font-size: 9px; padding: 3px 6px; border-width: 1px; }
-.bw-btn.primary { background: var(--ui-glass-2); color: var(--ui-text); }
-.bw-btn.danger { border-color: var(--ui-danger); color: var(--ui-danger); }
-.bw-btn:disabled { opacity: 0.4; cursor: default; }
+.model-row .ui-field { flex: 1; }
 
 .config-list, .session-list { display: flex; flex-direction: column; gap: 6px; }
-.config-card, .session-card { border: 1px solid var(--ui-border); padding: 8px 10px; cursor: pointer; }
+.config-card, .session-card {
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-md);
+  padding: 8px 10px;
+  cursor: pointer;
+  background: color-mix(in srgb, var(--ui-glass) 55%, transparent);
+  transition: border-color var(--ui-dur-fast) var(--ui-ease-out), background-color var(--ui-dur-fast) var(--ui-ease-out);
+}
+.config-card:hover, .session-card:hover { border-color: var(--ui-border-hover); }
 .session-card { display: flex; align-items: center; gap: 8px; }
-.config-card.on, .session-card.on { background: color-mix(in srgb, var(--ui-text) 6%, transparent); }
-.cfg-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.config-card.on, .session-card.on {
+  border-color: color-mix(in srgb, var(--ui-accent) 45%, transparent);
+  background: var(--ui-accent-softer);
+}
+.cfg-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap; }
 .cfg-name { font-size: 12px; font-weight: 700; flex: 1; }
 .cfg-type { font-size: 9px; }
-.cfg-status { font-size: 9px; font-weight: 700; border: 1px solid var(--ui-border-strong); padding: 0 4px; }
-.cfg-status.on { background: var(--ui-glass-2); color: var(--ui-text); }
 .cfg-actions { display: flex; gap: 6px; margin-top: 6px; }
 .session-title { font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-meta { font-size: 9px; }
@@ -1142,12 +1287,17 @@ onMounted(async () => {
 
 .thread { border-top: 1px solid var(--ui-border); padding-top: 12px; }
 .thread-actions { margin-bottom: 8px; }
-.mono { font-family: inherit; border: 1px solid var(--ui-border); padding: 0 4px; }
+.mono { font-family: var(--ui-font-mono); border: 1px solid var(--ui-border); padding: 0 4px; border-radius: var(--ui-radius-xs); }
 .remote-list { margin-top: 6px; }
-.remote-row { display: flex; justify-content: space-between; gap: 8px; font-size: 10px; border-bottom: 1px solid var(--ui-border-strong); padding: 2px 0; }
+.remote-row { display: flex; justify-content: space-between; gap: 8px; font-size: 10px; border-bottom: 1px solid var(--ui-hairline); padding: 2px 0; }
 .usage { font-size: 9px; margin-bottom: 6px; }
 .messages { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; max-height: 420px; overflow-y: auto; }
-.msg { border: 1px solid var(--ui-border); padding: 6px 8px; }
+.msg {
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-md);
+  padding: 6px 8px;
+  background: color-mix(in srgb, var(--ui-glass) 45%, transparent);
+}
 .msg-role { font-size: 9px; font-weight: 700; margin-bottom: 4px; }
 .msg-body { font-size: 11px; white-space: pre-wrap; word-break: break-word; }
 .role-user { border-color: var(--ui-border); }
@@ -1157,10 +1307,37 @@ onMounted(async () => {
 .tool-name { font-size: 10px; font-weight: 700; }
 .tool-input { font-size: 9px; color: color-mix(in srgb, var(--ui-text) 70%, transparent); white-space: pre-wrap; margin: 4px 0 0; }
 
-.approval { border: 2px solid var(--ui-warning); padding: 8px; margin-bottom: 10px; }
-.approval-title { font-size: 10px; font-weight: 700; color: var(--ui-warning); margin-bottom: 4px; }
+.approval {
+  border: 1px solid color-mix(in srgb, var(--ui-warning) 55%, transparent);
+  border-radius: var(--ui-radius-md);
+  padding: 8px;
+  margin-bottom: 10px;
+  background: color-mix(in srgb, var(--ui-warning) 8%, transparent);
+  backdrop-filter: blur(calc(var(--ui-blur) * 0.4));
+  -webkit-backdrop-filter: blur(calc(var(--ui-blur) * 0.4));
+}
+.approval-title { font-size: 10px; font-weight: 700; color: var(--ui-warning); margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
 .approval-text { font-size: 11px; margin-bottom: 8px; word-break: break-word; }
 
-.prompt-box { width: 100%; min-height: 64px; resize: vertical; margin-bottom: 8px; }
+.prompt-box {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  margin-bottom: 8px;
+  background: color-mix(in srgb, var(--ui-surface) 70%, transparent);
+  border: 1px solid var(--ui-border-strong);
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text);
+  font-family: var(--ui-font);
+  font-size: var(--ui-fs-sm);
+  padding: 8px 10px;
+  outline: none;
+  transition: border-color var(--ui-dur) var(--ui-ease-out), box-shadow var(--ui-dur) var(--ui-ease-out);
+}
+.prompt-box:hover { border-color: var(--ui-border-hover); }
+.prompt-box:focus {
+  border-color: color-mix(in srgb, var(--ui-accent) 70%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-accent) 15%, transparent);
+}
 .text-muted { color: color-mix(in srgb, var(--ui-text) 50%, transparent) !important; }
 </style>

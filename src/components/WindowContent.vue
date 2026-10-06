@@ -2,26 +2,25 @@
   <div class="window-content-panel">
     <!-- Search Panel -->
     <div v-if="panelType === 'search'" class="panel-search">
-      <div class="bw-card" style="padding: 12px; margin-bottom: 12px;">
+      <div class="bw-card search-card">
         <div class="bw-title">TANTIVY SEARCH</div>
-        <div class="search-controls">
-          <p class="text-muted" style="flex:1;">"{{ store.searchQuery }}" - {{ filteredSearchResults.length }} RESULTS</p>
-          <select v-model="searchTypeFilter" class="bw-select-sm" title="FILTER BY TYPE">
-            <option value="all">ALL</option>
-            <option value="image">IMAGES</option>
-            <option value="text">TEXT</option>
-            <option value="folder">FOLDERS</option>
-            <option value="file">FILES</option>
-          </select>
-          <label class="search-current-dir" title="SEARCH ONLY IN CURRENT DIRECTORY">
-            <input type="checkbox" v-model="searchCurrentDir" class="bw-checkbox" />
-            <span class="text-muted" style="font-size:9px;">DIR</span>
-          </label>
-        </div>
+        <UiToolbar glass divided>
+          <template #lead>
+            <p class="text-muted search-summary">"{{ store.searchQuery }}" - {{ filteredSearchResults.length }} RESULTS</p>
+          </template>
+          <UiSelect
+            v-model="searchTypeFilter"
+            :options="SEARCH_TYPE_OPTIONS"
+            inline
+            aria-label="Filter by type"
+            title="FILTER BY TYPE"
+          />
+          <UiCheckbox v-model="searchCurrentDir" label="DIR" title="SEARCH ONLY IN CURRENT DIRECTORY" />
+        </UiToolbar>
       </div>
 
       <div v-if="recentSearches.length > 0 && !store.searchQuery" class="recent-searches">
-        <div class="bw-title" style="padding: 0 12px; margin-bottom: 6px;">RECENT SEARCHES</div>
+        <div class="bw-title">RECENT SEARCHES</div>
         <div v-for="sq in recentSearches" :key="sq" class="recent-search-item" @click="store.searchQuery = sq; store.searchFiles(sq)">
           <span class="text-muted"><AppIcon name="solar:history-bold" :size="12" /></span>
           <span>{{ sq }}</span>
@@ -42,35 +41,49 @@
           </div>
           <div class="search-result-score">{{ result.score.toFixed(3) }}</div>
         </div>
-        <button
+        <UiButton
           v-if="filteredSearchResults.length < store.searchTotalResults"
-          class="load-more-btn"
-          @click="store.loadMoreSearchResults()"
+          icon="solar:double-alt-arrow-down-bold"
           :disabled="store.isSearching"
-        ><AppIcon name="solar:double-alt-arrow-down-bold" :size="13" /> LOAD MORE ({{ store.searchTotalResults - filteredSearchResults.length }} MORE)</button>
+          @click="store.loadMoreSearchResults()"
+        >
+          LOAD MORE ({{ store.searchTotalResults - filteredSearchResults.length }} MORE)
+        </UiButton>
       </div>
-      <div v-else-if="store.searchQuery && !store.isSearching" class="empty-state">
-        <p class="text-muted">NO RESULTS FOR "{{ store.searchQuery }}"</p>
-      </div>
-      <div v-else-if="!store.searchQuery" class="empty-state">
-        <p class="text-muted">TYPE IN SEARCH BAR FOR TANTIVY BM25 SEARCH</p>
-      </div>
+      <UiEmpty
+        v-else-if="store.searchQuery && !store.isSearching"
+        size="sm"
+        icon="solar:magnifier-bold"
+        :title="`No results for “${store.searchQuery}”`"
+      />
+      <UiEmpty
+        v-else-if="!store.searchQuery"
+        size="sm"
+        icon="solar:magnifier-bold"
+        title="Tantivy BM25 search"
+        description="Type in the search bar to search file contents."
+      />
     </div>
 
     <!-- Trash Panel -->
     <div v-if="panelType === 'trash'" class="panel-page">
       <div class="panel-card">
-        <div class="trash-header">
-          <div class="panel-title">TRASH</div>
-          <div class="trash-actions">
-            <button class="panel-btn" @click="store.fetchTrashItems()" title="REFRESH TRASH" aria-label="REFRESH TRASH"><AppIcon name="solar:refresh-bold" :size="12" /></button>
-            <button class="panel-btn panel-btn-danger" @click="store.emptyTrash()" title="EMPTY TRASH" aria-label="EMPTY TRASH"><AppIcon name="solar:trash-bin-trash-bold" :size="12" /></button>
-          </div>
-        </div>
+        <UiToolbar divided>
+          <template #lead>
+            <div class="panel-title">TRASH</div>
+          </template>
+          <template #trail>
+            <UiButton size="sm" icon="solar:refresh-bold" icon-only title="REFRESH TRASH" aria-label="REFRESH TRASH" @click="store.fetchTrashItems()" />
+            <UiButton size="sm" variant="danger" icon="solar:trash-bin-trash-bold" icon-only title="EMPTY TRASH" aria-label="EMPTY TRASH" @click="store.emptyTrash()" />
+          </template>
+        </UiToolbar>
         <p class="panel-hint">DELETED FILES CAN BE RESTORED FROM HERE.</p>
-        <div v-if="store.trashItems.length === 0" class="empty-state" style="height:80px;">
-          <p class="text-muted">NO FILES IN TRASH</p>
-        </div>
+        <UiEmpty
+          v-if="store.trashItems.length === 0"
+          size="sm"
+          icon="solar:trash-bin-trash-bold"
+          title="No files in trash"
+        />
         <div v-else class="trash-list">
           <div v-for="item in store.trashItems" :key="item.id" class="trash-item">
             <span class="trash-icon"><AppIcon :name="item.originalFile.fileType === 'folder' ? 'solar:folder-bold' : 'solar:file-bold'" :size="14" /></span>
@@ -79,8 +92,8 @@
               <span class="trash-date text-muted">{{ new Date(item.deletedAt).toLocaleDateString() }}</span>
             </div>
             <div class="trash-actions">
-              <button class="trash-action-btn" @click="store.restoreTrashItem(item.originalFile.id)" title="RESTORE" aria-label="RESTORE"><AppIcon name="solar:undo-left-round-bold" :size="12" /></button>
-              <button class="trash-action-btn danger" @click="store.deleteFromTrash(item.originalFile.id)" title="DELETE PERMANENTLY" aria-label="DELETE PERMANENTLY"><AppIcon name="solar:trash-bin-trash-bold" :size="12" /></button>
+              <UiButton size="xs" icon="solar:undo-left-round-bold" icon-only title="RESTORE" aria-label="RESTORE" @click="store.restoreTrashItem(item.originalFile.id)" />
+              <UiButton size="xs" variant="danger" icon="solar:trash-bin-trash-bold" icon-only title="DELETE PERMANENTLY" aria-label="DELETE PERMANENTLY" @click="store.deleteFromTrash(item.originalFile.id)" />
             </div>
           </div>
         </div>
@@ -90,14 +103,21 @@
     <!-- Activity Panel -->
     <div v-if="panelType === 'activity'" class="panel-page">
       <div class="panel-card">
-        <div class="trash-header">
-          <div class="panel-title">ACTIVITY LOG</div>
-          <button class="panel-btn" @click="store.fetchAuditLog()" title="REFRESH" aria-label="REFRESH ACTIVITY"><AppIcon name="solar:refresh-bold" :size="12" /></button>
-        </div>
+        <UiToolbar divided>
+          <template #lead>
+            <div class="panel-title">ACTIVITY LOG</div>
+          </template>
+          <template #trail>
+            <UiButton size="sm" icon="solar:refresh-bold" icon-only title="REFRESH" aria-label="REFRESH ACTIVITY" @click="store.fetchAuditLog()" />
+          </template>
+        </UiToolbar>
         <p class="panel-hint">FILE OPERATIONS TIMELINE.</p>
-        <div v-if="store.auditLog.length === 0" class="empty-state" style="height:80px;">
-          <p class="text-muted">NO RECENT ACTIVITY</p>
-        </div>
+        <UiEmpty
+          v-if="store.auditLog.length === 0"
+          size="sm"
+          icon="solar:pulse-bold"
+          title="No recent activity"
+        />
         <div v-else class="activity-list">
           <div v-for="entry in store.auditLog" :key="entry.id" class="activity-item">
             <span class="activity-action">{{ entry.action.toUpperCase() }}</span>
@@ -113,9 +133,12 @@
     <div v-if="panelType === 'favorites'" class="panel-page">
       <div class="panel-card">
         <div class="panel-title">FAVORITES</div>
-        <div v-if="store.starredFiles.length === 0" class="empty-state" style="height:100px;">
-          <p class="text-muted">NO STARRED FILES</p>
-        </div>
+        <UiEmpty
+          v-if="store.starredFiles.length === 0"
+          size="sm"
+          icon="solar:star-bold"
+          title="No starred files"
+        />
         <div v-else class="fav-list">
           <div v-for="f in store.starredFiles" :key="f.id" class="fav-item" @click="store.selectFile(f.id)">
             <span class="fav-icon"><AppIcon :name="f.fileType === 'folder' ? 'solar:folder-bold' : 'solar:file-bold'" :size="14" /></span>
@@ -129,9 +152,12 @@
     <div v-if="panelType === 'recent'" class="panel-page">
       <div class="panel-card">
         <div class="panel-title">RECENT FILES</div>
-        <div v-if="recentFiles.length === 0" class="empty-state" style="height:100px;">
-          <p class="text-muted">NO FILES YET</p>
-        </div>
+        <UiEmpty
+          v-if="recentFiles.length === 0"
+          size="sm"
+          icon="solar:history-bold"
+          title="No files yet"
+        />
         <div v-else class="recent-list">
           <div
             v-for="f in recentFiles"
@@ -181,6 +207,11 @@
 
 <script setup lang="ts">
 import AppIcon from '@/components/AppIcon.vue'
+import UiButton from '@/components/ui/UiButton.vue'
+import UiCheckbox from '@/components/ui/UiCheckbox.vue'
+import UiEmpty from '@/components/ui/UiEmpty.vue'
+import UiSelect from '@/components/ui/UiSelect.vue'
+import UiToolbar from '@/components/ui/UiToolbar.vue'
 import { ref, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { useWindowManager } from '@/composables/useWindowManager'
@@ -195,6 +226,14 @@ const wm = useWindowManager()
 
 const searchTypeFilter = ref('all')
 const searchCurrentDir = ref(false)
+
+const SEARCH_TYPE_OPTIONS = [
+  { label: 'ALL', value: 'all' },
+  { label: 'IMAGES', value: 'image' },
+  { label: 'TEXT', value: 'text' },
+  { label: 'FOLDERS', value: 'folder' },
+  { label: 'FILES', value: 'file' },
+]
 
 const recentSearches = ref<string[]>((() => {
   try { return JSON.parse(localStorage.getItem('cybermanju_recent_searches') || '[]') as string[] } catch { return [] }
@@ -238,29 +277,34 @@ function highlightTerms(text: string, query: string): string {
 
 .panel-page {
   padding: 12px;
-}.panel-card {background: var(--ui-glass);
+}
+
+.panel-card {
+  background: var(--ui-glass);
   border: 1px solid var(--ui-border);
-  border-radius: 8px;
+  border-radius: var(--ui-radius-md);
   padding: 16px;
   backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
   -webkit-backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
+  box-shadow: var(--ui-shadow-1);
 }
 
 .panel-card-row {
   background: var(--ui-glass);
   border: 1px solid var(--ui-border);
-  border-radius: 6px;
+  border-radius: var(--ui-radius-sm);
   padding: 10px 12px;
   cursor: pointer;
-  transition: border-color 0.1s;
+  transition: border-color var(--ui-dur-fast) var(--ui-ease-out);
 }
 
 .panel-card-row:hover {
-  border-color: var(--ui-text-3);
+  border-color: var(--ui-border-hover);
 }
 
 .panel-card-row.active {
-  border-color: color-mix(in srgb, var(--ui-accent) 30%, transparent);
+  border-color: color-mix(in srgb, var(--ui-accent) 40%, transparent);
+  box-shadow: var(--ui-glow-soft);
 }
 
 .panel-title {
@@ -279,59 +323,30 @@ function highlightTerms(text: string, query: string): string {
   margin-bottom: 12px;
 }
 
-.panel-btn {
-  background: transparent;
-  border: 1px solid var(--ui-border-strong);
-  color: var(--ui-text-2);
-  padding: 2px 8px;
-  font-family: var(--ui-font);
-  font-size: 9px;
-  font-weight: 700;
-  cursor: pointer;
-  border-radius: 4px;
-  transition: all 0.1s;
-}
-
-.panel-btn:hover {
-  border-color: var(--ui-text-3);
-  color: var(--ui-text);
-  background: var(--ui-surface-3);
-}
-
-.panel-btn-danger:hover {
-  border-color: var(--ui-danger);
-  color: var(--ui-danger);
-}
-
 .bw-title {
   font-family: var(--ui-font);
   font-size: 11px;
   font-weight: 700;
   color: var(--ui-text);
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   letter-spacing: 1px;
 }
 
 .bw-card {
   background: var(--ui-glass);
   border: 1px solid var(--ui-border);
-  border-radius: 6px;
+  border-radius: var(--ui-radius-md);
   padding: 12px;
   color: var(--ui-text);
+  backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
+  -webkit-backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
 }
+
+.search-card { margin-bottom: 12px; }
+.search-summary { margin: 0; font-size: 10px; flex: 1; min-width: 0; }
 
 .text-muted {
   color: var(--ui-text-3) !important;
-}
-
-.empty-state {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  color: var(--ui-text-3);
-  font-family: var(--ui-font);
-  font-size: 10px;
 }
 
 /* Search panel styles */
@@ -339,80 +354,29 @@ function highlightTerms(text: string, query: string): string {
   padding: 12px;
 }
 
-.search-controls {
+.recent-searches {
+  margin-bottom: 10px;
+}
+
+.recent-search-item {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.bw-select-sm {
-  background: var(--ui-surface);
-  border: 1px solid var(--ui-border-strong);
-  color: var(--ui-text);
+  padding: 6px 10px;
+  cursor: pointer;
   font-family: var(--ui-font);
-  font-size: 9px;
-  padding: 2px 4px;
-  cursor: pointer;
-  appearance: none;
-  border-radius: 4px;
-}
-
-.bw-input-sm {
-  background: var(--ui-surface);
-  border: 1px solid var(--ui-border-strong);
+  font-size: 11px;
   color: var(--ui-text);
-  font-family: var(--ui-font);
-  font-size: 9px;
-  padding: 3px 6px;
-  border-radius: 4px;
-  min-width: 0;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-sm);
+  margin-bottom: 4px;
+  background: var(--ui-glass);
+  transition: border-color var(--ui-dur-fast) var(--ui-ease-out);
 }
 
-.session-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.session-user {
-  font-size: 10px;
-  color: var(--ui-text);
-  font-weight: 700;
-}
-
-.acct-create {
-  display: flex;
-  gap: 4px;
-  margin-top: 8px;
-  flex-wrap: wrap;
-}
-
-.acct-create .bw-input-sm {
-  flex: 1;
-  min-width: 90px;
-}
-
-.search-current-dir {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-}
-
-.bw-checkbox {
-  appearance: none;
-  width: 12px;
-  height: 12px;
-  border: 1px solid var(--ui-text-3);
-  background: var(--ui-surface);
-  cursor: pointer;
-  border-radius: 2px;
-}
-
-.bw-checkbox:checked {
-  background: var(--ui-accent);
-  border-color: var(--ui-accent);
+.recent-search-item:hover {
+  border-color: var(--ui-border-hover);
+  background: var(--ui-glass-2);
 }
 
 .search-results-list {
@@ -421,17 +385,18 @@ function highlightTerms(text: string, query: string): string {
   gap: 4px;
 }
 
-.search-result-item {display: flex;
+.search-result-item {
+  display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 10px !important;
+  padding: 10px;
   cursor: pointer;
-  transition: border-color 0.1s;
+  transition: border-color var(--ui-dur-fast) var(--ui-ease-out);
   border-radius: var(--ui-radius-md);
 }
 
 .search-result-item:hover {
-  border-color: var(--ui-text-faint);
+  border-color: var(--ui-border-hover);
 }
 
 .search-match-type {
@@ -441,7 +406,7 @@ function highlightTerms(text: string, query: string): string {
   background: var(--ui-surface-3);
   color: var(--ui-text-2);
   white-space: nowrap;
-  border-radius: 3px;
+  border-radius: var(--ui-radius-xs);
 }
 
 .search-result-body {
@@ -450,85 +415,87 @@ function highlightTerms(text: string, query: string): string {
 }
 
 .search-result-name {
-  font-family: var(--ui-font);
-  font-weight: 600;
-  color: var(--ui-text);
-  margin-bottom: 2px;
   font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 2px;
 }
 
 .search-result-snippet {
-  font-size: 9px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ui-text-3);
+  font-size: 10px;
+  word-break: break-word;
 }
 
 .search-result-score {
-  font-family: var(--ui-font);
+  font-family: var(--ui-font-mono);
   font-size: 9px;
   color: var(--ui-text-3);
-  white-space: nowrap;
 }
 
-.load-more-btn {
-  width: 100%;
-  padding: 8px;
-  background: transparent;
-  border: 1px solid var(--ui-border-strong);
-  border-radius: 6px;
-  color: var(--ui-text-2);
-  font-family: var(--ui-font);
-  font-size: 10px;
-  font-weight: 700;
-  cursor: pointer;
-  text-align: center;
-  transition: all 0.1s;
-}
-
-.load-more-btn:hover {
-  border-color: var(--ui-text-3);
+.search-result-name :deep(mark),
+.search-result-snippet :deep(mark) {
+  background: color-mix(in srgb, var(--ui-accent) 35%, transparent);
   color: var(--ui-text);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.trash-list,
+.activity-list,
+.fav-list,
+.recent-list,
+.loose-groups-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.trash-item,
+.fav-item,
+.recent-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-sm);
   background: var(--ui-glass);
+  cursor: pointer;
+  transition: border-color var(--ui-dur-fast) var(--ui-ease-out);
 }
 
-.load-more-btn:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
+.trash-item:hover,
+.fav-item:hover,
+.recent-item:hover {
+  border-color: var(--ui-border-hover);
 }
 
-.recent-searches {
+.trash-icon,
+.fav-icon,
+.recent-icon {
+  color: var(--ui-text-2);
+  display: flex;
+  flex-shrink: 0;
+}
+
+.trash-info,
+.recent-info {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  margin-bottom: 12px;
 }
 
-.recent-search-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  font-size: 10px;
-  cursor: pointer;
-  border: 1px solid transparent;
-  font-family: var(--ui-font);
-  color: var(--ui-text);
-  border-radius: 4px;
+.trash-name,
+.fav-name,
+.recent-name {
+  font-size: 11px;
+  font-weight: 600;
 }
 
-.recent-search-item:hover {
-  border-color: var(--ui-text-3);
-  background: var(--ui-glass);
-}
-
-/* Trash styles */
-.trash-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 4px;
+.trash-date,
+.recent-date {
+  font-size: 9px;
 }
 
 .trash-actions {
@@ -536,223 +503,48 @@ function highlightTerms(text: string, query: string): string {
   gap: 4px;
 }
 
-.trash-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.trash-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
-  border: 1px solid transparent;
-  border-radius: 4px;
-}
-
-.trash-item:hover {
-  border-color: var(--ui-text-3);
-  background: var(--ui-glass);
-}
-
-.trash-icon {
-  font-size: 10px;
-  flex-shrink: 0;
-  color: var(--ui-text-3);
-}
-
-.trash-info {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.trash-name {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--ui-text);
-}
-
-.trash-date {
-  font-size: 8px;
-  color: var(--ui-text-3) !important;
-}
-
-.trash-action-btn {
-  background: transparent;
-  border: 1px solid var(--ui-border-strong);
-  color: var(--ui-text-2);
-  padding: 1px 6px;
-  font-family: var(--ui-font);
-  font-size: 8px;
-  font-weight: 700;
-  cursor: pointer;
-  border-radius: 3px;
-  transition: all 0.1s;
-}
-
-.trash-action-btn:hover {
-  border-color: var(--ui-text-3);
-  color: var(--ui-text);
-}
-
-.trash-action-btn.danger:hover {
-  border-color: var(--ui-danger);
-  color: var(--ui-danger);
-}
-
-/* Activity styles */
-.activity-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
 .activity-item {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
-  padding: 4px 6px;
-  font-size: 9px;
-  border-bottom: 1px solid var(--ui-border-strong);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--ui-hairline);
+  font-size: 10px;
+  align-items: baseline;
 }
 
 .activity-action {
   font-weight: 700;
-  color: var(--ui-text);
-  flex-shrink: 0;
-  min-width: 50px;
+  min-width: 72px;
 }
 
 .activity-entity {
-  flex-shrink: 0;
-  min-width: 30px;
+  min-width: 70px;
 }
 
 .activity-date {
-  flex-shrink: 0;
+  font-family: var(--ui-font-mono);
+  font-size: 9px;
 }
 
 .activity-detail {
-  flex: 1;
+  font-family: var(--ui-font-mono);
+  font-size: 9px;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  text-align: right;
 }
 
-/* Favorites/Recent styles */
-.fav-list, .recent-list {
+.lg-info {
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.fav-item, .recent-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 5px 8px;
-  cursor: pointer;
-  border: 1px solid transparent;
-  border-radius: 4px;
-}
-
-.fav-item:hover, .recent-item:hover {
-  border-color: var(--ui-text-3);
-  background: var(--ui-glass);
-}
-
-.fav-icon, .recent-icon {
-  font-size: 10px;
-  flex-shrink: 0;
-  color: var(--ui-text-3);
-}
-
-.fav-name, .recent-name {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--ui-text);
-  flex: 1;
-}
-
-.recent-info {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.recent-date {
-  font-size: 8px;
-  color: var(--ui-text-3) !important;
-}
-
-/* Accounts styles */
-.accounts-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.account-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.account-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.account-name {
-  font-weight: 600;
-  font-size: 11px;
-  color: var(--ui-text);
-}
-
-.account-meta {
-  font-size: 9px;
-  margin-top: 1px;
-  color: var(--ui-text-3);
-}
-
-.active-badge {
-  font-size: 8px;
-  font-weight: 700;
-  padding: 2px 8px;
-  background: color-mix(in srgb, var(--ui-accent) 10%, transparent);
-  color: var(--ui-accent);
-  border: 1px solid color-mix(in srgb, var(--ui-accent) 20%, transparent);
-  border-radius: 3px;
-  letter-spacing: 0.5px;
-}
-
-/* Loose groups styles */
-.loose-groups-list {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.loose-group-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.lg-info {
-  flex: 1;
-  min-width: 0;
-}
-
 .lg-name {
-  font-weight: 600;
-  color: var(--ui-text);
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .lg-count {
@@ -760,64 +552,32 @@ function highlightTerms(text: string, query: string): string {
   color: var(--ui-text-3);
 }
 
-/* Style tags */
 .style-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  gap: 6px;
 }
 
 .style-tag {
-  display: inline-block;
-  padding: 2px 8px;
-  font-size: 9px;
-  font-family: var(--ui-font);
-  font-weight: 600;
-  border: 1px solid var(--ui-border-strong);
-  border-radius: 4px;
+  font-family: var(--ui-font-mono);
+  font-size: 10px;
+  padding: 4px 10px;
+  border-radius: var(--ui-radius-full);
+  border: 1px solid var(--ui-border);
+  background: var(--ui-glass);
   color: var(--ui-text-2);
   cursor: pointer;
-  transition: all 0.1s;
+  transition: border-color var(--ui-dur-fast) var(--ui-ease-out), color var(--ui-dur-fast) var(--ui-ease-out);
 }
 
 .style-tag:hover {
-  border-color: var(--ui-text-3);
-  color: var(--ui-text);
-  background: var(--ui-glass);
-}
-
-.bw-dot {
-  width: 8px;
-  height: 8px;
-  display: inline-block;
-  border: 2px solid var(--ui-text-3);
-  background: transparent;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.bw-dot-on {
-  background: var(--ui-accent);
-  border-color: var(--ui-accent);
+  border-color: color-mix(in srgb, var(--ui-accent) 55%, transparent);
+  color: var(--ui-accent);
 }
 
 .truncate {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.search-result-name :deep(mark) {
-  background: color-mix(in srgb, var(--ui-accent) 20%, transparent);
-  color: var(--ui-accent);
-  padding: 0 2px;
-  border-radius: 2px;
-}
-
-.search-result-snippet :deep(mark) {
-  background: color-mix(in srgb, var(--ui-text) 10%, transparent);
-  color: var(--ui-text);
-  padding: 0 2px;
-  border-radius: 2px;
 }
 </style>

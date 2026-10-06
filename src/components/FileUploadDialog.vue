@@ -30,7 +30,14 @@
 
         <div class="upload-footer" v-if="files.length > 0">
           <span class="upload-progress-text">{{ completedCount }}/{{ files.length }} FILES</span>
-          <button class="bw-btn" @click="startUpload" :disabled="isUploading"><AppIcon name="solar:upload-bold" :size="13" /> UPLOAD</button>
+          <UiButton
+            variant="primary"
+            size="sm"
+            icon="solar:upload-bold"
+            :loading="isUploading"
+            :disabled="isUploading"
+            @click="startUpload"
+          >UPLOAD</UiButton>
         </div>
       </div>
     </div>
@@ -39,6 +46,7 @@
 
 <script setup lang="ts">
 import AppIcon from '@/components/AppIcon.vue'
+import UiButton from '@/components/ui/UiButton.vue'
 import { ref, toRef, computed, watch, nextTick } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { humanBytes } from '@/utils/format'
@@ -156,33 +164,44 @@ async function startUpload() {
 .upload-close {
   background: transparent;
   border: 1px solid var(--ui-border);
-  color: var(--ui-text);
-  padding: 2px 6px;
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-2);
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   font-family: var(--ui-font);
-  font-size: 9px;
+  transition:
+    background-color var(--ui-dur-fast) var(--ui-ease-out),
+    border-color var(--ui-dur-fast) var(--ui-ease-out),
+    color var(--ui-dur-fast) var(--ui-ease-out);
 }
 
 .upload-close:hover {
   background: var(--ui-glass-2);
+  border-color: var(--ui-border-hover);
   color: var(--ui-text);
 }
 
 .drop-zone {
-  border: 2px dashed var(--ui-border);
+  border: 1px dashed var(--ui-border-strong);
+  border-radius: var(--ui-radius-md);
   margin: 12px;
   padding: 32px;
   text-align: center;
   cursor: pointer;
   font-size: 10px;
-  color: color-mix(in srgb, var(--ui-text) 50%, transparent);
-  transition: border-color 0.15s, background 0.15s;
+  color: var(--ui-text-3);
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
 }
 
 .drop-zone:hover,
 .drop-zone.drop-active {
-  border-color: var(--ui-border-strong);
-  background: color-mix(in srgb, var(--ui-text) 6%, transparent);
+  border-color: color-mix(in srgb, var(--ui-accent) 55%, transparent);
+  background: var(--ui-accent-softer);
+  color: var(--ui-text);
 }
 
 .file-input-hidden {
@@ -203,9 +222,11 @@ async function startUpload() {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 8px;
+  padding: 5px 8px;
   border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-sm);
   font-size: 9px;
+  background: color-mix(in srgb, var(--ui-glass) 50%, transparent);
 }
 
 .upload-file-row.done {
@@ -214,14 +235,14 @@ async function startUpload() {
 }
 
 .upload-file-row.error {
-  border-color: var(--ui-border-strong);
-  background: color-mix(in srgb, var(--ui-text) 6%, transparent);
+  border-color: color-mix(in srgb, var(--ui-danger) 45%, transparent);
+  background: color-mix(in srgb, var(--ui-danger) 10%, transparent);
 }
 
 .uf-name { flex: 1; }
 .uf-size { flex-shrink: 0; }
 .uf-status { flex-shrink: 0; font-weight: 700; }
-.uf-error { flex: 1; text-align: right; font-size: 8px; }
+.uf-error { flex: 1; text-align: right; font-size: 8px; color: var(--ui-danger); }
 
 .upload-footer {
   display: flex;
@@ -233,28 +254,7 @@ async function startUpload() {
 
 .upload-progress-text {
   font-size: 10px;
-  color: color-mix(in srgb, var(--ui-text) 50%, transparent);
-}
-
-.bw-btn {
-  background: transparent;
-  border: 1px solid var(--ui-border);
-  color: var(--ui-text);
-  padding: 4px 12px;
-  cursor: pointer;
-  font-family: var(--ui-font);
-  font-size: 10px;
-  font-weight: 700;
-}
-
-.bw-btn:hover {
-  background: var(--ui-glass-2);
-  color: var(--ui-text);
-}
-
-.bw-btn:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
+  color: var(--ui-text-3);
 }
 
 .text-muted { color: color-mix(in srgb, var(--ui-text) 50%, transparent) !important; }

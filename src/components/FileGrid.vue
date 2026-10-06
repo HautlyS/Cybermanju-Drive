@@ -18,7 +18,7 @@
       </div>
       <div class="ft-center">
         <span class="ft-info">{{ sortedFiles.length }} ITEMS</span>
-        <span v-if="store.isMultiSelect && selectedCount" class="ft-info" style="margin-left:8px;color:#FFFFFF;">{{ selectedCount }} SEL</span>
+        <span v-if="store.isMultiSelect && selectedCount" class="ft-info" style="margin-left:8px;color:var(--ui-on-accent);">{{ selectedCount }} SEL</span>
       </div>
       <div class="ft-right">
         <input
@@ -976,32 +976,39 @@ async function handleRenameConfirm() {
 .context-menu {
   position: fixed;
   z-index: 1000;
-  background: var(--ui-surface);
+  background: var(--ui-glass-2);
   border: 1px solid var(--ui-border);
   min-width: 180px;
   font-family: var(--ui-font);
   font-size: 10px;
   color: var(--ui-text);
-  box-shadow: 4px 4px 0 var(--ui-border);
+  border-radius: var(--ui-radius-md);
+  box-shadow: var(--ui-shadow-2);
+  backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
+  -webkit-backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
+  padding: 4px;
 }
 
 .context-menu-item {
   position: relative;
   padding: 6px 12px;
+  border-radius: var(--ui-radius-sm);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  color: var(--ui-text-2);
+  transition: background-color var(--ui-dur-fast) var(--ui-ease-out), color var(--ui-dur-fast) var(--ui-ease-out);
 }
 
 .context-menu-item:hover {
-  background: var(--ui-glass-2);
+  background: var(--ui-accent-softer);
   color: var(--ui-text);
 }
 
 .context-menu-item.danger:hover {
-  background: var(--ui-glass-2);
-  color: var(--ui-text);
+  background: color-mix(in srgb, var(--ui-danger) 14%, transparent);
+  color: var(--ui-danger);
 }
 
 .context-menu-item.disabled {
@@ -1018,11 +1025,15 @@ async function handleRenameConfirm() {
   position: absolute;
   left: 100%;
   top: -2px;
-  background: var(--ui-surface);
+  background: var(--ui-glass-2);
   border: 1px solid var(--ui-border);
   min-width: 220px;
   z-index: 1001;
-  box-shadow: 4px 4px 0 var(--ui-border);
+  border-radius: var(--ui-radius-md);
+  box-shadow: var(--ui-shadow-2);
+  padding: 4px;
+  backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
+  -webkit-backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
 }
 
 .submenu-right {
@@ -1046,13 +1057,13 @@ async function handleRenameConfirm() {
   z-index: 100;
 }
 
-.rename-modal {background: var(--ui-surface);
+.rename-modal {background: var(--ui-glass-2);
   border: 1px solid var(--ui-border);
   padding: 16px;
   width: 300px;
   font-family: var(--ui-font);
   color: var(--ui-text);
-  box-shadow: 4px 4px 0 var(--ui-border);
+  box-shadow: var(--ui-shadow-3);
   border-radius: var(--ui-radius-lg);
   backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
   -webkit-backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));

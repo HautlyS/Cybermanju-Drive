@@ -188,7 +188,7 @@ onUnmounted(() => {
 
 <style scoped>.ctx-menu {position: fixed;
   z-index: 9999;
-  background: var(--ui-surface);
+  background: var(--ui-glass-2);
   border: 1px solid var(--ui-border);
   min-width: 180px;
   max-width: 300px;
@@ -196,7 +196,7 @@ onUnmounted(() => {
   font-family: var(--ui-font);
   font-size: 10px;
   color: var(--ui-text);
-  box-shadow: 4px 4px 0 var(--ui-border);
+  box-shadow: var(--ui-shadow-2);
   outline: none;
   backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
   -webkit-backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
@@ -212,15 +212,19 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 12px;
+  padding: 6px 12px;
+  margin: 1px 4px;
+  border-radius: var(--ui-radius-sm);
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
+  color: var(--ui-text-2);
+  transition: background-color var(--ui-dur-fast) var(--ui-ease-out), color var(--ui-dur-fast) var(--ui-ease-out);
 }
 
 .ctx-item:hover,
 .ctx-focused {
-  background: var(--ui-glass-2);
+  background: var(--ui-accent-softer);
   color: var(--ui-text);
 }
 
