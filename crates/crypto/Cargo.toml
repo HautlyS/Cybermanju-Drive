@@ -6,7 +6,7 @@ description = "Post-quantum cryptography engine (ML-KEM, ML-DSA, ChaCha20)"
 
 [dependencies]
 anyhow = "1"
-base64 = "0.22"
+base64 = "0.23"
 blake3 = "1"
 chacha20poly1305 = "0.10"
 chrono = { version = "0.4", features = ["serde"] }
