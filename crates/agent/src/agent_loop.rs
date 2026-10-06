@@ -48,7 +48,7 @@ impl AgentTurn {
         Self {
             messages,
             turns_used: 0,
-            max_turns: max_turns.min(MAX_TURNS_HARD_CAP).max(1),
+            max_turns: max_turns.clamp(1, MAX_TURNS_HARD_CAP),
             usage: TokenUsage::default(),
             task_depth,
             last_finish: String::new(),

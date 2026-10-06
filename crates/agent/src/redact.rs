@@ -64,7 +64,7 @@ pub fn redact(text: &str) -> (String, usize) {
             let matches = window
                 .iter()
                 .zip(needle.iter())
-                .all(|(a, b)| a.to_ascii_lowercase() == b.to_ascii_lowercase());
+                .all(|(a, b)| a.eq_ignore_ascii_case(b));
             if !matches {
                 from += 1;
                 continue;

@@ -160,7 +160,6 @@ async fn agent_prompt_inner(req_json: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    
 
     #[test]
     fn catalog_serializes_ten_presets() {

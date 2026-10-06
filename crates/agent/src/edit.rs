@@ -82,7 +82,7 @@ fn fuzzy_locate(haystack: &str, needle: &str) -> Result<Option<std::ops::Range<u
             in_gap = false;
             let before = out.len();
             out.push(ch);
-            map.extend(std::iter::repeat(byte).take(out.len() - before));
+            map.extend(std::iter::repeat_n(byte, out.len() - before));
         }
         (out, map)
     }

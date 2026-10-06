@@ -539,12 +539,15 @@ pub fn get_json(url: &str, headers: &[(String, String)]) -> Result<serde_json::V
 /// Raw POST returning status + headers + body (Streamable HTTP clients need
 /// the session header). Same timeout and prefix contract as `post_json`.
 #[cfg(feature = "native")]
+/// Status code, response headers and body of a completed HTTP POST.
+pub type RawResponse = Result<(u16, Vec<(String, String)>, String), String>;
+
 pub fn post_raw(
     url: &str,
     headers: &[(String, String)],
     body: &serde_json::Value,
     timeout_secs: u64,
-) -> Result<(u16, Vec<(String, String)>, String), String> {
+) -> RawResponse {
     let client = reqwest::blocking::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(15))
         .timeout(std::time::Duration::from_secs(timeout_secs))

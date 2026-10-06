@@ -708,7 +708,7 @@ fn tool_glob(
                 .to_string_lossy()
                 .replace('\\', "/");
             if cybermanju_agent::config::match_glob(pattern, &rel) {
-                let display = if &base == vol {
+                let display = if base == *vol {
                     format!("/{rel}")
                 } else {
                     rel.clone()
@@ -1065,7 +1065,7 @@ fn mcp_connect_stdio(
     let command = cfg.command.clone().unwrap_or_default();
     let mut child = Command::new(&command)
         .args(&cfg.args)
-        .envs(cfg.env.iter().map(|(k, v)| (k, v)))
+        .envs(cfg.env.iter())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -1303,7 +1303,7 @@ fn http_post_raw(
     headers: &[(String, String)],
     body: &serde_json::Value,
     timeout_secs: u64,
-) -> Result<(u16, Vec<(String, String)>, String), String> {
+) -> cybermanju_agent::protocol::RawResponse {
     protocol::post_raw(url, headers, body, timeout_secs)
 }
 
@@ -2199,7 +2199,7 @@ fn run_subagent(
             &repo_overview(root),
             agent_loop::Sandbox::Native
         ),
-        load_project_rules(&root)
+        load_project_rules(root)
     );
     let headers = endpoint_headers(&endpoint, &api_key);
     let model = config.model.clone();
