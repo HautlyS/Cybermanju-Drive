@@ -19,6 +19,7 @@
         :max="max"
         :step="step"
         :autocomplete="autocomplete"
+        :list="list || undefined"
         :spellcheck="false"
         @input="onInput"
         @focus="focused = true"
@@ -65,6 +66,7 @@ withDefaults(
     max?: number
     step?: number
     autocomplete?: string
+    list?: string
   }>(),
   {
     modelValue: '',
@@ -83,6 +85,7 @@ withDefaults(
     max: undefined,
     step: undefined,
     autocomplete: 'off',
+    list: '',
   }
 )
 

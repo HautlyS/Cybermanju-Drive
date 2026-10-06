@@ -5,51 +5,94 @@
         <span class="icon-sync"><AppIcon name="solar:refresh-bold" /></span>
         <h2 class="panel-title">STORAGE SYNC</h2>
       </div>
-      <button class="bw-btn small" @click="showWizard = !showWizard">{{ showWizard ? 'CLOSE' : '+ CONFIG' }}</button>
+      <UiButton size="sm" :icon="showWizard ? 'solar:close-bold' : 'solar:add-bold'" @click="showWizard = !showWizard">
+        {{ showWizard ? 'CLOSE' : 'CONFIG' }}
+      </UiButton>
     </div>
 
     <!-- Config wizard -->
     <div v-if="showWizard" class="section wizard">
       <h3 class="section-title"><AppIcon name="solar:add-bold" :size="13" /> PROVIDER CONFIG</h3>
-      <label class="w-label">BACKEND
-        <select v-model="form.backendType" class="bw-input">
-          <option v-for="(info, key) in SYNC_BACKEND_INFO" :key="key" :value="key">{{ info.name }}</option>
-        </select>
-      </label>
-      <label class="w-label">NAME <input v-model="form.name" class="bw-input" placeholder="MY PROVIDER" /></label>
-      <label v-if="needsBasePath" class="w-label">LOCAL PATH <input v-model="form.basePath" class="bw-input" placeholder="/DATA/SYNC" /></label>
-      <label v-if="needsRepo" class="w-label">REPO (owner/repo) <input v-model="form.repoName" class="bw-input" placeholder="OWNER/REPO" /></label>
-      <label v-if="needsRepo" class="w-label">BRANCH <input v-model="form.branch" class="bw-input" placeholder="MAIN" /></label>
-      <label v-if="needsFolder" class="w-label">DRIVE FOLDER ID <input v-model="form.folderId" class="bw-input" placeholder="FOLDER ID" /></label>
-      <label v-if="needsAlbum" class="w-label">PHOTOS ALBUM ID <input v-model="form.albumId" class="bw-input" placeholder="ALBUM ID" /></label>
-      <label v-if="needsChat" class="w-label">TELEGRAM CHAT ID <input v-model="form.chatId" class="bw-input" placeholder="CHAT ID" /></label>
-      <label class="w-label">TOKEN (PAT / OAuth, never shown back)
-        <input v-model="form.token" type="password" class="bw-input" placeholder="PASTE TOKEN" autocomplete="off" />
-      </label>
-      <div class="w-row">
-        <label class="w-check"><input type="checkbox" v-model="form.enabled" /> ENABLED</label>
-        <label class="w-check"><input type="checkbox" v-model="form.encryptBeforeUpload" /> ENCRYPT</label>
-        <label class="w-check"><input type="checkbox" v-model="form.compressBeforeUpload" /> COMPRESS</label>
+      <div class="w-field">
+        <span class="w-label text-muted">BACKEND</span>
+        <UiSelect
+          :model-value="form.backendType"
+          :options="backendOptions"
+          @update:model-value="form.backendType = $event as SyncConfig['backendType']"
+        />
+      </div>
+      <div class="w-field">
+        <span class="w-label text-muted">NAME</span>
+        <UiInput v-model="form.name" placeholder="MY PROVIDER" aria-label="Provider name" />
+      </div>
+      <div v-if="needsBasePath" class="w-field">
+        <span class="w-label text-muted">LOCAL PATH</span>
+        <UiInput v-model="form.basePath" placeholder="/DATA/SYNC" aria-label="Local path" />
+      </div>
+      <div v-if="needsRepo" class="w-field">
+        <span class="w-label text-muted">REPO (owner/repo)</span>
+        <UiInput v-model="form.repoName" placeholder="OWNER/REPO" aria-label="Repository" />
+      </div>
+      <div v-if="needsRepo" class="w-field">
+        <span class="w-label text-muted">BRANCH</span>
+        <UiInput v-model="form.branch" placeholder="MAIN" aria-label="Branch" />
+      </div>
+      <div v-if="needsFolder" class="w-field">
+        <span class="w-label text-muted">DRIVE FOLDER ID</span>
+        <UiInput v-model="form.folderId" placeholder="FOLDER ID" aria-label="Drive folder id" />
+      </div>
+      <div v-if="needsAlbum" class="w-field">
+        <span class="w-label text-muted">PHOTOS ALBUM ID</span>
+        <UiInput v-model="form.albumId" placeholder="ALBUM ID" aria-label="Photos album id" />
+      </div>
+      <div v-if="needsChat" class="w-field">
+        <span class="w-label text-muted">TELEGRAM CHAT ID</span>
+        <UiInput v-model="form.chatId" placeholder="CHAT ID" aria-label="Telegram chat id" />
+      </div>
+      <div class="w-field">
+        <span class="w-label text-muted">TOKEN (PAT / OAuth, never shown back)</span>
+        <UiInput
+          v-model="form.token"
+          type="password"
+          placeholder="PASTE TOKEN"
+          aria-label="Provider token"
+          autocomplete="off"
+        />
+      </div>
+      <div class="w-row checks">
+        <UiCheckbox v-model="form.enabled" label="ENABLED" />
+        <UiCheckbox v-model="form.encryptBeforeUpload" label="ENCRYPT" />
+        <UiCheckbox v-model="form.compressBeforeUpload" label="COMPRESS" />
       </div>
       <div class="w-row">
-        <label class="w-label">PLACEMENT
-          <select v-model="form.placement" class="bw-input">
-            <option value="whole">WHOLE</option>
-            <option value="striped">STRIPED (≥2 providers)</option>
-          </select>
-        </label>
-        <label class="w-label">POLICY
-          <select v-model="form.conflictPolicy" class="bw-input">
-            <option value="skip">SKIP</option>
-            <option value="overwrite">OVERWRITE</option>
-            <option value="keepBoth">KEEP-BOTH</option>
-          </select>
-        </label>
+        <div class="w-field">
+          <span class="w-label text-muted">PLACEMENT</span>
+          <UiSelect
+            :model-value="form.placement"
+            :options="[
+              { label: 'WHOLE', value: 'whole' },
+              { label: 'STRIPED (≥2 providers)', value: 'striped' },
+            ]"
+            @update:model-value="form.placement = $event as 'whole' | 'striped'"
+          />
+        </div>
+        <div class="w-field">
+          <span class="w-label text-muted">POLICY</span>
+          <UiSelect
+            :model-value="form.conflictPolicy"
+            :options="[
+              { label: 'SKIP', value: 'skip' },
+              { label: 'OVERWRITE', value: 'overwrite' },
+              { label: 'KEEP-BOTH', value: 'keepBoth' },
+            ]"
+            @update:model-value="form.conflictPolicy = $event as 'skip' | 'overwrite' | 'keepBoth'"
+          />
+        </div>
       </div>
       <div class="w-actions">
-        <button class="bw-btn small" :disabled="busy" @click="testCurrent">TEST</button>
-        <button class="bw-btn small primary" :disabled="busy" @click="saveConfig">SAVE</button>
-        <button v-if="oauthable" class="bw-btn small" :disabled="busy" @click="oauthConnect">OAUTH CONNECT</button>
+        <UiButton size="sm" :disabled="busy" @click="testCurrent">TEST</UiButton>
+        <UiButton size="sm" variant="primary" :disabled="busy" @click="saveConfig">SAVE</UiButton>
+        <UiButton v-if="oauthable" size="sm" :disabled="busy" @click="oauthConnect">OAUTH CONNECT</UiButton>
       </div>
       <div v-if="testMsg" class="w-msg">{{ testMsg }}</div>
     </div>
@@ -61,7 +104,7 @@
           <div class="cfg-header">
             <span class="cfg-name">{{ cfg.name || cfg.backendType }}</span>
             <span class="cfg-type text-muted">{{ cfg.backendType }}</span>
-            <span class="cfg-status" :class="{ on: cfg.enabled }">{{ cfg.enabled ? 'ON' : 'OFF' }}</span>
+            <UiBadge :tone="cfg.enabled ? 'accent' : 'neutral'" size="sm">{{ cfg.enabled ? 'ON' : 'OFF' }}</UiBadge>
           </div>
           <div class="cfg-meta text-muted">
             <span v-if="cfg.basePath">PATH: {{ cfg.basePath }}</span>
@@ -69,28 +112,37 @@
             <span v-if="cfg.placement"> · {{ cfg.placement }}</span>
           </div>
           <div class="cfg-actions">
-            <button class="bw-btn xs" @click="testCfg(cfg)">TEST</button>
-            <button class="bw-btn xs" @click="startCfg(cfg)">START</button>
-            <button v-if="isOauthCapable(cfg.backendType)" class="bw-btn xs" @click="oauthConnectCfg(cfg)">OAUTH</button>
-            <button class="bw-btn xs" @click="usageCfg(cfg)">QUOTA</button>
-            <button class="bw-btn xs danger" @click="removeCfg(cfg.id)">DEL</button>
+            <UiButton size="xs" @click="testCfg(cfg)">TEST</UiButton>
+            <UiButton size="xs" variant="primary" @click="startCfg(cfg)">START</UiButton>
+            <UiButton v-if="isOauthCapable(cfg.backendType)" size="xs" @click="oauthConnectCfg(cfg)">OAUTH</UiButton>
+            <UiButton size="xs" @click="usageCfg(cfg)">QUOTA</UiButton>
+            <UiButton size="xs" variant="danger" @click="removeCfg(cfg.id)">DEL</UiButton>
           </div>
           <div v-if="quotaMsg[cfg.id]" class="cfg-msg">{{ quotaMsg[cfg.id] }}</div>
         </div>
       </div>
-      <div v-if="!syncConfigs.length" class="empty text-muted">No providers connected — add one above.</div>
+      <UiEmpty
+        v-if="!syncConfigs.length"
+        size="sm"
+        icon="solar:cloud-storage-bold"
+        title="No providers connected"
+        description="Open CONFIG above, pick a backend, paste a token, and SAVE."
+      />
     </div>
 
     <div class="section">
       <h3 class="section-title"><AppIcon name="solar:play-bold" :size="13" /> START / MONITOR</h3>
       <div class="w-row">
-        <select v-model="runConfigId" class="bw-input">
-          <option value="">SELECT CONFIG</option>
-          <option v-for="c in syncConfigs" :key="c.id" :value="c.id">{{ c.name || c.backendType }}</option>
-        </select>
-        <button class="bw-btn small" :disabled="!runConfigId || busy" @click="startRun">START</button>
-        <button class="bw-btn small" @click="cancelRun">CANCEL</button>
-        <button class="bw-btn small" @click="refreshRuns">RUNS</button>
+        <div class="w-field grow">
+          <UiSelect
+            :model-value="runConfigId"
+            :options="runConfigOptions"
+            @update:model-value="runConfigId = $event"
+          />
+        </div>
+        <UiButton size="sm" :disabled="!runConfigId || busy" @click="startRun">START</UiButton>
+        <UiButton size="sm" @click="cancelRun">CANCEL</UiButton>
+        <UiButton size="sm" @click="refreshRuns">RUNS</UiButton>
       </div>
       <div v-if="jobMsg" class="w-msg">{{ jobMsg }}</div>
     </div>
@@ -118,16 +170,16 @@
 
     <div class="section">
       <h3 class="section-title"><AppIcon name="solar:undo-left-round-bold" :size="13" /> DOWNLOAD / DELETE REMOTE</h3>
-      <div class="w-row">
-        <input v-model="restoreFileId" class="bw-input" placeholder="FILE ID (optional if path given)" />
+      <div class="w-field">
+        <UiInput v-model="restoreFileId" placeholder="FILE ID (optional if path given)" aria-label="File id" />
       </div>
-      <div class="w-row">
-        <input v-model="restoreRemotePath" class="bw-input" placeholder="REMOTE PATH" />
+      <div class="w-field">
+        <UiInput v-model="restoreRemotePath" placeholder="REMOTE PATH" aria-label="Remote path" />
       </div>
       <div class="w-actions">
-        <button class="bw-btn small" :disabled="!runConfigId" @click="doRestore">RESTORE</button>
-        <button class="bw-btn small danger" :disabled="!runConfigId || !restoreRemotePath" @click="doRemoteDelete">DELETE REMOTE</button>
-        <button class="bw-btn small" :disabled="!runConfigId" @click="browseRemote">BROWSE</button>
+        <UiButton size="sm" :disabled="!runConfigId" @click="doRestore">RESTORE</UiButton>
+        <UiButton size="sm" variant="danger" :disabled="!runConfigId || !restoreRemotePath" @click="doRemoteDelete">DELETE REMOTE</UiButton>
+        <UiButton size="sm" :disabled="!runConfigId" @click="browseRemote">BROWSE</UiButton>
       </div>
       <div v-if="remoteFiles.length" class="remote-list">
         <div v-for="f in remoteFiles.slice(0, 20)" :key="f.path" class="remote-row">
@@ -140,6 +192,12 @@
 
 <script setup lang="ts">
 import AppIcon from '@/components/AppIcon.vue'
+import UiBadge from '@/components/ui/UiBadge.vue'
+import UiButton from '@/components/ui/UiButton.vue'
+import UiCheckbox from '@/components/ui/UiCheckbox.vue'
+import UiEmpty from '@/components/ui/UiEmpty.vue'
+import UiInput from '@/components/ui/UiInput.vue'
+import UiSelect from '@/components/ui/UiSelect.vue'
 import { computed, reactive, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { SYNC_BACKEND_INFO, describeSyncError, isOauthCapable } from '@/types'
@@ -178,6 +236,15 @@ const form = reactive({
   placement: 'whole' as 'whole' | 'striped',
   conflictPolicy: 'skip' as 'skip' | 'overwrite' | 'keepBoth',
 })
+
+const backendOptions = computed(() =>
+  Object.entries(SYNC_BACKEND_INFO).map(([key, info]) => ({ label: info.name, value: key })),
+)
+
+const runConfigOptions = computed(() => [
+  { label: 'SELECT CONFIG', value: '' },
+  ...syncConfigs.value.map(c => ({ label: c.name || c.backendType, value: c.id })),
+])
 
 const needsBasePath = computed(() => form.backendType === 'local')
 const needsRepo = computed(() => backendNeedsRepo(form.backendType))
@@ -337,40 +404,64 @@ async function browseRemote() {
   margin: 0 0 8px;
 }
 
-.wizard { border: 2px dashed var(--ui-border-strong); padding: 10px; }
-.w-label { display: flex; flex-direction: column; gap: 4px; font-size: 10px; margin-bottom: 8px; }
-.bw-input { background: var(--ui-surface); color: var(--ui-text); border: 1px solid var(--ui-border-strong); padding: 6px 8px; font-size: 11px; font-family: inherit; }
+.wizard {
+  border: 1px dashed color-mix(in srgb, var(--ui-border-strong) 80%, transparent);
+  border-radius: var(--ui-radius-md);
+  padding: 12px;
+  background: color-mix(in srgb, var(--ui-glass) 70%, transparent);
+  backdrop-filter: blur(calc(var(--ui-blur) * 0.6));
+  -webkit-backdrop-filter: blur(calc(var(--ui-blur) * 0.6));
+}
+
+.w-field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; min-width: 0; }
+.w-field.grow { flex: 1; }
+.w-label { font-size: 10px; font-weight: 700; letter-spacing: 0.06em; }
 .w-row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
-.w-row .bw-input { flex: 1; min-width: 140px; }
-.w-check { font-size: 10px; display: flex; gap: 4px; align-items: center; }
+.w-row.checks { align-items: center; gap: 14px; padding: 2px 0; }
+.w-row .w-field { flex: 1; min-width: 140px; }
 .w-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .w-msg, .cfg-msg { font-size: 10px; margin-top: 6px; color: color-mix(in srgb, var(--ui-text) 70%, transparent); }
-.bw-btn { background: var(--ui-surface); color: var(--ui-text); border: 2px solid var(--ui-border-strong); padding: 6px 10px; font-size: 10px; font-weight: 700; cursor: pointer; font-family: inherit; }
-.bw-btn.small { font-size: 10px; }
-.bw-btn.xs { font-size: 9px; padding: 3px 6px; border-width: 1px; }
-.bw-btn.primary { background: var(--ui-glass-2); color: var(--ui-text); }
-.bw-btn.danger { border-color: var(--ui-danger); color: var(--ui-danger); }
-.bw-btn:disabled { opacity: 0.4; cursor: default; }
 
 .config-list { display: flex; flex-direction: column; gap: 6px; }
-.config-card { border: 1px solid var(--ui-border); padding: 8px 10px; }
+.config-card {
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-md);
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--ui-glass) 55%, transparent);
+  backdrop-filter: blur(calc(var(--ui-blur) * 0.4));
+  -webkit-backdrop-filter: blur(calc(var(--ui-blur) * 0.4));
+}
 .cfg-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .cfg-name { font-size: 12px; font-weight: 700; flex: 1; }
 .cfg-type { font-size: 9px; }
-.cfg-status { font-size: 9px; font-weight: 700; border: 1px solid var(--ui-border-strong); padding: 0 4px; }
-.cfg-status.on { background: var(--ui-glass-2); color: var(--ui-text); }
 .cfg-meta { font-size: 9px; }
 .cfg-actions { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
-.empty { font-size: 10px; }
 
-.progress-card { border: 1px solid var(--ui-border); padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+.progress-card {
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-md);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: color-mix(in srgb, var(--ui-glass) 55%, transparent);
+}
 .p-row { display: flex; justify-content: space-between; }
 .p-key { font-size: 10px; }
 .p-value { font-size: 10px; font-weight: 700; }
 .p-errors { display: flex; flex-direction: column; gap: 2px; }
 .p-err { font-size: 9px; color: var(--ui-danger); word-break: break-all; }
-.run-card { display: flex; gap: 8px; font-size: 10px; border: 1px solid var(--ui-border-hover); padding: 4px 6px; margin-bottom: 4px; }
+.run-card {
+  display: flex;
+  gap: 8px;
+  font-size: 10px;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-sm);
+  padding: 4px 6px;
+  margin-bottom: 4px;
+  background: var(--ui-glass);
+}
 .remote-list { margin-top: 6px; }
-.remote-row { display: flex; justify-content: space-between; font-size: 10px; border-bottom: 1px solid var(--ui-border-strong); padding: 2px 0; }
+.remote-row { display: flex; justify-content: space-between; font-size: 10px; border-bottom: 1px solid var(--ui-hairline); padding: 2px 0; }
 .text-muted { color: color-mix(in srgb, var(--ui-text) 50%, transparent) !important; }
 </style>

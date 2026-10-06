@@ -508,30 +508,6 @@ async function handleRefresh() {
 .info-value { font-size: 10px; font-weight: 700; }
 .mono { font-family: var(--ui-font); }
 
-.bw-input {
-  background: var(--ui-surface);
-  border: 1px solid var(--ui-border);
-  padding: 4px 8px;
-  color: var(--ui-text);
-  font-family: var(--ui-font);
-  font-size: 10px;
-}
-
-.bw-btn {
-  padding: 4px 12px;
-  background: var(--ui-surface);
-  border: 1px solid var(--ui-border);
-  color: var(--ui-text);
-  font-family: var(--ui-font);
-  font-size: 10px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.bw-btn:hover { background: var(--ui-glass-2); color: var(--ui-text); }
-.bw-btn-inverse { background: var(--ui-glass-2); color: var(--ui-text); }
-.bw-btn-inverse:hover { background: var(--ui-surface); color: var(--ui-text); }
-
 .shortcuts-table {
   border: 1px solid var(--ui-hairline);
   max-height: 300px;

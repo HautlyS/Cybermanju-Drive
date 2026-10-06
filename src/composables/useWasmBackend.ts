@@ -86,7 +86,7 @@ const CANAL_STALE =
 function canalFn<K extends keyof WasmCanal>(mod: WasmBackend, key: K): WasmCanal[K] {
   const fn = (mod as unknown as Partial<WasmCanal>)[key]
   if (typeof fn !== 'function') throw new Error(CANAL_STALE)
-  return fn
+  return fn as WasmCanal[K]
 }
 
 interface CanalEnvelope<T> {
