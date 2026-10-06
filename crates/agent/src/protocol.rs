@@ -542,6 +542,7 @@ pub fn get_json(url: &str, headers: &[(String, String)]) -> Result<serde_json::V
 /// Status code, response headers and body of a completed HTTP POST.
 pub type RawResponse = Result<(u16, Vec<(String, String)>, String), String>;
 
+#[cfg(feature = "native")]
 pub fn post_raw(
     url: &str,
     headers: &[(String, String)],
