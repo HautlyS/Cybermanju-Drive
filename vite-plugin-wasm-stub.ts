@@ -6,10 +6,10 @@
 // - Docker frontend stage (vite.config.wasm.ts without pkg): the image serves
 //   the dashboard REST API on :3456, so the frontend never imports the wasm
 //   backend either.
-// When pkg EXISTS (wasm/GH-Pages build), the alias in vite.config.wasm.ts
-// resolves first and this plugin is never consulted.
-import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
+// When a usable pkg EXISTS (wasm/GH-Pages build), the alias in
+// vite.config.wasm.ts resolves first and this plugin is never consulted —
+// "usable" meaning present *and* not older than crates/ (see wasm-pkg.ts).
+import { wasmPkgEntry } from './wasm-pkg'
 
 const STUB_SOURCE = `
 function unavailable() {
@@ -32,10 +32,10 @@ export default function wasmStubPlugin() {
     name: 'cybermanju-drive-wasm-stub',
     resolveId(id: string) {
       if (id !== 'cybermanju-drive-wasm') return null
-      // Real pkg present? Let the alias handle it (plugins run after aliases,
-      // so returning null here defers to the alias — and if the alias target
-      // is missing we stub instead of failing the build).
-      if (existsSync(resolve(process.cwd(), 'crates/drive-wasm/pkg'))) return null
+      // Usable pkg? Let the alias handle it (plugins run after aliases, so
+      // returning null here defers to the alias — and if the alias target is
+      // missing or stale we stub instead of failing the build).
+      if (wasmPkgEntry(process.cwd())) return null
       return '\0cybermanju-drive-wasm-stub'
     },
     load(id: string) {

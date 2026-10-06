@@ -215,9 +215,9 @@ onMounted(refresh)
 .disk-panel {
   height: 100%;
   overflow-y: auto;
-  background: #000;
-  color: #fff;
-  font-family: 'Courier New', monospace;
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  font-family: var(--ui-font);
   font-size: 13px;
 }
 
@@ -226,7 +226,7 @@ onMounted(refresh)
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+  border-bottom: 1px solid var(--ui-border);
 }
 
 .header-left {
@@ -236,7 +236,7 @@ onMounted(refresh)
 }
 
 .icon-disks {
-  color: #5af78e;
+  color: var(--ui-accent);
 }
 
 .panel-title {
@@ -247,8 +247,8 @@ onMounted(refresh)
 
 .ghost-btn {
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  color: rgba(255, 255, 255, 0.75);
+  border: 1px solid var(--ui-border);
+  color: color-mix(in srgb, var(--ui-text) 70%, transparent);
   font-family: inherit;
   font-size: 11px;
   padding: 4px 9px;
@@ -256,8 +256,8 @@ onMounted(refresh)
 }
 
 .ghost-btn:hover:not(:disabled) {
-  color: #fff;
-  border-color: #fff;
+  color: var(--ui-text);
+  border-color: var(--ui-border-strong);
 }
 
 .ghost-btn:disabled {
@@ -266,48 +266,48 @@ onMounted(refresh)
 }
 
 .ghost-btn.primary {
-  color: #5af78e;
-  border-color: rgba(90, 247, 142, 0.6);
+  color: var(--ui-accent);
+  border-color: color-mix(in srgb, var(--ui-accent) 60%, transparent);
 }
 
 .ghost-btn.primary:hover:not(:disabled) {
-  color: #000;
-  background: #5af78e;
-  border-color: #5af78e;
+  color: var(--ui-text);
+  background: var(--ui-accent);
+  border-color: var(--ui-accent);
 }
 
 .ghost-btn.danger {
-  color: #ff5f56;
-  border-color: rgba(255, 95, 86, 0.55);
+  color: var(--ui-danger);
+  border-color: color-mix(in srgb, var(--ui-danger) 55%, transparent);
 }
 
 .ghost-btn.danger:hover:not(:disabled) {
-  color: #000;
-  background: #ff5f56;
-  border-color: #ff5f56;
+  color: var(--ui-text);
+  background: var(--ui-danger);
+  border-color: var(--ui-danger);
 }
 
 .section {
   padding: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--ui-border);
 }
 
 .section-title {
   margin: 0 0 10px;
   font-size: 11px;
   letter-spacing: 1.5px;
-  color: rgba(255, 255, 255, 0.55);
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent);
 }
 
 .df-bar {
   height: 18px;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: color-mix(in srgb, var(--ui-text) 10%, transparent);
+  border: 1px solid var(--ui-border);
 }
 
 .df-used {
   height: 100%;
-  background: linear-gradient(90deg, #5af78e, #57c7ff);
+  background: linear-gradient(90deg, var(--ui-accent), var(--ui-info));
 }
 
 .df-legend {
@@ -326,11 +326,11 @@ onMounted(refresh)
 }
 
 .dot.used {
-  background: #5af78e;
+  background: var(--ui-accent);
 }
 
 .dot.free {
-  background: rgba(255, 255, 255, 0.3);
+  background: color-mix(in srgb, var(--ui-text) 30%, transparent);
 }
 
 .df-root {
@@ -359,9 +359,9 @@ onMounted(refresh)
 }
 
 .input {
-  background: #000;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  color: #fff;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
   font-family: inherit;
   font-size: 12px;
   padding: 5px 6px;
@@ -369,18 +369,18 @@ onMounted(refresh)
 }
 
 .input:focus {
-  border-color: #5af78e;
+  border-color: var(--ui-accent);
 }
 
 .slider {
   width: 100%;
-  accent-color: #5af78e;
+  accent-color: var(--ui-accent);
 }
 
 .note {
   margin: 8px 0 0;
   font-size: 11px;
-  color: #9aedfe;
+  color: var(--ui-info);
 }
 
 .cards {
@@ -390,7 +390,7 @@ onMounted(refresh)
 }
 
 .card {
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid var(--ui-border);
   padding: 10px;
   display: flex;
   flex-direction: column;
@@ -420,26 +420,26 @@ onMounted(refresh)
 }
 
 .health-ok {
-  color: #5af78e;
+  color: var(--ui-accent);
 }
 
 .health-degraded,
 .health-repairing {
-  color: #f3f99d;
+  color: var(--ui-warning);
 }
 
 .health-failed {
-  color: #ff5f56;
+  color: var(--ui-danger);
 }
 
 .card-bar {
   height: 10px;
-  background: rgba(255, 255, 255, 0.12);
+  background: color-mix(in srgb, var(--ui-text) 6%, transparent);
 }
 
 .card-used {
   height: 100%;
-  background: #5af78e;
+  background: var(--ui-accent);
 }
 
 .card-figures {
@@ -495,6 +495,6 @@ onMounted(refresh)
 }
 
 .text-muted {
-  color: rgba(255, 255, 255, 0.5) !important;
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent) !important;
 }
 </style>

@@ -519,7 +519,7 @@ async function handleRenameConfirm() {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: #000;
+  background: var(--ui-surface);
   position: relative;
   height: 100%;
 }
@@ -530,8 +530,8 @@ async function handleRenameConfirm() {
   justify-content: space-between;
   height: 32px;
   padding: 0 8px;
-  border-bottom: 2px solid #FFFFFF;
-  background: #000;
+  border-bottom: 1px solid var(--ui-border);
+  background: var(--ui-surface);
   flex-shrink: 0;
 }
 
@@ -544,38 +544,38 @@ async function handleRenameConfirm() {
 .ft-div {
   width: 1px;
   height: 14px;
-  background: rgba(255,255,255,0.3);
+  background: color-mix(in srgb, var(--ui-text) 30%, transparent);
   margin: 0 4px;
 }
 
 .ft-info {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 10px;
-  color: rgba(255,255,255,0.5);
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent);
 }
 
 .sort-select {
-  background: #000;
-  border: 2px solid #FFFFFF;
-  color: #FFFFFF;
-  font-family: 'Courier New', monospace;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
+  font-family: var(--ui-font);
   font-size: 9px;
   padding: 2px 4px;
   cursor: pointer;
 }
 
 .filter-input {
-  background: #000;
-  border: 2px solid #FFFFFF;
-  color: #FFFFFF;
-  font-family: 'Courier New', monospace;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
+  font-family: var(--ui-font);
   font-size: 9px;
   padding: 2px 6px;
   width: 100px;
 }
 
 .filter-input::placeholder {
-  color: rgba(255,255,255,0.3);
+  color: color-mix(in srgb, var(--ui-text) 35%, transparent);
 }
 
 .bulk-toolbar {
@@ -583,38 +583,38 @@ async function handleRenameConfirm() {
   align-items: center;
   gap: 6px;
   padding: 4px 8px;
-  background: #FFFFFF;
-  border-bottom: 2px solid #000000;
+  background: var(--ui-glass-2);
+  border-bottom: 1px solid var(--ui-border);
   flex-shrink: 0;
 }
 
 .bulk-label {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 10px;
   font-weight: 700;
-  color: #000000;
+  color: var(--ui-text);
   margin-right: 8px;
 }
 
 .bulk-btn {
   padding: 2px 8px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 9px;
   font-weight: 700;
   cursor: pointer;
-  border: 2px solid #000000;
-  background: #FFFFFF;
-  color: #000000;
+  border: 1px solid var(--ui-border);
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
 .bulk-btn:hover {
-  background: #000000;
-  color: #FFFFFF;
+  background: var(--ui-surface);
+  color: var(--ui-text);
 }
 
 .bulk-btn.danger:hover {
-  background: #000000;
-  color: #FFFFFF;
+  background: var(--ui-surface);
+  color: var(--ui-text);
 }
 
 .view-toggle {
@@ -623,22 +623,22 @@ async function handleRenameConfirm() {
   justify-content: center;
   padding: 2px 6px;
   cursor: pointer;
-  color: rgba(255,255,255,0.4);
-  font-family: 'Courier New', monospace;
+  color: color-mix(in srgb, var(--ui-text) 40%, transparent);
+  font-family: var(--ui-font);
   font-size: 10px;
   font-weight: 700;
   border: 2px solid transparent;
 }
 
 .view-toggle:hover {
-  color: #FFFFFF;
-  border-color: #FFFFFF;
+  color: var(--ui-text);
+  border-color: var(--ui-border-strong);
 }
 
 .view-toggle.active {
-  color: #000;
-  background: #FFFFFF;
-  border-color: #FFFFFF;
+  color: var(--ui-text);
+  background: var(--ui-glass-2);
+  border-color: var(--ui-border-strong);
 }
 
 .grid-view {
@@ -658,35 +658,35 @@ async function handleRenameConfirm() {
   align-items: center;
   padding: 12px 8px 8px;
   cursor: pointer;
-  border: 2px solid #FFFFFF;
-  background: #000;
+  border: 1px solid var(--ui-border);
+  background: var(--ui-surface);
   min-height: 110px;
   position: relative;
 }
 
 .file-card:hover {
-  background: #FFFFFF;
+  background: var(--ui-glass-2);
 }
 
 .file-card:hover .file-card-name,
 .file-card:hover .file-card-meta {
-  color: #000;
+  color: var(--ui-text);
 }
 
 .file-card.selected {
-  background: #FFFFFF;
+  background: var(--ui-glass-2);
 }
 
 .file-card.selected .file-card-name,
 .file-card.selected .file-card-meta,
 .file-card.selected .file-icon {
-  color: #000;
+  color: var(--ui-text);
 }
 
 .file-card.bulk-selected {
   border-width: 3px;
-  border-color: #FFFFFF;
-  background: rgba(255,255,255,0.08);
+  border-color: var(--ui-border-strong);
+  background: color-mix(in srgb, var(--ui-text) 6%, transparent);
 }
 
 .file-card-select {
@@ -697,18 +697,18 @@ async function handleRenameConfirm() {
 }
 
 .check-box {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 8px;
-  color: #FFFFFF;
-  border: 1px solid #FFFFFF;
+  color: var(--ui-text);
+  border: 1px solid var(--ui-border-strong);
   padding: 0 1px;
   line-height: 12px;
   cursor: pointer;
 }
 
 .check-box.checked {
-  background: #FFFFFF;
-  color: #000;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
 .file-card-icon {
@@ -720,15 +720,15 @@ async function handleRenameConfirm() {
 }
 
 .file-icon {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 18px;
-  color: #FFFFFF;
+  color: var(--ui-text);
 }
 
 .file-thumb {
   max-width: 60px;
   max-height: 60px;
-  border: 1px solid #FFFFFF;
+  border: 1px solid var(--ui-border-strong);
 }
 
 .thumb-sm {
@@ -743,20 +743,20 @@ async function handleRenameConfirm() {
 .file-thumb-sm {
   max-width: 18px;
   max-height: 18px;
-  border: 1px solid #FFFFFF;
+  border: 1px solid var(--ui-border-strong);
 }
 
 .file-card-name {
   font-size: 10px;
   font-weight: 600;
-  color: #FFFFFF;
+  color: var(--ui-text);
   text-align: center;
   width: 100%;
 }
 
 .file-card-meta {
   font-size: 9px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   margin-top: 2px;
 }
 
@@ -770,11 +770,11 @@ async function handleRenameConfirm() {
 }
 
 .card-badge {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 8px;
   font-weight: 700;
-  color: #FFFFFF;
-  border: 1px solid #FFFFFF;
+  color: var(--ui-text);
+  border: 1px solid var(--ui-border-strong);
   padding: 0 2px;
 }
 
@@ -801,28 +801,28 @@ async function handleRenameConfirm() {
   margin-bottom: 8px;
   break-inside: avoid;
   cursor: pointer;
-  border: 2px solid #FFFFFF;
-  background: #000;
+  border: 1px solid var(--ui-border);
+  background: var(--ui-surface);
   position: relative;
 }
 
 .masonry-item:hover {
-  background: #FFFFFF;
+  background: var(--ui-glass-2);
 }
 
 .masonry-item:hover .masonry-name,
 .masonry-item:hover .masonry-meta {
-  color: #000;
+  color: var(--ui-text);
 }
 
 .masonry-item.selected {
-  background: #FFFFFF;
+  background: var(--ui-glass-2);
 }
 
 .masonry-item.selected .masonry-name,
 .masonry-item.selected .masonry-meta,
 .masonry-item.selected .masonry-icon .file-icon {
-  color: #000;
+  color: var(--ui-text);
 }
 
 .masonry-item.bulk-selected {
@@ -854,14 +854,14 @@ async function handleRenameConfirm() {
 .masonry-name {
   font-size: 10px;
   font-weight: 600;
-  color: #FFFFFF;
+  color: var(--ui-text);
   text-align: center;
   width: 100%;
 }
 
 .masonry-meta {
   font-size: 9px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   margin-top: 4px;
 }
 
@@ -882,13 +882,13 @@ async function handleRenameConfirm() {
   align-items: center;
   height: 28px;
   padding: 0 10px;
-  background: #000;
-  border-bottom: 2px solid #FFFFFF;
+  background: var(--ui-surface);
+  border-bottom: 1px solid var(--ui-border);
   font-size: 9px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-weight: 700;
   letter-spacing: 0.5px;
-  color: rgba(255,255,255,0.5);
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent);
   position: sticky;
   top: 0;
   z-index: 2;
@@ -899,7 +899,7 @@ async function handleRenameConfirm() {
 }
 
 .list-header .lc:hover {
-  color: #FFFFFF;
+  color: var(--ui-text);
 }
 
 .list-row {
@@ -907,28 +907,28 @@ async function handleRenameConfirm() {
   align-items: center;
   height: 30px;
   padding: 0 10px;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
+  border-bottom: 1px solid var(--ui-border);
   cursor: pointer;
   font-size: 11px;
-  color: #FFFFFF;
+  color: var(--ui-text);
 }
 
 .list-row:hover {
-  background: rgba(255,255,255,0.1);
+  background: color-mix(in srgb, var(--ui-text) 10%, transparent);
 }
 
 .list-row.selected {
-  background: #FFFFFF;
-  color: #000;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
 .list-row.selected .text-muted {
-  color: #000 !important;
+  color: var(--ui-text) !important;
   opacity: 0.6;
 }
 
 .list-row.bulk-selected {
-  background: rgba(255,255,255,0.08);
+  background: color-mix(in srgb, var(--ui-text) 6%, transparent);
 }
 
 .lc {
@@ -945,12 +945,12 @@ async function handleRenameConfirm() {
 .lc-type { flex: 1.2; min-width: 60px; }
 .lc-date { flex: 1.2; min-width: 80px; }
 .lc-status { flex: 0.8; min-width: 50px; gap: 2px; }
-.lc-hash { flex: 1.2; min-width: 80px; font-size: 9px; font-family: 'Courier New', monospace; }
+.lc-hash { flex: 1.2; min-width: 80px; font-size: 9px; font-family: var(--ui-font); }
 
 .file-icon-sm {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 11px;
-  color: #FFFFFF;
+  color: var(--ui-text);
   flex-shrink: 0;
   width: 18px;
   text-align: center;
@@ -958,11 +958,11 @@ async function handleRenameConfirm() {
 
 .badge-sm {
   font-size: 8px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-weight: 700;
-  border: 1px solid #FFFFFF;
+  border: 1px solid var(--ui-border-strong);
   padding: 0 2px;
-  color: #FFFFFF;
+  color: var(--ui-text);
 }
 
 .empty-list {
@@ -976,13 +976,13 @@ async function handleRenameConfirm() {
 .context-menu {
   position: fixed;
   z-index: 1000;
-  background: #000;
-  border: 2px solid #FFFFFF;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
   min-width: 180px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 10px;
-  color: #FFFFFF;
-  box-shadow: 4px 4px 0 rgba(255,255,255,0.15);
+  color: var(--ui-text);
+  box-shadow: 4px 4px 0 var(--ui-border);
 }
 
 .context-menu-item {
@@ -995,13 +995,13 @@ async function handleRenameConfirm() {
 }
 
 .context-menu-item:hover {
-  background: #FFFFFF;
-  color: #000;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
 .context-menu-item.danger:hover {
-  background: #FFFFFF;
-  color: #000;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
 .context-menu-item.disabled {
@@ -1018,11 +1018,11 @@ async function handleRenameConfirm() {
   position: absolute;
   left: 100%;
   top: -2px;
-  background: #000;
-  border: 2px solid #FFFFFF;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
   min-width: 220px;
   z-index: 1001;
-  box-shadow: 4px 4px 0 rgba(255,255,255,0.15);
+  box-shadow: 4px 4px 0 var(--ui-border);
 }
 
 .submenu-right {
@@ -1032,28 +1032,30 @@ async function handleRenameConfirm() {
 
 .context-menu-divider {
   height: 1px;
-  background: rgba(255,255,255,0.2);
+  background: color-mix(in srgb, var(--ui-text) 20%, transparent);
   margin: 2px 0;
 }
 
 .rename-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.7);
+  background: color-mix(in srgb, var(--ui-bg-deep) 62%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 100;
 }
 
-.rename-modal {
-  background: #000;
-  border: 2px solid #FFFFFF;
+.rename-modal {background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
   padding: 16px;
   width: 300px;
-  font-family: 'Courier New', monospace;
-  color: #FFFFFF;
-  box-shadow: 4px 4px 0 rgba(255,255,255,0.15);
+  font-family: var(--ui-font);
+  color: var(--ui-text);
+  box-shadow: 4px 4px 0 var(--ui-border);
+  border-radius: var(--ui-radius-lg);
+  backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
+  -webkit-backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
 }
 
 .rename-header {
@@ -1065,10 +1067,10 @@ async function handleRenameConfirm() {
 
 .rename-input {
   width: 100%;
-  background: #000;
-  border: 2px solid #FFFFFF;
-  color: #FFFFFF;
-  font-family: 'Courier New', monospace;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
+  font-family: var(--ui-font);
   font-size: 11px;
   padding: 6px 8px;
   margin-bottom: 10px;
@@ -1082,30 +1084,30 @@ async function handleRenameConfirm() {
 
 .rename-btn {
   background: transparent;
-  border: 2px solid #FFFFFF;
-  color: #FFFFFF;
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
   padding: 4px 12px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 10px;
   font-weight: 700;
   cursor: pointer;
 }
 
 .rename-btn:hover {
-  background: #FFFFFF;
-  color: #000;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
 .rename-btn-primary {
-  background: #FFFFFF;
-  color: #000;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
 .rename-btn-primary:hover {
-  background: #000;
-  color: #FFFFFF;
+  background: var(--ui-surface);
+  color: var(--ui-text);
 }
 
-.text-muted { color: rgba(255,255,255,0.5) !important; }
+.text-muted { color: color-mix(in srgb, var(--ui-text) 50%, transparent) !important; }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

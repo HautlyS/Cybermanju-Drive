@@ -16,6 +16,8 @@
           :key="type"
           class="algo-btn"
           :class="{ selected: selectedAlgo === type }"
+          :disabled="webLocked || !layerCapable(type as CompressionType)"
+          :title="webLocked || !layerCapable(type as CompressionType) ? 'Not available in this build' : `Compress with ${info.name}`"
           @click="selectedAlgo = type as CompressionType"
         >
           <div class="algo-header">
@@ -27,14 +29,12 @@
       </div>
     </div>
 
-    <div v-if="webLocked" class="web-note">
-      DESKTOP-ONLY OPS DISABLED IN WEB MODE — COMPRESSION NEEDS THE TAURI APP. ALGORITHM PICKER STAYS FOR REFERENCE.
-    </div>
+    <div class="web-note" :class="{ info: !webLocked }">{{ compressNote }}</div>
 
     <div class="section" v-if="selectedFile">
       <h3 class="section-title"><AppIcon name="solar:file-bold" :size="13" /> SELECTED FILE</h3>
       <p class="selected-file-name">{{ selectedFile.name }}</p>
-      <button class="compress-btn" :disabled="webLocked" :title="webLocked ? 'Desktop app only' : 'Compress file'" @click="handleCompress"><AppIcon name="solar:archive-bold" :size="14" /> COMPRESS</button>
+      <button class="compress-btn" :disabled="webLocked" :title="webLocked ? 'Needs the desktop app or offline build' : 'Compress file'" @click="handleCompress"><AppIcon name="solar:archive-bold" :size="14" /> COMPRESS</button>
     </div>
 
     <div class="section" v-if="compressionStats">
@@ -66,18 +66,32 @@ import AppIcon from '@/components/AppIcon.vue'
 import { ref, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { humanBytes } from '@/utils/format'
-import { isWebMode } from '@/composables/useTauri'
+import { isStaticHost } from '@/composables/useTauri'
+import { compressionCapable } from '@/composables/useWasmCrypto'
 import type { CompressionType } from '@/types'
 import { COMPRESSION_INFO } from '@/types'
 
 const store = useAppStore()
 const emit = defineEmits<{ close: [] }>()
 
-const webLocked = computed(() => isWebMode())
+// The wasm pack ships lz4 + brotli; zstd (and therefore triple) stays in the
+// desktop app. The dashboard build has no compression endpoint at all.
+const staticWasm = isStaticHost()
+const webLocked = computed(() => !staticWasm)
+const compressNote = computed(() => {
+  if (webLocked) {
+    return 'COMPRESSION NEEDS THE TAURI DESKTOP APP OR THE OFFLINE BROWSER BUILD — THIS DASHBOARD BUILD SERVES NO COMPRESSION ENDPOINT.'
+  }
+  return 'LZ4 + BROTLI RUN IN THE WASM PACK AND WRITE INTO .CYBERMANJU. ZSTD / TRIPLE NEED THE DESKTOP APP (THE WASM PACK HAS NO ZSTD).'
+})
+
+function layerCapable(type: CompressionType): boolean {
+  return !staticWasm || compressionCapable(type)
+}
 
 const selectedFile = computed(() => store.selectedFile)
 const compressionStats = computed(() => store.compressionStats)
-const selectedAlgo = ref<CompressionType>('zstd')
+const selectedAlgo = ref<CompressionType>(staticWasm ? 'lz4' : 'zstd')
 
 
 async function handleCompress() {
@@ -88,12 +102,16 @@ async function handleCompress() {
 
 <style scoped>
 .web-note {
-  border: 1px dashed #f3f99d;
-  color: #f3f99d;
+  border: 1px dashed var(--ui-warning);
+  color: var(--ui-warning);
   font-size: 9px;
   line-height: 1.5;
   padding: 8px 10px;
   letter-spacing: 0.3px;
+}
+.web-note.info {
+  border-color: color-mix(in srgb, var(--ui-accent) 60%, transparent);
+  color: var(--ui-accent);
 }
 
 .algo-btn:disabled,
@@ -104,27 +122,27 @@ async function handleCompress() {
 .compression-panel {
   width: 400px;
   height: 100%;
-  background: #000;
-  border-left: 2px solid #FFFFFF;
+  background: var(--ui-surface);
+  border-left: 1px solid var(--ui-border);
   overflow-y: auto;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  font-family: 'Courier New', monospace;
-  color: #FFFFFF;
+  font-family: var(--ui-font);
+  color: var(--ui-text);
 }
 
 .compression-panel::-webkit-scrollbar { width: 4px; }
-.compression-panel::-webkit-scrollbar-track { background: #000; }
-.compression-panel::-webkit-scrollbar-thumb { background: #FFFFFF; }
+.compression-panel::-webkit-scrollbar-track { background: var(--ui-surface); }
+.compression-panel::-webkit-scrollbar-thumb { background: var(--ui-glass-2); }
 
 .panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding-bottom: 10px;
-  border-bottom: 2px solid #FFFFFF;
+  border-bottom: 1px solid var(--ui-border);
 }
 
 .header-left {
@@ -134,23 +152,23 @@ async function handleCompress() {
 }
 
 .icon-compress {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 16px;
-  color: #FFFFFF;
+  color: var(--ui-text);
 }
 
 .panel-title {
   font-size: 14px;
   font-weight: 800;
   letter-spacing: 1px;
-  color: #FFFFFF;
+  color: var(--ui-text);
   margin: 0;
 }
 
 .close-btn {
   background: none;
-  border: 2px solid #FFFFFF;
-  color: #FFFFFF;
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
   cursor: pointer;
   width: 24px;
   height: 24px;
@@ -158,13 +176,13 @@ async function handleCompress() {
   align-items: center;
   justify-content: center;
   font-size: 11px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-weight: 700;
 }
 
 .close-btn:hover {
-  background: #FFFFFF;
-  color: #000;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
 .section {
@@ -177,10 +195,10 @@ async function handleCompress() {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 1px;
-  color: rgba(255,255,255,0.6);
+  color: color-mix(in srgb, var(--ui-text) 60%, transparent);
   margin: 0;
   padding-bottom: 4px;
-  border-bottom: 2px solid rgba(255,255,255,0.2);
+  border-bottom: 1px solid var(--ui-hairline);
 }
 
 .algo-list {
@@ -190,27 +208,27 @@ async function handleCompress() {
 }
 
 .algo-btn {
-  background: #000;
-  border: 2px solid #FFFFFF;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
   padding: 8px 10px;
   cursor: pointer;
   text-align: left;
   display: flex;
   flex-direction: column;
   gap: 3px;
-  color: #FFFFFF;
-  font-family: 'Courier New', monospace;
+  color: var(--ui-text);
+  font-family: var(--ui-font);
 }
 
 .algo-btn:hover,
 .algo-btn.selected {
-  background: #FFFFFF;
-  color: #000;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
 .algo-btn:hover .algo-desc,
 .algo-btn.selected .algo-desc {
-  color: #000 !important;
+  color: var(--ui-text) !important;
 }
 
 .algo-header {
@@ -238,33 +256,33 @@ async function handleCompress() {
 
 .selected-file-name {
   font-size: 11px;
-  color: #FFFFFF;
-  background: rgba(255,255,255,0.05);
+  color: var(--ui-text);
+  background: color-mix(in srgb, var(--ui-text) 6%, transparent);
   padding: 4px 8px;
-  border: 2px solid rgba(255,255,255,0.3);
+  border: 1px solid var(--ui-hairline);
   word-break: break-all;
   margin: 0;
 }
 
 .compress-btn {
-  background: #FFFFFF;
-  color: #000;
-  border: 2px solid #FFFFFF;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
+  border: 1px solid var(--ui-border);
   padding: 8px 16px;
   font-size: 11px;
   font-weight: 800;
   cursor: pointer;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   width: 100%;
 }
 
 .compress-btn:hover {
-  background: #000;
-  color: #FFFFFF;
+  background: var(--ui-surface);
+  color: var(--ui-text);
 }
 
 .stats-card {
-  border: 2px solid #FFFFFF;
+  border: 1px solid var(--ui-border);
   padding: 10px;
   display: flex;
   flex-direction: column;
@@ -284,8 +302,8 @@ async function handleCompress() {
 .stat-value {
   font-size: 11px;
   font-weight: 700;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
 }
 
-.text-muted { color: rgba(255,255,255,0.5) !important; }
+.text-muted { color: color-mix(in srgb, var(--ui-text) 50%, transparent) !important; }
 </style>

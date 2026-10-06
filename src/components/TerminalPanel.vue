@@ -271,9 +271,9 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: #000;
-  color: #fff;
-  font-family: 'Courier New', monospace;
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  font-family: var(--ui-font-mono);
   font-size: 13px;
 }
 
@@ -282,7 +282,7 @@ onMounted(async () => {
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+  border-bottom: 1px solid var(--ui-border);
   flex: 0 0 auto;
 }
 
@@ -293,7 +293,7 @@ onMounted(async () => {
 }
 
 .icon-terminal {
-  color: #5af78e;
+  color: var(--ui-accent);
 }
 
 .panel-title {
@@ -305,19 +305,19 @@ onMounted(async () => {
 .job-badge {
   font-size: 10px;
   padding: 1px 6px;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  color: rgba(255, 255, 255, 0.5);
+  border: 1px solid var(--ui-border);
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent);
 }
 
 .job-badge.on {
-  color: #f3f99d;
-  border-color: #f3f99d;
+  color: var(--ui-warning);
+  border-color: var(--ui-warning);
 }
 
 .ghost-btn {
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  color: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--ui-border);
+  color: color-mix(in srgb, var(--ui-text) 70%, transparent);
   font-family: inherit;
   font-size: 11px;
   padding: 3px 8px;
@@ -325,8 +325,8 @@ onMounted(async () => {
 }
 
 .ghost-btn:hover {
-  color: #fff;
-  border-color: #fff;
+  color: var(--ui-text);
+  border-color: var(--ui-border-strong);
 }
 
 .term-scroll {
@@ -345,23 +345,23 @@ onMounted(async () => {
 }
 
 .term-line:focus {
-  outline: 1px solid rgba(90, 247, 142, 0.5);
+  outline: 1px solid color-mix(in srgb, var(--ui-accent) 50%, transparent);
 }
 
 .kind-in {
-  color: #9aedfe;
+  color: var(--ui-info);
 }
 
 .kind-out {
-  color: #e6e6e6;
+  color: var(--ui-text);
 }
 
 .kind-err {
-  color: #ff5f56;
+  color: var(--ui-danger);
 }
 
 .kind-sys {
-  color: rgba(255, 255, 255, 0.45);
+  color: color-mix(in srgb, var(--ui-text) 40%, transparent);
   font-style: italic;
 }
 
@@ -370,12 +370,12 @@ onMounted(async () => {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  border-top: 1px solid var(--ui-border);
   flex: 0 0 auto;
 }
 
 .term-prompt {
-  color: #5af78e;
+  color: var(--ui-accent);
 }
 
 .term-input {
@@ -383,7 +383,7 @@ onMounted(async () => {
   background: transparent;
   border: none;
   outline: none;
-  color: #fff;
+  color: var(--ui-text);
   font-family: inherit;
   font-size: 13px;
 }

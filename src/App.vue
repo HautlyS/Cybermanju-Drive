@@ -9,7 +9,10 @@ import { useDrag } from '@/composables/useDrag'
 import { useSwipe } from '@/composables/useSwipe'
 import { useTouchConfig, type TouchAction } from '@/composables/useTouchConfig'
 import { useWindowManager } from '@/composables/useWindowManager'
-import { finishSupabaseReturn } from '@/composables/useSupabase'
+import { finishSupabaseReturn, hydrateSupabaseConfig, refreshIdentity } from '@/composables/useSupabase'
+import { migrateVaultFromLocalStorage } from '@/composables/useVault'
+import { bootCybermanjuDisk, disk } from '@/composables/useCybermanjuFile'
+import { startVolumeMirror, replayVolumeFromVault, flushVolumeMirror } from '@/composables/useVolumeMirror'
 import { defaultKpl, defaultKpd } from '@/keymaps'
 import { ShortcutsKey } from '@/composables/shortcutsKey'
 import DesktopShell from '@/components/DesktopShell.vue'
@@ -20,7 +23,6 @@ import CommandPalette from '@/components/CommandPalette.vue'
 import KeyboardShortcutsHelp from '@/components/KeyboardShortcutsHelp.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import LoadingSpinner from '@/components/LoadingSpinner.vue'
-import LoginPopup from '@/components/LoginPopup.vue'
 import FileUploadDialog from '@/components/FileUploadDialog.vue'
 import MobileNav from '@/components/MobileNav.vue'
 import ContextMenu from '@/components/ContextMenu.vue'
@@ -110,7 +112,7 @@ const confirmMessage = ref('')
 const confirmTitle = ref('CONFIRM')
 
 const newFolderName = ref('')
-const folderInputRef = ref<HTMLInputElement | null>(null)
+const folderInputRef = ref<{ focus: () => void } | null>(null)
 const showUploadDialog = ref(false)
 
 const mainAreaRef = ref<HTMLElement | null>(null)
@@ -444,24 +446,47 @@ function openAgent(event: KeyboardEvent) {
   wm.open('agent')
 }
 
+const openAccountsWindow = () => wm.open('accounts')
+
 onMounted(() => {
   store.currentPanel = 'landing'
   store.initialize()
   // OAuth return (Supabase PKCE popup or full-redirect): exchange ?code=,
   // stash the provider token, close popup returns.
-  void finishSupabaseReturn().then((handled) => {
+  void finishSupabaseReturn().then(async (handled) => {
     if (handled) store.notifySuccess('OAuth return processed — token captured')
+    await refreshIdentity()
   })
+  // Vault boot: migrate anything an older build left in localStorage into
+  // `.cybermanju`, restore the Supabase URL/key from the file, re-attach the
+  // remembered file (permission/passphrase gated), then fill the OS volume
+  // from the vault. Volume mirroring starts first so replayed writes push
+  // straight back into the file.
+  startVolumeMirror()
+  void (async () => {
+    try {
+      await migrateVaultFromLocalStorage()
+      await hydrateSupabaseConfig()
+      await bootCybermanjuDisk()
+      await replayVolumeFromVault(disk.attached)
+      if (disk.attached) store.notifySuccess(`${disk.name} opened — vault is on disk`)
+    } catch (e) {
+      store.notifyError('Vault boot failed', e)
+    }
+  })()
   window.addEventListener('cybermanju:upload', handleUpload)
+  window.addEventListener('cybermanju:open-accounts', openAccountsWindow)
   window.addEventListener('keydown', toggleTerminal)
   window.addEventListener('keydown', openEditor)
   window.addEventListener('keydown', openAgent)
+  window.addEventListener('pagehide', () => void flushVolumeMirror())
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', toggleTerminal)
   window.removeEventListener('keydown', openEditor)
   window.removeEventListener('keydown', openAgent)
+  window.removeEventListener('cybermanju:open-accounts', openAccountsWindow)
 })
 </script>
 
@@ -488,17 +513,16 @@ onBeforeUnmount(() => {
       <div v-if="store.createFolderPromptOpen" class="overlay-thin" @click.self="store.createFolderPromptOpen = false">
         <div class="mini-modal">
           <div class="mini-header">NEW FOLDER</div>
-          <input
+          <UiInput
             ref="folderInputRef"
             v-model="newFolderName"
-            class="bw-input"
-            style="width:100%;margin-bottom:8px;"
+            class="mini-input"
             placeholder="FOLDER NAME"
-            @keyup.enter="handleCreateFolder"
+            @enter="handleCreateFolder"
           />
           <div class="mini-actions">
-            <button class="bw-btn" @click="store.createFolderPromptOpen = false"><AppIcon name="solar:close-bold" :size="13" /> CANCEL</button>
-            <button class="bw-btn bw-btn-inverse" @click="handleCreateFolder"><AppIcon name="solar:add-bold" :size="13" /> CREATE</button>
+            <UiButton variant="ghost" size="sm" icon="solar:close-bold" @click="store.createFolderPromptOpen = false">CANCEL</UiButton>
+            <UiButton variant="primary" size="sm" icon="solar:add-bold" @click="handleCreateFolder">CREATE</UiButton>
           </div>
         </div>
       </div>
@@ -515,7 +539,6 @@ onBeforeUnmount(() => {
       @cancel="confirmVisible = false"
       @update:visible="confirmVisible = $event"
     />
-    <LoginPopup />
     <FileUploadDialog
       :visible="showUploadDialog"
       @close="showUploadDialog = false"
@@ -533,8 +556,8 @@ onBeforeUnmount(() => {
   flex-direction: column;
   height: 100vh;
   width: 100vw;
-  background: #0a0a0a;
-  color: #e0e0e0;
+  background: var(--ui-bg);
+  color: var(--ui-text);
   overflow: hidden;
   position: relative;
 }
@@ -547,49 +570,78 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 16px;
-  background: #1a1a1a;
-  border: 1px solid #ff5f57;
-  border-radius: 8px;
-  color: #ff5f57;
-  font-family: 'Courier New', monospace;
-  font-size: 10px;
+  padding: 7px 14px;
+  background: var(--ui-glass-2);
+  backdrop-filter: blur(var(--ui-blur-strong)) saturate(var(--ui-saturate));
+  -webkit-backdrop-filter: blur(var(--ui-blur-strong)) saturate(var(--ui-saturate));
+  border: 1px solid color-mix(in srgb, var(--ui-danger) 55%, transparent);
+  border-radius: var(--ui-radius-full);
+  color: var(--ui-danger);
+  font-family: var(--ui-font-mono);
+  font-size: var(--ui-fs-xs);
   font-weight: 600;
   cursor: pointer;
   z-index: 9999;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  box-shadow: var(--ui-shadow-3), 0 0 24px color-mix(in srgb, var(--ui-danger) 18%, transparent);
+  animation: ui-rise var(--ui-dur) var(--ui-ease-spring);
 }
 
-.error-icon { font-size: 12px; flex-shrink: 0; }
+.error-banner:hover {
+  background: var(--ui-surface-2);
+}
+
+.error-icon { font-size: 12px; flex-shrink: 0; display: flex; }
 .error-text { flex: 1; }
-.error-dismiss { font-weight: 700; cursor: pointer; margin-left: 8px; }
+.error-dismiss {
+  font-weight: 700;
+  cursor: pointer;
+  margin-left: 8px;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--ui-radius-full);
+  background: color-mix(in srgb, var(--ui-danger) 16%, transparent);
+}
 
 .overlay-thin {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.7);
+  background: color-mix(in srgb, var(--ui-bg-deep) 62%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 10000;
+  animation: ui-fade-in var(--ui-dur) var(--ui-ease-out);
 }
 
 .mini-modal {
-  background: #1a1a1a;
-  border: 1px solid #2a2a2a;
-  border-radius: 10px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  background: var(--ui-glass-2);
+  backdrop-filter: blur(var(--ui-blur-strong)) saturate(var(--ui-saturate));
+  -webkit-backdrop-filter: blur(var(--ui-blur-strong)) saturate(var(--ui-saturate));
+  border: 1px solid var(--ui-border-strong);
+  border-radius: var(--ui-radius-lg);
+  box-shadow: var(--ui-shadow-3), inset 0 1px 0 var(--ui-glass-highlight);
   padding: 20px;
-  width: 300px;
-  font-family: 'Courier New', monospace;
+  width: 320px;
+  font-family: var(--ui-font);
+  animation: ui-pop var(--ui-dur) var(--ui-ease-spring);
 }
 
 .mini-header {
-  font-size: 12px;
+  font-size: var(--ui-fs-md);
   font-weight: 800;
-  color: #e0e0e0;
+  color: var(--ui-text);
   margin-bottom: 12px;
-  letter-spacing: 1px;
+  letter-spacing: var(--ui-tracking-wide);
+}
+
+.mini-input {
+  width: 100%;
+  margin-bottom: 14px;
 }
 
 .mini-actions {
@@ -598,6 +650,6 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 
-.text-muted { color: rgba(255,255,255,0.5) !important; }
+.text-muted { color: color-mix(in srgb, var(--ui-text) 50%, transparent) !important; }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

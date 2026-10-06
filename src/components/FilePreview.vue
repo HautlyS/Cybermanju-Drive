@@ -193,8 +193,8 @@ function handleDelete() {
   min-width: 280px;
   display: flex;
   flex-direction: column;
-  background: #000;
-  border-left: 2px solid #FFFFFF;
+  background: var(--ui-surface);
+  border-left: 1px solid var(--ui-border);
   overflow: hidden;
   z-index: 5;
   height: 100%;
@@ -218,14 +218,14 @@ function handleDelete() {
   align-items: flex-start;
   gap: 8px;
   padding: 10px;
-  border-bottom: 2px solid #FFFFFF;
+  border-bottom: 1px solid var(--ui-border);
   flex-shrink: 0;
 }
 
 .preview-icon {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 18px;
-  color: #FFFFFF;
+  color: var(--ui-text);
   flex-shrink: 0;
 }
 
@@ -240,12 +240,12 @@ function handleDelete() {
 .preview-filename {
   font-size: 12px;
   font-weight: 700;
-  color: #FFFFFF;
+  color: var(--ui-text);
 }
 
 .preview-path {
   font-size: 9px;
-  color: rgba(255,255,255,0.5);
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent);
 }
 
 .preview-scroll {
@@ -260,11 +260,11 @@ function handleDelete() {
 }
 
 .section-label {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.8px;
-  color: rgba(255,255,255,0.5);
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent);
   margin-bottom: 6px;
 }
 
@@ -284,19 +284,19 @@ function handleDelete() {
 .meta-key {
   font-size: 10px;
   flex-shrink: 0;
-  color: rgba(255,255,255,0.5) !important;
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent) !important;
 }
 
 .meta-value {
   font-size: 10px;
-  color: #FFFFFF;
+  color: var(--ui-text);
   text-align: right;
 }
 
 .info-card {
   padding: 6px 8px;
-  border: 2px solid #FFFFFF;
-  background: #000;
+  border: 1px solid var(--ui-border);
+  background: var(--ui-surface);
 }
 
 .info-row {
@@ -310,16 +310,16 @@ function handleDelete() {
 .info-key {
   font-size: 10px;
   flex-shrink: 0;
-  color: rgba(255,255,255,0.5) !important;
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent) !important;
 }
 
 .info-badge {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 9px;
   font-weight: 700;
-  border: 1px solid #FFFFFF;
+  border: 1px solid var(--ui-border-strong);
   padding: 0 4px;
-  color: #FFFFFF;
+  color: var(--ui-text);
 }
 
 .tag-list {
@@ -330,11 +330,11 @@ function handleDelete() {
 
 .tag-item {
   font-size: 9px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-weight: 700;
-  border: 2px solid #FFFFFF;
+  border: 1px solid var(--ui-border);
   padding: 1px 6px;
-  color: #FFFFFF;
+  color: var(--ui-text);
 }
 
 .face-list {
@@ -353,22 +353,22 @@ function handleDelete() {
 .avatar-sm {
   width: 20px;
   height: 20px;
-  border: 2px solid #FFFFFF;
+  border: 1px solid var(--ui-border);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   font-size: 8px;
-  color: #FFFFFF;
+  color: var(--ui-text);
 }
 
 .face-name {
   font-size: 11px;
-  color: #FFFFFF;
+  color: var(--ui-text);
 }
 
 .symbol-tree {
-  border: 2px solid rgba(255,255,255,0.3);
+  border: 1px solid var(--ui-hairline);
   overflow: hidden;
 }
 
@@ -378,20 +378,20 @@ function handleDelete() {
   gap: 4px;
   padding: 2px 6px;
   font-size: 10px;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
+  border-bottom: 1px solid var(--ui-border);
 }
 
 .symbol-kind {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 8px;
-  color: rgba(255,255,255,0.6);
+  color: color-mix(in srgb, var(--ui-text) 60%, transparent);
   text-transform: uppercase;
   flex-shrink: 0;
   min-width: 40px;
 }
 
 .symbol-name {
-  color: #FFFFFF;
+  color: var(--ui-text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -401,7 +401,7 @@ function handleDelete() {
   display: flex;
   gap: 2px;
   padding: 6px;
-  border-top: 2px solid #FFFFFF;
+  border-top: 1px solid var(--ui-border);
   flex-shrink: 0;
 }
 
@@ -411,26 +411,26 @@ function handleDelete() {
   align-items: center;
   justify-content: center;
   height: 28px;
-  border: 2px solid #FFFFFF;
-  background: #000;
-  color: #FFFFFF;
+  border: 1px solid var(--ui-border);
+  background: var(--ui-surface);
+  color: var(--ui-text);
   cursor: pointer;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 9px;
   font-weight: 700;
 }
 
 .pa-btn:hover {
-  background: #FFFFFF;
-  color: #000;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
 .pa-btn.danger:hover {
-  background: #FFFFFF;
-  color: #000;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
-.mono { font-family: 'Courier New', monospace; }
-.text-muted { color: rgba(255,255,255,0.5) !important; }
+.mono { font-family: var(--ui-font); }
+.text-muted { color: color-mix(in srgb, var(--ui-text) 50%, transparent) !important; }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

@@ -1,4 +1,6 @@
 pub mod agent;
+pub mod artifact;
+pub mod canal;
 pub mod compression;
 pub mod crypto;
 pub mod db;

@@ -266,8 +266,8 @@ function showTreeContextMenu(e: MouseEvent) {
   min-width: 48px;
   display: flex;
   flex-direction: column;
-  background: #000;
-  border-right: 2px solid #FFFFFF;
+  background: var(--ui-surface);
+  border-right: 1px solid var(--ui-border);
   overflow: hidden;
   transition: width 0.15s;
   position: relative;
@@ -283,14 +283,14 @@ function showTreeContextMenu(e: MouseEvent) {
   align-items: center;
   gap: 6px;
   padding: 8px 10px 6px;
-  border-bottom: 2px solid #FFFFFF;
+  border-bottom: 1px solid var(--ui-border);
 }
 
 .sidebar-account-name {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 10px;
   font-weight: 700;
-  color: #FFFFFF;
+  color: var(--ui-text);
   text-transform: uppercase;
 }
 
@@ -299,7 +299,7 @@ function showTreeContextMenu(e: MouseEvent) {
   flex-direction: column;
   padding: 4px;
   gap: 1px;
-  border-bottom: 2px solid #FFFFFF;
+  border-bottom: 1px solid var(--ui-border);
 }
 
 .sidebar-tab {
@@ -308,25 +308,25 @@ function showTreeContextMenu(e: MouseEvent) {
   gap: 6px;
   padding: 6px 8px;
   cursor: pointer;
-  color: rgba(255,255,255,0.5);
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent);
   font-size: 10px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-weight: 700;
   border: 2px solid transparent;
 }
 
 .sidebar-tab:hover {
-  color: #FFFFFF;
-  border-color: #FFFFFF;
+  color: var(--ui-text);
+  border-color: var(--ui-border-strong);
 }
 
 .sidebar-tab.active {
-  color: #000;
-  background: #FFFFFF;
+  color: var(--ui-text);
+  background: var(--ui-glass-2);
 }
 
 .tab-icon {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 11px;
   width: 20px;
   text-align: center;
@@ -347,9 +347,9 @@ function showTreeContextMenu(e: MouseEvent) {
 .ql-item {
   display: block;
   padding: 6px 10px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 10px;
-  color: rgba(255,255,255,0.7);
+  color: color-mix(in srgb, var(--ui-text) 70%, transparent);
   cursor: pointer;
   text-decoration: none;
   border: none;
@@ -358,8 +358,8 @@ function showTreeContextMenu(e: MouseEvent) {
 }
 
 .ql-item:hover {
-  background: #FFFFFF;
-  color: #000;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
 .sidebar-content {
@@ -373,17 +373,17 @@ function showTreeContextMenu(e: MouseEvent) {
 }
 
 .section-header {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 1px;
-  color: rgba(255,255,255,0.4);
+  color: color-mix(in srgb, var(--ui-text) 40%, transparent);
   padding: 4px 8px;
   cursor: default;
 }
 
 .section-header:hover {
-  color: #FFFFFF;
+  color: var(--ui-text);
 }
 
 .sidebar-item {
@@ -397,15 +397,15 @@ function showTreeContextMenu(e: MouseEvent) {
 }
 
 .sidebar-item:hover {
-  border-color: #FFFFFF;
+  border-color: var(--ui-border-strong);
 }
 
 .sidebar-item.active {
-  background: #FFFFFF;
+  background: var(--ui-glass-2);
 }
 
 .sidebar-item.active .item-name {
-  color: #000;
+  color: var(--ui-text);
 }
 
 .item-info {
@@ -418,25 +418,25 @@ function showTreeContextMenu(e: MouseEvent) {
 
 .item-name {
   font-size: 11px;
-  color: #FFFFFF;
+  color: var(--ui-text);
   font-weight: 500;
 }
 
 .item-meta {
   font-size: 9px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
 }
 
 .avatar-circle {
   width: 24px;
   height: 24px;
-  border: 2px solid #FFFFFF;
+  border: 1px solid var(--ui-border);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   font-size: 9px;
-  color: #FFFFFF;
+  color: var(--ui-text);
 }
 
 .tag-cloud {
@@ -450,16 +450,16 @@ function showTreeContextMenu(e: MouseEvent) {
   display: inline-block;
   padding: 2px 6px;
   font-size: 9px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-weight: 700;
-  border: 2px solid #FFFFFF;
-  color: #FFFFFF;
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
   cursor: pointer;
 }
 
 .tag-item:hover {
-  background: #FFFFFF;
-  color: #000;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
 .tree-container {
@@ -473,20 +473,20 @@ function showTreeContextMenu(e: MouseEvent) {
   padding: 3px 8px;
   cursor: pointer;
   font-size: 11px;
-  color: #FFFFFF;
+  color: var(--ui-text);
 }
 
 .tree-node-row:hover {
-  background: rgba(255,255,255,0.1);
+  background: color-mix(in srgb, var(--ui-text) 10%, transparent);
 }
 
 .tree-arrow {
-  color: rgba(255,255,255,0.5);
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent);
   font-size: 9px;
 }
 
 .tree-name {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
 }
 
 .empty-section {
@@ -499,16 +499,16 @@ function showTreeContextMenu(e: MouseEvent) {
   display: flex;
   gap: 2px;
   padding: 4px;
-  border-top: 2px solid #FFFFFF;
+  border-top: 1px solid var(--ui-border);
 }
 
 .qa-btn {
   flex: 1;
   padding: 4px 2px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 8px;
   font-weight: 700;
-  color: rgba(255,255,255,0.6);
+  color: color-mix(in srgb, var(--ui-text) 60%, transparent);
   cursor: pointer;
   border: 2px solid transparent;
   background: transparent;
@@ -516,8 +516,8 @@ function showTreeContextMenu(e: MouseEvent) {
 }
 
 .qa-btn:hover {
-  border-color: #FFFFFF;
-  color: #FFFFFF;
+  border-color: var(--ui-border-strong);
+  color: var(--ui-text);
 }
 
 .collapse-btn {
@@ -527,25 +527,25 @@ function showTreeContextMenu(e: MouseEvent) {
   transform: translateY(-50%);
   width: 14px;
   height: 32px;
-  background: #000;
-  border: 2px solid #FFFFFF;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   z-index: 20;
-  color: #FFFFFF;
+  color: var(--ui-text);
   font-size: 9px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   padding: 0;
 }
 
 .collapse-btn:hover {
-  background: #FFFFFF;
-  color: #000;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
-.text-muted { opacity: 0.6; color: #FFFFFF !important; }
+.text-muted { opacity: 0.6; color: var(--ui-text) !important; }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 768px) {

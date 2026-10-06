@@ -119,8 +119,8 @@
         <button
           class="tray-icon"
           type="button"
-          @click="store.showLoginPopup = true"
-          :title="store.currentUser ? store.currentUser.username : 'Login'"
+          @click="wm.open('accounts')"
+          :title="store.currentUser ? `Signed in — ${store.currentUser.username}` : 'Accounts — OAuth sign-in, .cybermanju disk'"
         >
           <AppIcon name="solar:login-2-bold" :size="14" />
         </button>

@@ -28,54 +28,93 @@
       </div>
     </div>
 
-    <!-- App session -->
+    <!-- Identity — OAuth is the only sign-in; there is no password form -->
     <div class="section">
-      <h3 class="section-title"><AppIcon name="solar:login-bold" :size="13" /> APP LOGIN</h3>
-      <div class="card">
-        <div v-if="store.currentUser" class="row-between">
-          <span>{{ store.currentUser.username }} · {{ store.currentUser.role }}</span>
-          <button class="ghost-btn" type="button" @click="store.logout()">LOGOUT</button>
+      <h3 class="section-title"><AppIcon name="solar:login-bold" :size="13" /> IDENTITY — OAUTH SIGN-IN</h3>
+      <div v-if="identity" class="card">
+        <div class="row-between">
+          <span class="identity-row">
+            <img v-if="identity.avatarUrl" class="avatar" :src="identity.avatarUrl" alt="" />
+            {{ identity.name }}
+            <span class="text-muted small"> · {{ identity.email || identity.provider }}</span>
+          </span>
+          <span class="row-actions">
+            <span class="badge-on">{{ identity.provider.toUpperCase() }}</span>
+            <button class="ghost-btn xs" type="button" :disabled="signingOut" @click="signOut">{{ signingOut ? '…' : 'SIGN OUT' }}</button>
+          </span>
         </div>
-        <div v-else class="row-between">
-          <span class="text-muted">NOT LOGGED IN — USERNAME + PASSWORD (ARGON2).</span>
-          <button class="ghost-btn primary" type="button" @click="store.showLoginPopup = true">LOGIN / REGISTER</button>
+        <p class="text-muted small">Signed in through the Supabase broker — this app stores no password anywhere.</p>
+      </div>
+      <div v-else class="card">
+        <div class="row-between">
+          <span class="text-muted">NOT SIGNED IN — PICK A PROVIDER (APPROVE THERE, NOTHING IS TYPED HERE).</span>
         </div>
+        <div class="row-actions" style="margin-top:6px;">
+          <button
+            v-for="p in IDENTITY_PROVIDERS"
+            :key="p.id"
+            class="ghost-btn xs primary"
+            type="button"
+            :disabled="signInBusy === p.id || !sbConfigured"
+            @click="signIn(p.id)"
+          >{{ signInBusy === p.id ? 'OPENING…' : `CONTINUE WITH ${p.label}` }}</button>
+        </div>
+        <p v-if="signInMsg" class="note">{{ signInMsg }}</p>
+        <p v-if="!sbConfigured" class="note">Set SUPABASE URL + KEY in Settings → OAUTH first — the broker runs the sign-in flow (enable the provider under Supabase → Authentication → Sign-in).</p>
       </div>
     </div>
 
-    <!-- Local accounts -->
+    <!-- This machine: the .cybermanju file the whole vault lives in -->
     <div class="section">
-      <h3 class="section-title"><AppIcon name="solar:laptop-bold" :size="13" /> DEVICE ACCOUNTS ({{ store.accounts.length }})</h3>
-      <div v-if="store.accounts.length" class="cards">
-        <div
-          v-for="a in store.accounts"
-          :key="a.id"
-          class="card clickable"
-          :class="{ active: a.isActive }"
-          @click="store.switchAccount(a.id)"
-          :title="a.isActive ? 'Active account' : 'Click to switch'"
-        >
-          <div class="row-between">
-            <span><i class="dot" :class="{ on: a.isActive }"></i>{{ a.name }}</span>
-            <span class="row-actions" @click.stop>
-              <span v-if="a.isActive" class="badge-on">ACTIVE</span>
-              <button v-else class="ghost-btn xs" type="button" @click="store.switchAccount(a.id)">SWITCH</button>
-              <button class="ghost-btn xs danger" type="button" :disabled="!!a.isActive" title="The active account cannot be deleted" @click="removeAccount(a.id)">DEL</button>
-            </span>
-          </div>
-          <div class="text-muted small">{{ a.accountType }}{{ a.path ? ' · ' + a.path : '' }}</div>
+      <h3 class="section-title"><AppIcon name="solar:diskette-bold" :size="13" /> DISK — THIS MACHINE (.CYBERMANJU FILE)</h3>
+      <div class="card">
+        <div class="row-between">
+          <span>
+            <template v-if="disk.attached">
+              <i class="dot" :class="{ on: !disk.dirty }"></i>{{ disk.name }}
+              <span class="text-muted small"> · {{ humanBytes(disk.savedBytes) }}<template v-if="disk.dirty"> · UNSAVED CHANGES</template><template v-else> · SAVED {{ timeOf(disk.savedAt) }}</template></span>
+            </template>
+            <span v-else class="text-muted">NO FILE ATTACHED — THE VAULT LIVES IN THIS BROWSER ONLY.</span>
+          </span>
+          <span class="row-actions">
+            <button class="ghost-btn xs primary" type="button" :disabled="disk.busy" @click="openDiskFile">{{ disk.busy ? '…' : 'OPEN' }}</button>
+            <button class="ghost-btn xs" type="button" :disabled="disk.busy" @click="createDiskFile">CREATE</button>
+            <button class="ghost-btn xs" type="button" :disabled="disk.busy || !disk.bound" @click="saveDiskFile">SAVE NOW</button>
+            <button class="ghost-btn xs" type="button" :disabled="disk.busy" @click="exportDiskFile">EXPORT</button>
+            <button class="ghost-btn xs" type="button" :disabled="disk.busy" @click="pickImport">IMPORT</button>
+            <button v-if="disk.bound" class="ghost-btn xs danger" type="button" :disabled="disk.busy" @click="detachDiskFile">DETACH</button>
+          </span>
         </div>
-      </div>
-      <p v-else class="text-muted empty">No device accounts yet.</p>
-      <div class="form-row">
-        <input v-model="newAcctName" class="input" placeholder="ACCOUNT NAME" aria-label="Account name" />
-        <select v-model="newAcctType" class="input" aria-label="Account type">
-          <option value="local">LOCAL</option>
-          <option value="cloud">CLOUD</option>
-          <option value="network">NETWORK</option>
-        </select>
-        <input v-model="newAcctPath" class="input" placeholder="PATH (optional)" aria-label="Account path" />
-        <button class="ghost-btn primary" type="button" :disabled="!newAcctName.trim()" @click="addAccount">+ ADD</button>
+        <input ref="importInput" type="file" accept=".cybermanju,application/octet-stream" class="hidden-input" @change="onImportFile" />
+
+        <div class="form-row" style="margin-top:6px;">
+          <input
+            v-model="diskPassphrase"
+            class="input"
+            type="password"
+            placeholder="PASSPHRASE (OPTIONAL — ENCRYPTS THE FILE, NEVER STORED)"
+            autocomplete="new-password"
+            aria-label="File passphrase"
+          />
+          <span class="text-muted small">{{ disk.supported ? 'FILE SYSTEM ACCESS API — SAVES STRAIGHT TO YOUR DISK' : 'NO FILE SYSTEM ACCESS API — USE EXPORT / IMPORT' }}</span>
+        </div>
+
+        <div v-if="disk.needsPassphrase" class="oauth-block">
+          <div class="row-between">
+            <span class="small">{{ disk.name }} IS ENCRYPTED — ENTER ITS PASSPHRASE TO OPEN</span>
+            <button class="ghost-btn xs primary" type="button" :disabled="disk.busy" @click="unlockDisk">UNLOCK & OPEN</button>
+          </div>
+        </div>
+        <div v-else-if="disk.needsPermission" class="oauth-block">
+          <div class="row-between">
+            <span class="small">{{ disk.name }} IS REMEMBERED — THE BROWSER WANTS ONE CLICK TO RE-OPEN IT</span>
+            <button class="ghost-btn xs primary" type="button" :disabled="disk.busy" @click="unlockDisk">ALLOW & OPEN</button>
+          </div>
+        </div>
+
+        <p v-if="disk.lastMessage" class="note">{{ disk.lastMessage }}</p>
+        <p v-if="disk.lastError" class="note err">{{ disk.lastError }}</p>
+        <p v-if="disk.bound && disk.dirty" class="note">Changes are written back automatically — SAVE NOW forces it immediately.</p>
       </div>
     </div>
 
@@ -285,13 +324,29 @@ import { isStaticHost } from '@/composables/useTauri'
 import { wasmDbBackend } from '@/composables/useWasmBackend'
 import {
   getPendingOAuthConfig,
+  identity,
+  refreshIdentity,
   setPendingOAuthConfig,
+  signInWithPopup,
+  signOutIdentity,
   startSupabaseOAuth,
   supabaseConfigured,
   supabaseProviderFor,
   supabaseSession,
   takeProviderTokenStash,
+  type OAuthBackend,
 } from '@/composables/useSupabase'
+import {
+  createCybermanjuFile,
+  detachCybermanjuFile,
+  disk,
+  diskSupported,
+  exportCybermanjuFile,
+  importCybermanjuFile,
+  openCybermanjuFile,
+  reattachCybermanjuDisk,
+  saveCybermanjuFile,
+} from '@/composables/useCybermanjuFile'
 import { SYNC_BACKEND_INFO, describeSyncError, isOauthCapable } from '@/types'
 import type { DiskRow, SyncBackendType, SyncConfig } from '@/types'
 import { humanBytes, diskPct } from '@/utils/format'
@@ -339,9 +394,16 @@ const sbAbort = ref<AbortController | null>(null)
 const sbMsg = ref<Record<string, string>>({})
 const sbConfigured = computed(() => supabaseConfigured())
 
-const newAcctName = ref('')
-const newAcctType = ref('local')
-const newAcctPath = ref('')
+const IDENTITY_PROVIDERS: Array<{ id: OAuthBackend; label: string }> = [
+  { id: 'google', label: 'GOOGLE' },
+  { id: 'github', label: 'GITHUB' },
+  { id: 'gitlab', label: 'GITLAB' },
+]
+const signInBusy = ref<OAuthBackend | null>(null)
+const signInMsg = ref('')
+const signingOut = ref(false)
+const diskPassphrase = ref('')
+const importInput = ref<HTMLInputElement | null>(null)
 
 const newDiskMb = ref<Record<string, number>>({})
 const newDiskPass = ref<Record<string, string>>({})
@@ -455,16 +517,71 @@ async function refresh() {
   refreshing.value = false
 }
 
-async function addAccount() {
-  if (!newAcctName.value.trim()) return
-  await store.createAccount(newAcctName.value.trim(), newAcctType.value, newAcctPath.value.trim() || undefined)
-  newAcctName.value = ''
-  newAcctPath.value = ''
+async function signIn(provider: OAuthBackend) {
+  if (signInBusy.value) return
+  signInBusy.value = provider
+  signInMsg.value = ''
+  try {
+    const who = await signInWithPopup(provider)
+    store.notifySuccess(`Signed in as ${who.name}`)
+  } catch (e) {
+    signInMsg.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    signInBusy.value = null
+  }
 }
 
-async function removeAccount(id: string) {
-  if (!window.confirm('Delete this device account?')) return
-  await store.deleteAccount(id)
+async function signOut() {
+  signingOut.value = true
+  try {
+    await signOutIdentity()
+    store.notifySuccess('Signed out')
+  } finally {
+    signingOut.value = false
+  }
+}
+
+function timeOf(ts: number): string {
+  return ts ? new Date(ts).toLocaleTimeString() : ''
+}
+
+async function openDiskFile() {
+  await openCybermanjuFile()
+}
+
+async function createDiskFile() {
+  await createCybermanjuFile(diskPassphrase.value)
+}
+
+async function saveDiskFile() {
+  const ok = await saveCybermanjuFile()
+  if (ok) store.notifySuccess(disk.lastMessage || 'Saved')
+}
+
+async function exportDiskFile() {
+  await exportCybermanjuFile(diskPassphrase.value || undefined)
+}
+
+function pickImport() {
+  importInput.value?.click()
+}
+
+async function onImportFile(ev: Event) {
+  const input = ev.target as HTMLInputElement
+  const file = input.files?.[0] ?? null
+  input.value = ''
+  if (!file) return
+  await importCybermanjuFile(file)
+  if (disk.attached) store.notifySuccess(`${disk.name} imported`)
+}
+
+async function unlockDisk() {
+  await reattachCybermanjuDisk(diskPassphrase.value)
+}
+
+async function detachDiskFile() {
+  if (!window.confirm('Detach this file? The vault keeps living in this browser session until the file is opened again.')) return
+  await detachCybermanjuFile()
 }
 
 async function toggleEnabled(cfg: SyncConfig) {
@@ -746,6 +863,8 @@ async function addProvider(verify: boolean) {
 }
 
 onMounted(() => {
+  disk.supported = diskSupported()
+  void refreshIdentity()
   void (async () => {
     await refresh()
     if (!staticHost) return
@@ -778,9 +897,9 @@ onBeforeUnmount(() => {
 .acct-panel {
   height: 100%;
   overflow-y: auto;
-  background: #000;
-  color: #fff;
-  font-family: 'Courier New', monospace;
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  font-family: var(--ui-font);
   font-size: 13px;
 }
 
@@ -789,7 +908,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+  border-bottom: 1px solid var(--ui-border);
 }
 
 .header-left {
@@ -798,7 +917,7 @@ onBeforeUnmount(() => {
   gap: 10px;
 }
 
-.icon-acct { color: #5af78e; }
+.icon-acct { color: var(--ui-accent); }
 
 .panel-title {
   margin: 0;
@@ -810,40 +929,40 @@ onBeforeUnmount(() => {
 
 .ghost-btn {
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  color: rgba(255, 255, 255, 0.75);
+  border: 1px solid var(--ui-border);
+  color: color-mix(in srgb, var(--ui-text) 70%, transparent);
   font-family: inherit;
   font-size: 11px;
   padding: 3px 8px;
   cursor: pointer;
 }
 
-.ghost-btn:hover:not(:disabled) { color: #fff; border-color: #fff; }
+.ghost-btn:hover:not(:disabled) { color: var(--ui-text); border-color: var(--ui-border-strong); }
 .ghost-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.ghost-btn.primary { color: #5af78e; border-color: rgba(90, 247, 142, 0.6); }
-.ghost-btn.primary:hover:not(:disabled) { color: #000; background: #5af78e; border-color: #5af78e; }
-.ghost-btn.danger { color: #ff5f56; border-color: rgba(255, 95, 86, 0.55); }
-.ghost-btn.danger:hover:not(:disabled) { color: #000; background: #ff5f56; border-color: #ff5f56; }
+.ghost-btn.primary { color: var(--ui-accent); border-color: color-mix(in srgb, var(--ui-accent) 60%, transparent); }
+.ghost-btn.primary:hover:not(:disabled) { color: var(--ui-text); background: var(--ui-accent); border-color: var(--ui-accent); }
+.ghost-btn.danger { color: var(--ui-danger); border-color: color-mix(in srgb, var(--ui-danger) 55%, transparent); }
+.ghost-btn.danger:hover:not(:disabled) { color: var(--ui-text); background: var(--ui-danger); border-color: var(--ui-danger); }
 .ghost-btn.xs { font-size: 10px; padding: 2px 6px; }
-.ghost-btn.on { color: #5af78e; border-color: rgba(90, 247, 142, 0.6); }
+.ghost-btn.on { color: var(--ui-accent); border-color: color-mix(in srgb, var(--ui-accent) 60%, transparent); }
 
-.section { padding: 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+.section { padding: 12px; border-bottom: 1px solid var(--ui-border); }
 
 .section-title {
   margin: 0 0 10px;
   font-size: 11px;
   letter-spacing: 1.5px;
-  color: rgba(255, 255, 255, 0.55);
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent);
 }
 
-.df-bar { height: 18px; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); }
-.df-used { height: 100%; background: linear-gradient(90deg, #5af78e, #57c7ff); }
+.df-bar { height: 18px; background: color-mix(in srgb, var(--ui-text) 10%, transparent); border: 1px solid var(--ui-border); }
+.df-used { height: 100%; background: linear-gradient(90deg, var(--ui-accent), var(--ui-info)); }
 .df-legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; font-size: 11px; }
 
-.card { border: 1px solid rgba(255, 255, 255, 0.16); padding: 10px; margin-bottom: 8px; }
+.card { border: 1px solid var(--ui-border); padding: 10px; margin-bottom: 8px; }
 .card.clickable { cursor: pointer; }
-.card.clickable:hover { border-color: rgba(255, 255, 255, 0.4); }
-.card.active { border-color: rgba(90, 247, 142, 0.6); }
+.card.clickable:hover { border-color: var(--ui-border); }
+.card.active { border-color: color-mix(in srgb, var(--ui-accent) 60%, transparent); }
 .card.provider { border-width: 1px; }
 
 .cards { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
@@ -851,48 +970,48 @@ onBeforeUnmount(() => {
 .row-between { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .row-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 
-.dot { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border: 1px solid #888; border-radius: 50%; }
-.dot.on { background: #5af78e; border-color: #5af78e; }
-.badge-on { font-size: 10px; color: #5af78e; border: 1px solid rgba(90, 247, 142, 0.6); padding: 1px 6px; }
+.dot { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border: 1px solid var(--ui-text-2); border-radius: 50%; }
+.dot.on { background: var(--ui-accent); border-color: var(--ui-accent); }
+.badge-on { font-size: 10px; color: var(--ui-accent); border: 1px solid color-mix(in srgb, var(--ui-accent) 60%, transparent); padding: 1px 6px; }
 
 .auth-row { display: flex; align-items: center; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
-.auth-badge { font-size: 10px; font-weight: 700; border: 1px solid rgba(255, 255, 255, 0.3); color: rgba(255, 255, 255, 0.6); padding: 1px 6px; }
-.auth-badge.ok { color: #5af78e; border-color: rgba(90, 247, 142, 0.6); }
-.auth-badge.bad { color: #ff5f56; border-color: rgba(255, 95, 86, 0.6); }
-.auth-badge.warn { color: #f3f99d; border-color: rgba(243, 249, 157, 0.6); }
+.auth-badge { font-size: 10px; font-weight: 700; border: 1px solid var(--ui-border); color: color-mix(in srgb, var(--ui-text) 60%, transparent); padding: 1px 6px; }
+.auth-badge.ok { color: var(--ui-accent); border-color: color-mix(in srgb, var(--ui-accent) 60%, transparent); }
+.auth-badge.bad { color: var(--ui-danger); border-color: color-mix(in srgb, var(--ui-danger) 60%, transparent); }
+.auth-badge.warn { color: var(--ui-warning); border-color: color-mix(in srgb, var(--ui-warning) 75%, transparent); }
 
-.oauth-block { border: 1px dashed rgba(255, 255, 255, 0.25); padding: 8px; margin: 8px 0; }
+.oauth-block { border: 1px dashed var(--ui-border); padding: 8px; margin: 8px 0; }
 
 .cred-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; margin-top: 8px; }
 .field { display: flex; flex-direction: column; gap: 4px; font-size: 11px; }
 .field.grow { grid-column: 1 / -1; }
 
 .input {
-  background: #000;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  color: #fff;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
   font-family: inherit;
   font-size: 12px;
   padding: 5px 6px;
   outline: none;
   min-width: 0;
 }
-.input:focus { border-color: #5af78e; }
+.input:focus { border-color: var(--ui-accent); }
 .input.xs-num { width: 76px; }
 
 .form-row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; align-items: center; }
 .form-row .input { flex: 1; min-width: 140px; }
 
-.disks-block { margin-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.1); padding-top: 8px; }
-.disk-row { border: 1px solid rgba(255, 255, 255, 0.12); padding: 6px 8px; margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
-.mini-bar { height: 8px; background: rgba(255, 255, 255, 0.12); }
-.mini-used { height: 100%; background: #5af78e; }
-.slider { flex: 1; min-width: 140px; accent-color: #5af78e; }
+.disks-block { margin-top: 10px; border-top: 1px solid var(--ui-border); padding-top: 8px; }
+.disk-row { border: 1px solid var(--ui-border); padding: 6px 8px; margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
+.mini-bar { height: 8px; background: color-mix(in srgb, var(--ui-text) 6%, transparent); }
+.mini-used { height: 100%; background: var(--ui-accent); }
+.slider { flex: 1; min-width: 140px; accent-color: var(--ui-accent); }
 
-.note { margin: 6px 0 0; font-size: 11px; color: #9aedfe; white-space: pre-wrap; word-break: break-word; }
+.note { margin: 6px 0 0; font-size: 11px; color: var(--ui-info); white-space: pre-wrap; word-break: break-word; }
 .static-note {
-  border: 1px dashed #f3f99d;
-  color: #f3f99d;
+  border: 1px dashed var(--ui-warning);
+  color: var(--ui-warning);
   font-size: 10px;
   line-height: 1.5;
   padding: 8px 10px;
@@ -900,10 +1019,16 @@ onBeforeUnmount(() => {
   letter-spacing: 0.3px;
 }
 .mono { font-family: inherit; }
-.url { word-break: break-all; color: #9aedfe; }
-.linklike { background: none; border: none; color: #9aedfe; cursor: pointer; font: inherit; text-decoration: underline; padding: 0; }
+.url { word-break: break-all; color: var(--ui-info); }
+.linklike { background: none; border: none; color: var(--ui-info); cursor: pointer; font: inherit; text-decoration: underline; padding: 0; }
 .small { font-size: 11px; }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .empty { margin: 0 0 8px; font-size: 12px; }
-.text-muted { color: rgba(255, 255, 255, 0.5) !important; }
+.text-muted { color: color-mix(in srgb, var(--ui-text) 50%, transparent) !important; }
+
+/* identity + .cybermanju disk block */
+.note.err { color: var(--ui-danger); }
+.hidden-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.avatar { width: 16px; height: 16px; border-radius: 50%; vertical-align: -3px; margin-right: 6px; border: 1px solid var(--ui-border); }
+.identity-row { display: inline-flex; align-items: center; }
 </style>

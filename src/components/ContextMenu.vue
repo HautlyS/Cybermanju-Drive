@@ -186,25 +186,26 @@ onUnmounted(() => {
 })
 </script>
 
-<style scoped>
-.ctx-menu {
-  position: fixed;
+<style scoped>.ctx-menu {position: fixed;
   z-index: 9999;
-  background: #000;
-  border: 2px solid #FFFFFF;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
   min-width: 180px;
   max-width: 300px;
   padding: 4px 0;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 10px;
-  color: #FFFFFF;
-  box-shadow: 4px 4px 0 rgba(255,255,255,0.15);
+  color: var(--ui-text);
+  box-shadow: 4px 4px 0 var(--ui-border);
   outline: none;
+  backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
+  -webkit-backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
+  border-radius: var(--ui-radius-md);
 }
 
-.ctx-submenu {
-  position: fixed;
+.ctx-submenu {position: fixed;
   z-index: 10000;
+  border-radius: var(--ui-radius-md);
 }
 
 .ctx-item {
@@ -219,8 +220,8 @@ onUnmounted(() => {
 
 .ctx-item:hover,
 .ctx-focused {
-  background: #FFFFFF;
-  color: #000;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
 .ctx-disabled {
@@ -255,7 +256,7 @@ onUnmounted(() => {
 
 .ctx-divider {
   height: 1px;
-  background: rgba(255,255,255,0.2);
+  background: color-mix(in srgb, var(--ui-text) 20%, transparent);
   margin: 2px 8px;
 }
 

@@ -12,7 +12,7 @@ export interface ModuleInfo {
   requiresAuth: boolean
 }
 export type EncryptionAlgo = 'kyber1024' | 'dilithium5' | 'frodokem1344' | 'hybrid' | 'aes256'
-export type CompressionType = 'none' | 'lz4' | 'zstd' | 'triple'
+export type CompressionType = 'none' | 'lz4' | 'brotli' | 'zstd' | 'triple'
 export type AccountType = 'local' | 'cloud' | 'network'
 export type CollectionType = 'highlights' | 'best_moments' | 'custom'
 
@@ -345,6 +345,7 @@ export const ENCRYPTION_INFO: Record<EncryptionAlgo, { name: string; nistLevel: 
 export const COMPRESSION_INFO: Record<CompressionType, { name: string; description: string; color: string; speed: string }> = {
   none: { name: 'None', description: 'Uncompressed raw data', color: '#FFFFFF', speed: 'Instant' },
   lz4: { name: 'LZ4 (lz4_flex)', description: 'Ultra-fast pure Rust compression (~400 MB/s). Real-time previews and streaming.', color: '#FFFFFF', speed: 'Ultra-Fast' },
+  brotli: { name: 'Brotli-11', description: 'Google\'s format, quality 11 — the best ratio the browser wasm pack can run (no zstd here).', color: '#FFFFFF', speed: 'Medium' },
   zstd: { name: 'Zstandard (zstd)', description: 'Facebook\'s algorithm. Excellent ratio/speed balance, configurable levels 1-22.', color: '#FFFFFF', speed: 'Fast' },
   triple: { name: 'Triple-Layer', description: 'LZ4 -> ZSTD-15 -> Brotli-11 cascading. Maximum compression for archival.', color: '#FFFFFF', speed: 'Slow' },
 }

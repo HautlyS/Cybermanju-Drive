@@ -75,11 +75,11 @@ function handleDrop(collectionId: string) {
 .collections-panel {
   width: 100%;
   height: 100%;
-  background: #000;
+  background: var(--ui-surface);
   overflow-y: auto;
   padding: 16px;
-  font-family: 'Courier New', monospace;
-  color: #FFFFFF;
+  font-family: var(--ui-font);
+  color: var(--ui-text);
 }
 
 .panel-header {
@@ -87,7 +87,7 @@ function handleDrop(collectionId: string) {
   align-items: center;
   justify-content: space-between;
   padding-bottom: 10px;
-  border-bottom: 2px solid #FFFFFF;
+  border-bottom: 1px solid var(--ui-border);
   margin-bottom: 16px;
 }
 
@@ -116,14 +116,14 @@ function handleDrop(collectionId: string) {
 }
 
 .collection-card {
-  border: 2px solid #FFFFFF;
+  border: 1px solid var(--ui-border);
   padding: 10px;
   transition: border-color 0.15s;
 }
 
 .collection-card.drop-target {
-  border-color: #FFFFFF;
-  background: rgba(255,255,255,0.1);
+  border-color: var(--ui-border-strong);
+  background: color-mix(in srgb, var(--ui-text) 10%, transparent);
 }
 
 .col-header {
@@ -141,7 +141,7 @@ function handleDrop(collectionId: string) {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 1px;
-  color: rgba(255,255,255,0.6);
+  color: color-mix(in srgb, var(--ui-text) 60%, transparent);
   margin: 0 0 8px;
 }
 
@@ -152,26 +152,26 @@ function handleDrop(collectionId: string) {
 }
 
 .bw-input {
-  background: #000;
-  border: 2px solid #FFFFFF;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
   padding: 6px 8px;
-  color: #FFFFFF;
-  font-family: 'Courier New', monospace;
+  color: var(--ui-text);
+  font-family: var(--ui-font);
   font-size: 11px;
 }
 
 .bw-btn {
   padding: 6px 12px;
-  background: #FFFFFF;
-  color: #000;
-  border: 2px solid #FFFFFF;
-  font-family: 'Courier New', monospace;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
+  border: 1px solid var(--ui-border);
+  font-family: var(--ui-font);
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
 }
 
-.bw-btn:hover { background: #000; color: #FFFFFF; }
+.bw-btn:hover { background: var(--ui-surface); color: var(--ui-text); }
 
-.text-muted { color: rgba(255,255,255,0.5) !important; }
+.text-muted { color: color-mix(in srgb, var(--ui-text) 50%, transparent) !important; }
 </style>

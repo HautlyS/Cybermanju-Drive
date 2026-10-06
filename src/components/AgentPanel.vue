@@ -1052,11 +1052,11 @@ onMounted(async () => {
 .agent-panel {
   width: 100%;
   height: 100%;
-  background: #000;
+  background: var(--ui-surface);
   overflow-y: auto;
   padding: 16px;
-  font-family: 'Courier New', monospace;
-  color: #FFFFFF;
+  font-family: var(--ui-font);
+  color: var(--ui-text);
 }
 
 .panel-header {
@@ -1064,7 +1064,7 @@ onMounted(async () => {
   align-items: center;
   justify-content: space-between;
   padding-bottom: 10px;
-  border-bottom: 2px solid #FFFFFF;
+  border-bottom: 1px solid var(--ui-border);
   margin-bottom: 16px;
 }
 
@@ -1079,11 +1079,11 @@ onMounted(async () => {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 1px;
-  color: rgba(255,255,255,0.6);
+  color: color-mix(in srgb, var(--ui-text) 60%, transparent);
   margin: 0 0 8px;
 }
 
-.wizard { border: 2px dashed #FFFFFF; padding: 10px; }
+.wizard { border: 2px dashed var(--ui-border-strong); padding: 10px; }
 .preset-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -1091,9 +1091,9 @@ onMounted(async () => {
   margin-bottom: 10px;
 }
 .preset-card {
-  background: #000;
-  border: 2px solid rgba(255,255,255,0.4);
-  color: #FFF;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-hairline);
+  color: var(--ui-text);
   padding: 6px 8px;
   text-align: left;
   cursor: pointer;
@@ -1102,65 +1102,65 @@ onMounted(async () => {
   flex-direction: column;
   gap: 2px;
 }
-.preset-card.on { border-color: #FFF; background: rgba(255,255,255,0.08); }
+.preset-card.on { border-color: var(--ui-border-strong); background: color-mix(in srgb, var(--ui-text) 6%, transparent); }
 .preset-name { font-size: 11px; font-weight: 700; }
 .preset-meta { font-size: 9px; }
-.preset-free { font-size: 8px; color: #8f8; }
+.preset-free { font-size: 8px; color: var(--ui-accent); }
 
 .w-label { display: flex; flex-direction: column; gap: 4px; font-size: 10px; margin-bottom: 8px; flex: 1; }
-.bw-input { background: #000; color: #FFF; border: 1px solid #FFF; padding: 6px 8px; font-size: 11px; font-family: inherit; }
+.bw-input { background: var(--ui-surface); color: var(--ui-text); border: 1px solid var(--ui-border-strong); padding: 6px 8px; font-size: 11px; font-family: inherit; }
 .w-row { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; align-items: flex-end; }
 .w-row .w-label { min-width: 140px; }
 .w-check { font-size: 10px; display: flex; gap: 4px; align-items: center; padding-bottom: 8px; }
 .w-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.w-msg { font-size: 10px; margin-top: 6px; color: rgba(255,255,255,0.75); }
-.w-msg.err { color: #F99; }
+.w-msg { font-size: 10px; margin-top: 6px; color: color-mix(in srgb, var(--ui-text) 70%, transparent); }
+.w-msg.err { color: var(--ui-danger); }
 .hint { font-size: 9px; }
 .model-row { display: flex; gap: 6px; }
 .model-row .bw-input { flex: 1; }
 
-.bw-btn { background: #000; color: #FFF; border: 2px solid #FFF; padding: 6px 10px; font-size: 10px; font-weight: 700; cursor: pointer; font-family: inherit; }
+.bw-btn { background: var(--ui-surface); color: var(--ui-text); border: 2px solid var(--ui-border-strong); padding: 6px 10px; font-size: 10px; font-weight: 700; cursor: pointer; font-family: inherit; }
 .bw-btn.small { font-size: 10px; }
 .bw-btn.xs { font-size: 9px; padding: 3px 6px; border-width: 1px; }
-.bw-btn.primary { background: #FFF; color: #000; }
-.bw-btn.danger { border-color: #F66; color: #F66; }
+.bw-btn.primary { background: var(--ui-glass-2); color: var(--ui-text); }
+.bw-btn.danger { border-color: var(--ui-danger); color: var(--ui-danger); }
 .bw-btn:disabled { opacity: 0.4; cursor: default; }
 
 .config-list, .session-list { display: flex; flex-direction: column; gap: 6px; }
-.config-card, .session-card { border: 2px solid #FFFFFF; padding: 8px 10px; cursor: pointer; }
+.config-card, .session-card { border: 1px solid var(--ui-border); padding: 8px 10px; cursor: pointer; }
 .session-card { display: flex; align-items: center; gap: 8px; }
-.config-card.on, .session-card.on { background: rgba(255,255,255,0.08); }
+.config-card.on, .session-card.on { background: color-mix(in srgb, var(--ui-text) 6%, transparent); }
 .cfg-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .cfg-name { font-size: 12px; font-weight: 700; flex: 1; }
 .cfg-type { font-size: 9px; }
-.cfg-status { font-size: 9px; font-weight: 700; border: 1px solid #FFFFFF; padding: 0 4px; }
-.cfg-status.on { background: #FFFFFF; color: #000; }
+.cfg-status { font-size: 9px; font-weight: 700; border: 1px solid var(--ui-border-strong); padding: 0 4px; }
+.cfg-status.on { background: var(--ui-glass-2); color: var(--ui-text); }
 .cfg-actions { display: flex; gap: 6px; margin-top: 6px; }
 .session-title { font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-meta { font-size: 9px; }
 .empty { font-size: 10px; }
 
-.thread { border-top: 2px solid #FFFFFF; padding-top: 12px; }
+.thread { border-top: 1px solid var(--ui-border); padding-top: 12px; }
 .thread-actions { margin-bottom: 8px; }
-.mono { font-family: inherit; border: 1px solid rgba(255,255,255,0.4); padding: 0 4px; }
+.mono { font-family: inherit; border: 1px solid var(--ui-border); padding: 0 4px; }
 .remote-list { margin-top: 6px; }
-.remote-row { display: flex; justify-content: space-between; gap: 8px; font-size: 10px; border-bottom: 1px solid #222; padding: 2px 0; }
+.remote-row { display: flex; justify-content: space-between; gap: 8px; font-size: 10px; border-bottom: 1px solid var(--ui-border-strong); padding: 2px 0; }
 .usage { font-size: 9px; margin-bottom: 6px; }
 .messages { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; max-height: 420px; overflow-y: auto; }
-.msg { border: 1px solid rgba(255,255,255,0.25); padding: 6px 8px; }
+.msg { border: 1px solid var(--ui-border); padding: 6px 8px; }
 .msg-role { font-size: 9px; font-weight: 700; margin-bottom: 4px; }
 .msg-body { font-size: 11px; white-space: pre-wrap; word-break: break-word; }
-.role-user { border-color: rgba(255,255,255,0.6); }
+.role-user { border-color: var(--ui-border); }
 .role-assistant_tool { border-style: dashed; }
-.role-tool { background: rgba(255,255,255,0.04); }
+.role-tool { background: color-mix(in srgb, var(--ui-text) 6%, transparent); }
 .tool-block { margin-top: 4px; }
 .tool-name { font-size: 10px; font-weight: 700; }
-.tool-input { font-size: 9px; color: rgba(255,255,255,0.7); white-space: pre-wrap; margin: 4px 0 0; }
+.tool-input { font-size: 9px; color: color-mix(in srgb, var(--ui-text) 70%, transparent); white-space: pre-wrap; margin: 4px 0 0; }
 
-.approval { border: 2px solid #FFB800; padding: 8px; margin-bottom: 10px; }
-.approval-title { font-size: 10px; font-weight: 700; color: #FFB800; margin-bottom: 4px; }
+.approval { border: 2px solid var(--ui-warning); padding: 8px; margin-bottom: 10px; }
+.approval-title { font-size: 10px; font-weight: 700; color: var(--ui-warning); margin-bottom: 4px; }
 .approval-text { font-size: 11px; margin-bottom: 8px; word-break: break-word; }
 
 .prompt-box { width: 100%; min-height: 64px; resize: vertical; margin-bottom: 8px; }
-.text-muted { color: rgba(255,255,255,0.5) !important; }
+.text-muted { color: color-mix(in srgb, var(--ui-text) 50%, transparent) !important; }
 </style>

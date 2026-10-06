@@ -98,7 +98,6 @@ export const useAppStore = defineStore('cybermanju', () => {
   const currentUser = ref<AuthResult | null>(null)
   const authToken = ref(getAuthToken())
   const isAuthenticated = computed(() => !!currentUser.value)
-  const showLoginPopup = ref(false)
 
   /** Persist the JWT (store + localStorage) so REST calls stay authenticated. */
   function setSessionToken(token: string) {
@@ -106,10 +105,18 @@ export const useAppStore = defineStore('cybermanju', () => {
     setAuthToken(token)
   }
 
-  // Web mode: a 401 means the session is missing or expired — offer login (F2).
+  // Web mode: a 401 means the session is missing or expired. There is no
+  // password login any more — OAuth is the only way back in, so point at the
+  // Accounts window instead of opening a login form that no longer exists.
   if (typeof window !== 'undefined') {
     window.addEventListener('cybermanju:unauthorized', () => {
-      if (isWebMode()) showLoginPopup.value = true
+      if (isWebMode()) {
+        notifyError(
+          'Session expired',
+          'Reconnect with Google, GitHub or GitLab in Accounts (OAuth sign-in)'
+        )
+        window.dispatchEvent(new CustomEvent('cybermanju:open-accounts'))
+      }
     })
   }
 
@@ -355,7 +362,9 @@ export const useAppStore = defineStore('cybermanju', () => {
   // ── Actions: Encryption ───────────────────────────────────
   async function fetchEncryptionStatus() {
     try {
-      encryptionStatus.value = await invoke<EncryptionStatus>('get_encryption_status')
+      encryptionStatus.value = await invoke<EncryptionStatus>('get_encryption_status', {
+        fileId: selectedFileId.value || undefined,
+      })
     } catch (e) {
       notifyError('Failed to get encryption status', e)
     }
@@ -1601,7 +1610,7 @@ export const useAppStore = defineStore('cybermanju', () => {
     trashItems, showTrashPanel, auditLog, fileVersions, dashboardStatus, shareLinks,
     searchQuery, searchTotalResults, isSearching, isLoading, lastError, matrixRainEnabled,
     showEncryptionPanel, showCompressionPanel, showPermissionsPanel, commandPaletteOpen,
-    showShortcutsHelp, createFolderPromptOpen, showLoginPopup,
+    showShortcutsHelp, createFolderPromptOpen,
     selectedFileIds, isMultiSelect, users, autoRefreshInterval, sortBy,
     // Computed
     currentUser, selectedFile, activeAccount, encryptedFiles, compressedFiles,

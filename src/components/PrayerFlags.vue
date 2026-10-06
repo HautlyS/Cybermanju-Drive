@@ -28,11 +28,11 @@
 }
 
 .flag-seg.white {
-  background: #FFFFFF;
+  background: var(--ui-glass-2);
 }
 
 .flag-seg.black {
-  background: #000000;
-  border-right: 1px solid #FFFFFF;
+  background: var(--ui-surface);
+  border-right: 1px solid var(--ui-border-strong);
 }
 </style>

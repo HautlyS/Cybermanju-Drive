@@ -44,21 +44,25 @@ defineEmits<{ close: [] }>()
 .dash-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.9);
+  background: color-mix(in srgb, var(--ui-bg-deep) 62%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 100;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
-.dash-content {
-  background: #000;
-  border: 2px solid #FFFFFF;
+.dash-content {background: var(--ui-glass-2);
+  border: 1px solid var(--ui-border);
   padding: 24px;
   max-width: 400px;
   width: 90%;
-  font-family: 'Courier New', monospace;
-  color: #FFFFFF;
+  font-family: var(--ui-font);
+  color: var(--ui-text);
+  border-radius: var(--ui-radius-md);
+  backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
+  -webkit-backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
 }
 
 .dash-header {
@@ -67,7 +71,7 @@ defineEmits<{ close: [] }>()
   align-items: center;
   margin-bottom: 16px;
   padding-bottom: 8px;
-  border-bottom: 2px solid #FFFFFF;
+  border-bottom: 1px solid var(--ui-border);
 }
 
 .dash-header h2 {
@@ -79,20 +83,20 @@ defineEmits<{ close: [] }>()
 
 .close-btn {
   background: none;
-  border: 2px solid #FFFFFF;
-  color: #FFFFFF;
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
   width: 24px;
   height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-weight: 700;
   font-size: 10px;
 }
 
-.close-btn:hover { background: #FFFFFF; color: #000; }
+.close-btn:hover { background: var(--ui-glass-2); color: var(--ui-text); }
 
 .dash-body {
   display: flex;
@@ -103,31 +107,31 @@ defineEmits<{ close: [] }>()
 .dash-body p { font-size: 11px; margin: 0; }
 
 .dash-url {
-  border: 2px solid #FFFFFF;
+  border: 1px solid var(--ui-border);
   padding: 10px;
   text-align: center;
 }
 
-.mono { font-family: 'Courier New', monospace; font-size: 12px; font-weight: 700; }
+.mono { font-family: var(--ui-font); font-size: 12px; font-weight: 700; }
 .bw-btn {
   background: transparent;
-  border: 2px solid #FFFFFF;
-  color: #FFFFFF;
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
   padding: 4px 12px;
   cursor: pointer;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 10px;
   font-weight: 700;
 }
-.bw-btn:hover:not(:disabled) { background: #FFFFFF; color: #000; }
+.bw-btn:hover:not(:disabled) { background: var(--ui-glass-2); color: var(--ui-text); }
 .bw-btn:disabled { opacity: 0.3; cursor: default; }
 .status-row {
   display: flex;
   justify-content: space-between;
   padding: 4px 0;
   font-size: 10px;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
+  border-bottom: 1px solid var(--ui-border);
 }
 .s-value { font-weight: 700; }
-.text-muted { color: rgba(255,255,255,0.5) !important; }
+.text-muted { color: color-mix(in srgb, var(--ui-text) 50%, transparent) !important; }
 </style>

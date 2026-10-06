@@ -35,6 +35,12 @@ getrandom03-wasm = { package = "getrandom", version = "0.3", features = ["wasm_j
 # Compression (pure Rust only)
 lz4_flex = "0.11"
 brotli = "7"
+# ZSTD *decoder* only — pure Rust, so the wasm build can undo the native
+# TripleCompressor chain (Brotli → ZSTD → LZ4). The encoder side stays
+# native: `cybermanju-compression` pulls `zstd-sys` (C, `cc`) and can never
+# build for wasm32-unknown-unknown, which is why this crate carries its own
+# lz4/brotli/zstd decoders instead of depending on it.
+ruzstd = "0.9"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -44,9 +50,11 @@ serde_json = "1"
 # The `native` feature stays OFF: the browser fetches via web-sys below.
 cybermanju-agent = { path = "../agent" }
 
-# Browser fetch for agent turns (WASM target only in practice).
+# Browser fetch for agent turns and the provider canal (WASM target only in
+# practice — `WorkerGlobalScope` because `db-worker` has no `window()`).
 web-sys = { version = "0.3", features = [
     "Window",
+    "WorkerGlobalScope",
     "Request",
     "RequestInit",
     "Response",

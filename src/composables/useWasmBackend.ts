@@ -67,6 +67,73 @@ export async function wasmAgentPrompt(req: {
   }
 }
 
+// ── Provider canal (Phase 5, canal B) ─────────────────────────────────
+// probe/list/fetch and the artifact codec live in `crates/drive-wasm`
+// (canal.rs / artifact.rs). Main-thread load path, same as the agent —
+// the browser fetch needs a real origin, so these never run in the
+// db-worker.
+
+interface WasmCanal {
+  canal_dispatch: (op: string, argsJson: string) => Promise<string>
+  canal_fetch: (configJson: string, locator: string) => Promise<Uint8Array>
+  artifact_magic: (bytes: Uint8Array) => string
+  artifact_open: (bytes: Uint8Array, passphrase: string) => Uint8Array
+}
+
+const CANAL_STALE =
+  "the wasm bundle predates the provider canal — rebuild it with 'npm run build:wasm:frontend'"
+
+function canalFn<K extends keyof WasmCanal>(mod: WasmBackend, key: K): WasmCanal[K] {
+  const fn = (mod as unknown as Partial<WasmCanal>)[key]
+  if (typeof fn !== 'function') throw new Error(CANAL_STALE)
+  return fn
+}
+
+interface CanalEnvelope<T> {
+  ok?: boolean
+  data?: T
+  error?: string
+}
+
+/**
+ * One canal op (`probe` | `list`) — envelope in, `data` out; failures
+ * throw with the house prefixes the Rust side produced (`cors:`, `auth:` …).
+ */
+export async function wasmCanalDispatch<T>(op: string, args: Record<string, unknown>): Promise<T> {
+  const mod = await loadWasm()
+  if (!mod) throw new Error('wasm backend unavailable')
+  const raw = await canalFn(mod, 'canal_dispatch')(op, JSON.stringify(args))
+  let env: CanalEnvelope<T>
+  try {
+    env = JSON.parse(raw) as CanalEnvelope<T>
+  } catch {
+    throw new Error('network: unreadable canal reply')
+  }
+  if (!env.ok) throw new Error(String(env.error ?? 'unknown canal error'))
+  return env.data as T
+}
+
+/** One provider file's raw bytes; rejects with the same house prefixes. */
+export async function wasmCanalFetch(config: unknown, locator: string): Promise<Uint8Array> {
+  const mod = await loadWasm()
+  if (!mod) throw new Error('wasm backend unavailable')
+  return canalFn(mod, 'canal_fetch')(JSON.stringify(config), locator)
+}
+
+/** Header sniff: `CYBE1` | `CYBMJ01` | `CYBMJU1` | `raw` — no key needed. */
+export async function wasmArtifactMagic(bytes: Uint8Array): Promise<string> {
+  const mod = await loadWasm()
+  if (!mod) throw new Error('wasm backend unavailable')
+  return canalFn(mod, 'artifact_magic')(bytes)
+}
+
+/** Unlock + triple-decompress an artifact (Argon2id, byte-identical to desktop). */
+export async function wasmArtifactOpen(bytes: Uint8Array, passphrase: string): Promise<Uint8Array> {
+  const mod = await loadWasm()
+  if (!mod) throw new Error('wasm backend unavailable')
+  return canalFn(mod, 'artifact_open')(bytes, passphrase)
+}
+
 /**
  * Load the wasm-pack bundle (`--target web` output). Vite sees the
  * virtual module via the resolved alias in `vite.config.wasm.ts`; when the
@@ -91,6 +158,17 @@ async function loadWasm(): Promise<typeof wasmModule> {
 /** True once the wasm backend has been loaded (or loading has started). */
 export function wasmBackendActive(): boolean {
   return wasmModule !== null
+}
+
+/**
+ * The whole wasm module (os/db/crypto/compression exports), loaded once.
+ * Crypto callers cast it to the narrow interface they need — the local
+ * `.d.ts` shim only declares the entry points every transport shares.
+ */
+export async function wasmModuleExports<T>(): Promise<T> {
+  const mod = await loadWasm()
+  if (!mod) throw new Error('wasm backend unavailable')
+  return mod as unknown as T
 }
 
 /** Dispatch one os/* command through the wasm crate. Throws on transport errors. */

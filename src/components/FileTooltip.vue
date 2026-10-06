@@ -55,20 +55,22 @@ function getIcon(file: FileNode): string {
 const icon = getIcon
 </script>
 
-<style scoped>
-.file-tooltip {
+<style scoped>.file-tooltip {
   position: fixed;
   z-index: 1000;
-  background: #000;
-  border: 2px solid #FFFFFF;
+  background: var(--ui-glass-2);
+  border: 1px solid var(--ui-border);
   padding: 10px 12px;
   min-width: 200px;
   max-width: 280px;
   pointer-events: none;
-  font-family: 'Courier New', monospace;
-  color: #FFFFFF;
+  font-family: var(--ui-font);
+  color: var(--ui-text);
   transform: translate(12px, -50%);
-  box-shadow: 3px 3px 0 rgba(255,255,255,0.15);
+  box-shadow: var(--ui-shadow-3);
+  backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
+  -webkit-backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
+  border-radius: var(--ui-radius-md);
 }
 
 .tt-header {
@@ -77,7 +79,7 @@ const icon = getIcon
   gap: 8px;
   margin-bottom: 8px;
   padding-bottom: 6px;
-  border-bottom: 1px solid rgba(255,255,255,0.2);
+  border-bottom: 1px solid var(--ui-border);
 }
 
 .tt-icon {
@@ -105,13 +107,13 @@ const icon = getIcon
 }
 
 .tt-label {
-  color: rgba(255,255,255,0.4);
+  color: color-mix(in srgb, var(--ui-text) 40%, transparent);
   flex-shrink: 0;
 }
 
 .tt-hash {
   font-size: 8px;
-  color: rgba(255,255,255,0.5);
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent);
 }
 
 .tt-badges {
@@ -119,13 +121,13 @@ const icon = getIcon
   flex-wrap: wrap;
   gap: 4px;
   padding-top: 6px;
-  border-top: 1px solid rgba(255,255,255,0.15);
+  border-top: 1px solid var(--ui-border);
 }
 
 .tt-badge {
   font-size: 8px;
   font-weight: 700;
-  border: 1px solid #FFFFFF;
+  border: 1px solid var(--ui-border-strong);
   padding: 1px 4px;
 }
 </style>

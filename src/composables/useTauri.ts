@@ -6,6 +6,18 @@
 
 import type { FileNode } from '@/types'
 import { wasmOsDispatch, wasmSearchFiles, wasmBackendActive, wasmDbDispatch } from './useWasmBackend'
+import {
+  compressFile,
+  decryptFile,
+  decompressFile,
+  encryptFile,
+  generateKeyPair,
+  getEncryptionStatus,
+  listKeys,
+  readContentText,
+  writeContentText,
+} from './useWasmCrypto'
+import type { EncryptionAlgo } from '@/types'
 
 // ── Module-level connection state ─────────────────────────────
 
@@ -1116,47 +1128,20 @@ const DB_WASM_ROUTES: Record<string, DbWasmRoute> = {
       const fileId = String(a.fileId ?? '')
       const row = raw as { value?: unknown } | null
       const body = row && typeof row === 'object' && typeof row.value === 'string' ? row.value : ''
-      const [encoding, node] = await Promise.all([
-        wasmDbDispatch('kv.get', { key: `encoding:${fileId}` }),
-        wasmDbDispatch('files.get', { fileId }).catch(() => null),
-      ])
-      const enc = (encoding as { value?: unknown } | null)?.value
-      const content = enc === 'base64' ? base64ToText(body) : body
-      const meta = node as { name?: string; hashBlake3?: string | null } | null
-      return {
-        fileId,
-        name: String(meta?.name ?? a.name ?? a.fileName ?? ''),
-        content,
-        sizeBytes: content.length,
-        truncated: false,
-        hashBlake3: meta?.hashBlake3 ?? null,
-      }
-    },
-  },
-  write_file_content: {
-    op: 'kv.set',
-    args: (a) => ({ key: `content:${a.fileId}`, value: String(a.content ?? '') }),
-    map: async (_raw, a) => {
-      const fileId = String(a.fileId ?? '')
-      const content = String(a.content ?? '')
-      // Text from the editor replaces any uploaded encoding marker, and the
-      // node's size/modified stamp follows so the file list stays honest.
-      await wasmDbDispatch('kv.delete', { key: `encoding:${fileId}` }).catch(() => null)
-      await wasmDbDispatch('files.patch', {
-        fileId,
-        patch: { sizeBytes: content.length, hashBlake3: null },
-      }).catch(() => null)
+      // The stored body may be base64 (upload), compressed, encrypted, or all
+      // three — `readContentText` unwinds whatever the file's pipeline says.
+      const content = await readContentText(fileId, body)
       const node = (await wasmDbDispatch('files.get', { fileId }).catch(() => null)) as {
         name?: string
         hashBlake3?: string | null
-        modifiedAt?: string
       } | null
       return {
         fileId,
-        name: String(node?.name ?? a.name ?? ''),
+        name: String(node?.name ?? a.name ?? a.fileName ?? ''),
+        content,
         sizeBytes: content.length,
+        truncated: false,
         hashBlake3: node?.hashBlake3 ?? null,
-        modifiedAt: String(node?.modifiedAt ?? new Date().toISOString()),
       }
     },
   },
@@ -1169,17 +1154,6 @@ function coerceBytes(data: unknown): Uint8Array {
   if (data instanceof ArrayBuffer) return new Uint8Array(data)
   if (typeof data === 'string') return new TextEncoder().encode(data)
   return new Uint8Array()
-}
-
-function base64ToText(b64: string): string {
-  try {
-    const bin = atob(b64)
-    const bytes = new Uint8Array(bin.length)
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
-    return new TextDecoder().decode(bytes)
-  } catch {
-    return ''
-  }
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -1231,6 +1205,45 @@ const STATIC_COMMAND_HANDLERS: Record<string, StaticHandler> = {
     await wasmDbDispatch('kv.set', { key: `encoding:${id}`, value: 'base64' })
     return node
   },
+
+  // Save from the editor: runs the file's compress/encrypt pipeline, then
+  // reports the node as it now stands.
+  write_file_content: async (args) => {
+    const fileId = String(args.fileId ?? '')
+    if (!fileId) throw new Error('invalid: fileId is required')
+    await writeContentText(fileId, String(args.content ?? ''))
+    const node = (await wasmDbDispatch('files.get', { fileId }).catch(() => null)) as {
+      name?: string
+      sizeBytes?: number
+      hashBlake3?: string | null
+      modifiedAt?: string
+    } | null
+    return {
+      fileId,
+      name: String(node?.name ?? ''),
+      sizeBytes: Number(node?.sizeBytes ?? 0),
+      hashBlake3: node?.hashBlake3 ?? null,
+      modifiedAt: String(node?.modifiedAt ?? new Date().toISOString()),
+    }
+  },
+
+  // ── Encryption (wasm ciphers, keys inside the vault) ──
+  get_encryption_status: async (args) => getEncryptionStatus(args.fileId ? String(args.fileId) : undefined),
+  list_keys: async () => listKeys(),
+  generate_keypair: async (args) => generateKeyPair(String(args.algorithm ?? '') as EncryptionAlgo),
+  encrypt_file: async (args) => {
+    await encryptFile(String(args.fileId ?? ''), String(args.algorithm ?? '') as EncryptionAlgo)
+    return { ok: true }
+  },
+  decrypt_file: async (args) => {
+    await decryptFile(String(args.fileId ?? ''))
+    return { ok: true }
+  },
+
+  // ── Compression (lz4 + brotli in wasm; zstd stays desktop-only) ──
+  compress_file: async (args) =>
+    compressFile(String(args.fileId ?? ''), String(args.layer ?? 'lz4')),
+  decompress_file: async (args) => decompressFile(String(args.fileId ?? '')),
 }
 
 /**
@@ -1326,7 +1339,7 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
   // crate, and the database-backed commands below go to the redb database
   // running in the DB worker (real cybermanju.db in OPFS). Anything else
   // refuses fast with one clear error instead of ERR_CONNECTION_REFUSED.
-  if (isStaticHost() && (OS_WASM_COMMANDS.has(cmd) || mapping)) {
+  if (isStaticHost() && (OS_WASM_COMMANDS.has(cmd) || mapping || STATIC_COMMAND_HANDLERS[cmd])) {
     if (OS_WASM_COMMANDS.has(cmd)) {
       const wasmArgs = wasmArgsForCommand(cmd, args ?? {})
       const raw = await wasmOsDispatch(wasmArgs.cmd, wasmArgs.args)

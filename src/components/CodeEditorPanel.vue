@@ -646,9 +646,9 @@ function highlightSyntax(code: string, _lang: string): string {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: #000;
-  color: #fff;
-  font-family: 'Courier New', monospace;
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  font-family: var(--ui-font-mono);
   font-size: 12px;
   overflow: hidden;
 }
@@ -658,7 +658,7 @@ function highlightSyntax(code: string, _lang: string): string {
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
-  border-bottom: 2px solid #FFFFFF;
+  border-bottom: 1px solid var(--ui-border);
   flex: 0 0 auto;
 }
 
@@ -666,22 +666,22 @@ function highlightSyntax(code: string, _lang: string): string {
 .header-actions { display: flex; gap: 4px; }
 .icon-editor { font-size: 14px; }
 .panel-title { font-size: 13px; font-weight: 800; letter-spacing: 1px; margin: 0; }
-.transport-tag { font-size: 9px; color: rgba(255,255,255,0.5); }
+.transport-tag { font-size: 9px; color: color-mix(in srgb, var(--ui-text) 50%, transparent); }
 
 .engine-badge {
   font-size: 9px;
   font-weight: 700;
   padding: 1px 6px;
-  border: 1px solid rgba(255,255,255,0.4);
-  color: rgba(255,255,255,0.6);
+  border: 1px solid var(--ui-border);
+  color: color-mix(in srgb, var(--ui-text) 60%, transparent);
 }
-.engine-badge.engine-ts { background: #FFFFFF; color: #000; border-color: #FFFFFF; }
+.engine-badge.engine-ts { background: var(--ui-glass-2); color: var(--ui-text); border-color: var(--ui-border-strong); }
 
 .bw-btn {
   padding: 6px 12px;
-  background: #FFFFFF;
-  color: #000;
-  border: 2px solid #FFFFFF;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
+  border: 1px solid var(--ui-border);
   font-family: inherit;
   font-size: 10px;
   font-weight: 700;
@@ -691,41 +691,41 @@ function highlightSyntax(code: string, _lang: string): string {
 .bw-btn-sm {
   padding: 2px 6px;
   background: transparent;
-  border: 1px solid rgba(255,255,255,0.5);
-  color: #fff;
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
   font-family: inherit;
   font-size: 10px;
   font-weight: 700;
   cursor: pointer;
 }
 .bw-btn-sm:disabled { opacity: 0.4; cursor: default; }
-.bw-btn-sm:hover:not(:disabled) { background: #fff; color: #000; }
+.bw-btn-sm:hover:not(:disabled) { background: var(--ui-glass-2); color: var(--ui-text); }
 .ghost-btn {
   background: transparent;
-  border: 1px solid rgba(255,255,255,0.3);
-  color: rgba(255,255,255,0.7);
+  border: 1px solid var(--ui-border);
+  color: color-mix(in srgb, var(--ui-text) 70%, transparent);
   font-family: inherit;
   font-size: 11px;
   padding: 2px 7px;
   cursor: pointer;
 }
 .bw-input {
-  background: #000;
-  border: 1px solid rgba(255,255,255,0.5);
-  color: #fff;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
   font-family: inherit;
   font-size: 11px;
   padding: 4px 6px;
   outline: none;
 }
-.bw-input:focus { border-color: #fff; }
+.bw-input:focus { border-color: var(--ui-border-strong); }
 
 .editor-body { display: flex; flex: 1 1 auto; min-height: 0; }
 
 .explorer {
   width: 220px;
   flex: 0 0 auto;
-  border-right: 1px solid rgba(255,255,255,0.15);
+  border-right: 1px solid var(--ui-border);
   display: flex;
   flex-direction: column;
   padding: 8px;
@@ -733,7 +733,7 @@ function highlightSyntax(code: string, _lang: string): string {
   overflow: hidden;
 }
 .explorer-head { display: flex; align-items: center; justify-content: space-between; }
-.section-title { font-size: 10px; letter-spacing: 1px; color: rgba(255,255,255,0.55); margin: 0; }
+.section-title { font-size: 10px; letter-spacing: 1px; color: color-mix(in srgb, var(--ui-text) 50%, transparent); margin: 0; }
 .explorer-search { width: 100%; box-sizing: border-box; }
 .wasm-nav { display: flex; align-items: center; gap: 6px; }
 .wasm-path { font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -748,9 +748,9 @@ function highlightSyntax(code: string, _lang: string): string {
   cursor: pointer;
   font-size: 11px;
 }
-.explorer-row:hover { background: rgba(255,255,255,0.08); }
-.explorer-row.active { background: rgba(255,255,255,0.14); }
-.explorer-row.dir { color: #9aedfe; }
+.explorer-row:hover { background: color-mix(in srgb, var(--ui-text) 6%, transparent); }
+.explorer-row.active { background: color-mix(in srgb, var(--ui-text) 6%, transparent); }
+.explorer-row.dir { color: var(--ui-info); }
 .explorer-icon { flex: 0 0 auto; }
 .explorer-name { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .explorer-sub { font-size: 9px; flex: 0 0 auto; }
@@ -765,38 +765,38 @@ function highlightSyntax(code: string, _lang: string): string {
   padding: 6px 8px 0;
   overflow-x: auto;
   flex: 0 0 auto;
-  border-bottom: 1px solid rgba(255,255,255,0.15);
+  border-bottom: 1px solid var(--ui-border);
 }
 .tab {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 4px 6px 4px 8px;
-  border: 1px solid rgba(255,255,255,0.2);
+  border: 1px solid var(--ui-border);
   border-bottom: none;
   font-size: 11px;
   cursor: pointer;
   white-space: nowrap;
-  color: rgba(255,255,255,0.6);
+  color: color-mix(in srgb, var(--ui-text) 60%, transparent);
 }
-.tab.active { background: rgba(255,255,255,0.1); color: #fff; }
-.tab-dot { color: #f3f99d; font-size: 9px; }
+.tab.active { background: color-mix(in srgb, var(--ui-text) 10%, transparent); color: var(--ui-text); }
+.tab-dot { color: var(--ui-warning); font-size: 9px; }
 .tab-x { background: none; border: none; color: inherit; cursor: pointer; font-size: 12px; padding: 0 2px; }
-.tab-x:hover { color: #ff5f56; }
+.tab-x:hover { color: var(--ui-danger); }
 
 .findbar {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 6px 8px;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
+  border-bottom: 1px solid var(--ui-border);
   flex: 0 0 auto;
 }
 .find-input { flex: 1; }
 .find-count { font-size: 10px; min-width: 40px; text-align: right; }
 
 .empty-editor { padding: 24px; text-align: center; }
-.refusal { color: #ff8080; font-size: 11px; }
+.refusal { color: var(--ui-danger); font-size: 11px; }
 
 .edit-wrap { flex: 1 1 auto; display: flex; min-height: 0; overflow: hidden; }
 .gutter {
@@ -804,7 +804,7 @@ function highlightSyntax(code: string, _lang: string): string {
   width: 44px;
   padding: 8px 6px 8px 0;
   text-align: right;
-  color: rgba(255,255,255,0.3);
+  color: color-mix(in srgb, var(--ui-text) 35%, transparent);
   font-size: 12px;
   line-height: 1.5;
   overflow: hidden;
@@ -816,7 +816,7 @@ function highlightSyntax(code: string, _lang: string): string {
 .editor-input {
   margin: 0;
   padding: 8px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font-mono);
   font-size: 12px;
   line-height: 1.5;
   white-space: pre;
@@ -827,7 +827,7 @@ function highlightSyntax(code: string, _lang: string): string {
   inset: 0;
   overflow: hidden;
   pointer-events: none;
-  color: #e6e6e6;
+  color: var(--ui-text);
 }
 .highlight code { font-family: inherit; }
 .editor-input {
@@ -840,7 +840,7 @@ function highlightSyntax(code: string, _lang: string): string {
   outline: none;
   resize: none;
   color: transparent;
-  caret-color: #fff;
+  caret-color: var(--ui-text);
   overflow: auto;
 }
 
@@ -848,24 +848,24 @@ function highlightSyntax(code: string, _lang: string): string {
   display: flex;
   gap: 14px;
   padding: 4px 10px;
-  border-top: 1px solid rgba(255,255,255,0.15);
+  border-top: 1px solid var(--ui-border);
   font-size: 10px;
   flex: 0 0 auto;
 }
-.dirty-tag { color: #f3f99d; }
-.text-muted { color: rgba(255,255,255,0.5) !important; }
+.dirty-tag { color: var(--ui-warning); }
+.text-muted { color: color-mix(in srgb, var(--ui-text) 50%, transparent) !important; }
 
 .outline {
   flex: 0 0 auto;
   max-height: 220px;
   display: flex;
   flex-direction: column;
-  border-top: 1px solid rgba(255,255,255,0.15);
+  border-top: 1px solid var(--ui-border);
   padding: 6px 8px;
   gap: 6px;
 }
 .outline-head { display: flex; align-items: center; justify-content: space-between; }
-.symbol-tree { overflow-y: auto; border: 1px solid rgba(255,255,255,0.15); }
+.symbol-tree { overflow-y: auto; border: 1px solid var(--ui-border); }
 .symbol-row {
   display: flex;
   gap: 6px;
@@ -873,16 +873,16 @@ function highlightSyntax(code: string, _lang: string): string {
   font-size: 10px;
   cursor: pointer;
 }
-.symbol-row:hover { background: rgba(255,255,255,0.1); }
-.symbol-kind { font-size: 8px; color: rgba(255,255,255,0.6); text-transform: uppercase; min-width: 44px; }
+.symbol-row:hover { background: color-mix(in srgb, var(--ui-text) 10%, transparent); }
+.symbol-kind { font-size: 8px; color: color-mix(in srgb, var(--ui-text) 60%, transparent); text-transform: uppercase; min-width: 44px; }
 .symbol-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .symbol-lines { font-size: 9px; }
 </style>
 
 <style>
-.syn-keyword { color: #FFFFFF; font-weight: 700; }
-.syn-string { color: rgba(255,255,255,0.6); }
-.syn-comment { color: rgba(255,255,255,0.3); font-style: italic; }
-.syn-number { color: #FFFFFF; }
-.syn-type { color: #FFFFFF; text-decoration: underline; }
+.syn-keyword { color: var(--ui-text); font-weight: 700; }
+.syn-string { color: color-mix(in srgb, var(--ui-text) 60%, transparent); }
+.syn-comment { color: color-mix(in srgb, var(--ui-text) 35%, transparent); font-style: italic; }
+.syn-number { color: var(--ui-text); }
+.syn-type { color: var(--ui-text); text-decoration: underline; }
 </style>

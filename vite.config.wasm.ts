@@ -1,8 +1,8 @@
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import { resolve } from "path";
-import { existsSync } from "fs";
 import wasmStub from "./vite-plugin-wasm-stub";
+import { wasmPkgEntry } from "./wasm-pkg";
 
 // Determine the base path:
 // - GitHub Pages: /cybermanju-drive/ (lowercase repo slug)
@@ -22,20 +22,15 @@ export default defineConfig({
       "@": resolve(__dirname, "src"),
       // wasm-pack output (`wasm-pack build crates/drive-wasm --target web
       // --out-dir crates/drive-wasm/pkg`) — the integrated backend for the
-      // static/GH-Pages bundle. Only aliased when the pkg exists; otherwise
-      // the stub plugin below satisfies the import (Docker frontend stage).
+      // static/GH-Pages bundle. Used only when present AND not older than
+      // crates/**: a stale pkg falls back to the stub instead of shipping an
+      // artifact that no longer matches the Rust (see wasm-pkg.ts).
       // NOTE: the entry FILE (not the directory) is aliased — worker
       // bundles don't apply package.json directory resolution, so a
-      // directory alias EISDIRs the db-worker chunk. Without pkg (Docker
-      // frontend stage) the stub file stands in, same guarantee.
-      ...(existsSync(resolve(__dirname, "crates/drive-wasm/pkg/cybermanju_drive_wasm.js"))
-        ? {
-            "cybermanju-drive-wasm": resolve(
-              __dirname,
-              "crates/drive-wasm/pkg/cybermanju_drive_wasm.js",
-            ),
-          }
-        : { "cybermanju-drive-wasm": resolve(__dirname, "src/wasm-stub.js") }),
+      // directory alias EISDIRs the db-worker chunk. Without a usable pkg
+      // (Docker frontend stage) the stub file stands in, same guarantee.
+      "cybermanju-drive-wasm":
+        wasmPkgEntry(__dirname) ?? resolve(__dirname, "src/wasm-stub.js"),
     },
   },
   base,

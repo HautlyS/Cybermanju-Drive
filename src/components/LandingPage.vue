@@ -311,8 +311,8 @@ onUnmounted(() => {
   inset: 0;
   display: flex;
   flex-direction: column;
-  background: #000;
-  font-family: 'Courier New', 'Fira Code', monospace;
+  background: var(--ui-surface);
+  font-family: var(--ui-font);
   outline: none;
   overflow: hidden;
   z-index: 999;
@@ -334,7 +334,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #000;
+  background: var(--ui-surface);
   z-index: 10;
 }
 
@@ -342,13 +342,12 @@ onUnmounted(() => {
   width: 92vw;
   max-width: 780px;
   max-height: 70vh;
-  background: #050505;
-  border: 1px solid rgba(0, 255, 65, 0.15);
+  background: var(--ui-bg);
+  border: 1px solid color-mix(in srgb, var(--ui-accent) 15%, transparent);
   border-radius: 8px;
   padding: 24px 28px;
-  box-shadow:
-    0 0 40px rgba(0, 255, 65, 0.03),
-    inset 0 0 60px rgba(0, 0, 0, 0.8);
+  box-shadow: 0 0 40px color-mix(in srgb, var(--ui-accent) 3%, transparent),
+    inset 0 0 60px color-mix(in srgb, var(--ui-bg-deep) 56%, transparent);
   overflow: hidden;
 }
 
@@ -359,10 +358,10 @@ onUnmounted(() => {
 }
 
 .boot-line {
-  color: #00ff41;
+  color: var(--ui-accent);
   font-size: 13px;
   line-height: 1.5;
-  text-shadow: 0 0 4px rgba(0, 255, 65, 0.2);
+  text-shadow: 0 0 4px color-mix(in srgb, var(--ui-accent) 20%, transparent);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -375,21 +374,21 @@ onUnmounted(() => {
 .progress-track {
   width: 100%;
   height: 3px;
-  background: rgba(0, 255, 65, 0.1);
+  background: color-mix(in srgb, var(--ui-accent) 10%, transparent);
   border-radius: 2px;
   overflow: hidden;
 }
 
 .progress-fill {
   height: 100%;
-  background: #00ff41;
+  background: var(--ui-accent);
   transition: width 0.1s linear;
-  box-shadow: 0 0 8px rgba(0, 255, 65, 0.4);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--ui-accent) 40%, transparent);
 }
 
 .cursor-block {
   display: inline-block;
-  color: #00ff41;
+  color: var(--ui-accent);
   animation: blink 500ms step-end infinite;
   margin-top: 4px;
 }
@@ -423,8 +422,8 @@ onUnmounted(() => {
   text-align: center;
   font-size: 11px;
   line-height: 1.15;
-  color: #00ff41;
-  text-shadow: 0 0 6px rgba(0, 255, 65, 0.25);
+  color: var(--ui-accent);
+  text-shadow: 0 0 6px color-mix(in srgb, var(--ui-accent) 25%, transparent);
   letter-spacing: 1px;
   transition: opacity 0.05s;
   user-select: none;
@@ -442,7 +441,7 @@ onUnmounted(() => {
 
 .particle {
   position: absolute;
-  color: rgba(0, 255, 65, 0.15);
+  color: color-mix(in srgb, var(--ui-accent) 15%, transparent);
   font-size: 8px;
   animation: float 4s ease-in-out infinite;
 }
@@ -460,11 +459,11 @@ onUnmounted(() => {
   max-width: 680px;
   max-height: 46vh;
   overflow-y: auto;
-  background: rgba(0, 0, 0, 0.88);
-  border: 1px solid rgba(0, 255, 65, 0.25);
+  background: color-mix(in srgb, var(--ui-bg-deep) 62%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ui-accent) 25%, transparent);
   border-radius: 8px;
   padding: 16px 20px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 4px 24px color-mix(in srgb, var(--ui-bg-deep) 42%, transparent);
 }
 
 .report-head {
@@ -476,20 +475,20 @@ onUnmounted(() => {
 }
 
 .report-title {
-  color: #00ff41;
+  color: var(--ui-accent);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 1px;
 }
 
 .report-counts {
-  color: rgba(0, 255, 65, 0.7);
+  color: color-mix(in srgb, var(--ui-accent) 70%, transparent);
   font-size: 11px;
   white-space: nowrap;
 }
 
 .report-quote {
-  color: rgba(0, 255, 65, 0.55);
+  color: color-mix(in srgb, var(--ui-accent) 55%, transparent);
   font-size: 11px;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -511,13 +510,13 @@ onUnmounted(() => {
 }
 
 .report-name {
-  color: #00ff41;
+  color: var(--ui-accent);
   font-weight: 700;
   min-width: 92px;
 }
 
 .report-detail {
-  color: rgba(230, 255, 235, 0.75);
+  color: color-mix(in srgb, var(--ui-text) 75%, transparent);
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -526,28 +525,28 @@ onUnmounted(() => {
 }
 
 .report-flag {
-  color: #00ff41;
+  color: var(--ui-accent);
   font-weight: 700;
 }
 
 .report-row.warn .report-flag {
-  color: #f3f99d;
+  color: var(--ui-warning);
 }
 
 .report-row.warn .report-detail {
-  color: rgba(243, 249, 157, 0.75);
+  color: color-mix(in srgb, var(--ui-warning) 75%, transparent);
 }
 
 .report-hint {
   margin-top: 10px;
-  color: rgba(0, 255, 65, 0.4);
+  color: color-mix(in srgb, var(--ui-accent) 40%, transparent);
   font-size: 10px;
   letter-spacing: 0.5px;
 }
 
 .boot-pct {
   margin-top: 6px;
-  color: rgba(0, 255, 65, 0.6);
+  color: color-mix(in srgb, var(--ui-accent) 60%, transparent);
   font-size: 11px;
   text-align: right;
 }
@@ -562,29 +561,29 @@ onUnmounted(() => {
 
 .launch-button, .reboot-button {
   background: transparent;
-  border: 1px solid rgba(0, 255, 65, 0.3);
+  border: 1px solid color-mix(in srgb, var(--ui-accent) 30%, transparent);
   border-radius: 6px;
-  color: #00ff41;
-  font-family: 'Courier New', monospace;
+  color: var(--ui-accent);
+  font-family: var(--ui-font);
   font-size: 12px;
   font-weight: 700;
   padding: 10px 24px;
   cursor: pointer;
-  text-shadow: 0 0 4px rgba(0, 255, 65, 0.2);
+  text-shadow: 0 0 4px color-mix(in srgb, var(--ui-accent) 20%, transparent);
   transition: all 0.15s;
   letter-spacing: 1px;
 }
 
 .launch-button:hover {
-  background: rgba(0, 255, 65, 0.1);
-  border-color: #00ff41;
-  box-shadow: 0 0 16px rgba(0, 255, 65, 0.2);
+  background: color-mix(in srgb, var(--ui-accent) 10%, transparent);
+  border-color: var(--ui-accent);
+  box-shadow: 0 0 16px color-mix(in srgb, var(--ui-accent) 20%, transparent);
 }
 
 .reboot-button:hover {
-  background: rgba(255, 95, 87, 0.1);
-  border-color: #ff5f57;
-  color: #ff5f57;
+  background: color-mix(in srgb, var(--ui-danger) 12%, transparent);
+  border-color: var(--ui-danger);
+  color: var(--ui-danger);
 }
 
 @media (max-width: 768px) {

@@ -233,23 +233,22 @@ function highlightTerms(text: string, query: string): string {
   height: 100%;
   overflow-y: auto;
   padding: 0;
-  background: #111;
+  background: var(--ui-surface);
 }
 
 .panel-page {
   padding: 12px;
-}
-
-.panel-card {
-  background: #1a1a1a;
-  border: 1px solid #2a2a2a;
+}.panel-card {background: var(--ui-glass);
+  border: 1px solid var(--ui-border);
   border-radius: 8px;
   padding: 16px;
+  backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
+  -webkit-backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
 }
 
 .panel-card-row {
-  background: #1a1a1a;
-  border: 1px solid #2a2a2a;
+  background: var(--ui-glass);
+  border: 1px solid var(--ui-border);
   border-radius: 6px;
   padding: 10px 12px;
   cursor: pointer;
@@ -257,35 +256,35 @@ function highlightTerms(text: string, query: string): string {
 }
 
 .panel-card-row:hover {
-  border-color: #3a3a3a;
+  border-color: var(--ui-text-3);
 }
 
 .panel-card-row.active {
-  border-color: rgba(0, 255, 65, 0.3);
+  border-color: color-mix(in srgb, var(--ui-accent) 30%, transparent);
 }
 
 .panel-title {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 11px;
   font-weight: 700;
-  color: #e0e0e0;
+  color: var(--ui-text);
   letter-spacing: 1px;
   margin-bottom: 8px;
 }
 
 .panel-hint {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 9px;
-  color: #555;
+  color: var(--ui-text-3);
   margin-bottom: 12px;
 }
 
 .panel-btn {
   background: transparent;
-  border: 1px solid #333;
-  color: #999;
+  border: 1px solid var(--ui-border-strong);
+  color: var(--ui-text-2);
   padding: 2px 8px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 9px;
   font-weight: 700;
   cursor: pointer;
@@ -294,35 +293,35 @@ function highlightTerms(text: string, query: string): string {
 }
 
 .panel-btn:hover {
-  border-color: #555;
-  color: #e0e0e0;
-  background: #222;
+  border-color: var(--ui-text-3);
+  color: var(--ui-text);
+  background: var(--ui-surface-3);
 }
 
 .panel-btn-danger:hover {
-  border-color: #ff5f57;
-  color: #ff5f57;
+  border-color: var(--ui-danger);
+  color: var(--ui-danger);
 }
 
 .bw-title {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 11px;
   font-weight: 700;
-  color: #e0e0e0;
+  color: var(--ui-text);
   margin-bottom: 12px;
   letter-spacing: 1px;
 }
 
 .bw-card {
-  background: #1a1a1a;
-  border: 1px solid #2a2a2a;
+  background: var(--ui-glass);
+  border: 1px solid var(--ui-border);
   border-radius: 6px;
   padding: 12px;
-  color: #ccc;
+  color: var(--ui-text);
 }
 
 .text-muted {
-  color: #555 !important;
+  color: var(--ui-text-3) !important;
 }
 
 .empty-state {
@@ -330,8 +329,8 @@ function highlightTerms(text: string, query: string): string {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  color: #555;
-  font-family: 'Courier New', monospace;
+  color: var(--ui-text-3);
+  font-family: var(--ui-font);
   font-size: 10px;
 }
 
@@ -347,10 +346,10 @@ function highlightTerms(text: string, query: string): string {
 }
 
 .bw-select-sm {
-  background: #111;
-  border: 1px solid #333;
-  color: #ccc;
-  font-family: 'Courier New', monospace;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border-strong);
+  color: var(--ui-text);
+  font-family: var(--ui-font);
   font-size: 9px;
   padding: 2px 4px;
   cursor: pointer;
@@ -359,10 +358,10 @@ function highlightTerms(text: string, query: string): string {
 }
 
 .bw-input-sm {
-  background: #111;
-  border: 1px solid #333;
-  color: #ccc;
-  font-family: 'Courier New', monospace;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border-strong);
+  color: var(--ui-text);
+  font-family: var(--ui-font);
   font-size: 9px;
   padding: 3px 6px;
   border-radius: 4px;
@@ -378,7 +377,7 @@ function highlightTerms(text: string, query: string): string {
 
 .session-user {
   font-size: 10px;
-  color: #e0e0e0;
+  color: var(--ui-text);
   font-weight: 700;
 }
 
@@ -405,15 +404,15 @@ function highlightTerms(text: string, query: string): string {
   appearance: none;
   width: 12px;
   height: 12px;
-  border: 1px solid #555;
-  background: #111;
+  border: 1px solid var(--ui-text-3);
+  background: var(--ui-surface);
   cursor: pointer;
   border-radius: 2px;
 }
 
 .bw-checkbox:checked {
-  background: #00ff41;
-  border-color: #00ff41;
+  background: var(--ui-accent);
+  border-color: var(--ui-accent);
 }
 
 .search-results-list {
@@ -422,25 +421,25 @@ function highlightTerms(text: string, query: string): string {
   gap: 4px;
 }
 
-.search-result-item {
-  display: flex;
+.search-result-item {display: flex;
   align-items: flex-start;
   gap: 10px;
   padding: 10px !important;
   cursor: pointer;
   transition: border-color 0.1s;
+  border-radius: var(--ui-radius-md);
 }
 
 .search-result-item:hover {
-  border-color: #444;
+  border-color: var(--ui-text-faint);
 }
 
 .search-match-type {
   font-size: 8px;
   font-weight: 700;
   padding: 2px 6px;
-  background: #222;
-  color: #999;
+  background: var(--ui-surface-3);
+  color: var(--ui-text-2);
   white-space: nowrap;
   border-radius: 3px;
 }
@@ -451,9 +450,9 @@ function highlightTerms(text: string, query: string): string {
 }
 
 .search-result-name {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-weight: 600;
-  color: #e0e0e0;
+  color: var(--ui-text);
   margin-bottom: 2px;
   font-size: 11px;
 }
@@ -463,13 +462,13 @@ function highlightTerms(text: string, query: string): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: #666;
+  color: var(--ui-text-3);
 }
 
 .search-result-score {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 9px;
-  color: #555;
+  color: var(--ui-text-3);
   white-space: nowrap;
 }
 
@@ -477,10 +476,10 @@ function highlightTerms(text: string, query: string): string {
   width: 100%;
   padding: 8px;
   background: transparent;
-  border: 1px solid #333;
+  border: 1px solid var(--ui-border-strong);
   border-radius: 6px;
-  color: #999;
-  font-family: 'Courier New', monospace;
+  color: var(--ui-text-2);
+  font-family: var(--ui-font);
   font-size: 10px;
   font-weight: 700;
   cursor: pointer;
@@ -489,9 +488,9 @@ function highlightTerms(text: string, query: string): string {
 }
 
 .load-more-btn:hover {
-  border-color: #555;
-  color: #e0e0e0;
-  background: #1a1a1a;
+  border-color: var(--ui-text-3);
+  color: var(--ui-text);
+  background: var(--ui-glass);
 }
 
 .load-more-btn:disabled {
@@ -514,14 +513,14 @@ function highlightTerms(text: string, query: string): string {
   font-size: 10px;
   cursor: pointer;
   border: 1px solid transparent;
-  font-family: 'Courier New', monospace;
-  color: #ccc;
+  font-family: var(--ui-font);
+  color: var(--ui-text);
   border-radius: 4px;
 }
 
 .recent-search-item:hover {
-  border-color: #333;
-  background: #1a1a1a;
+  border-color: var(--ui-text-3);
+  background: var(--ui-glass);
 }
 
 /* Trash styles */
@@ -553,14 +552,14 @@ function highlightTerms(text: string, query: string): string {
 }
 
 .trash-item:hover {
-  border-color: #333;
-  background: #1a1a1a;
+  border-color: var(--ui-text-3);
+  background: var(--ui-glass);
 }
 
 .trash-icon {
   font-size: 10px;
   flex-shrink: 0;
-  color: #666;
+  color: var(--ui-text-3);
 }
 
 .trash-info {
@@ -573,20 +572,20 @@ function highlightTerms(text: string, query: string): string {
 .trash-name {
   font-size: 10px;
   font-weight: 600;
-  color: #ccc;
+  color: var(--ui-text);
 }
 
 .trash-date {
   font-size: 8px;
-  color: #555 !important;
+  color: var(--ui-text-3) !important;
 }
 
 .trash-action-btn {
   background: transparent;
-  border: 1px solid #333;
-  color: #888;
+  border: 1px solid var(--ui-border-strong);
+  color: var(--ui-text-2);
   padding: 1px 6px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 8px;
   font-weight: 700;
   cursor: pointer;
@@ -595,13 +594,13 @@ function highlightTerms(text: string, query: string): string {
 }
 
 .trash-action-btn:hover {
-  border-color: #555;
-  color: #e0e0e0;
+  border-color: var(--ui-text-3);
+  color: var(--ui-text);
 }
 
 .trash-action-btn.danger:hover {
-  border-color: #ff5f57;
-  color: #ff5f57;
+  border-color: var(--ui-danger);
+  color: var(--ui-danger);
 }
 
 /* Activity styles */
@@ -617,12 +616,12 @@ function highlightTerms(text: string, query: string): string {
   gap: 8px;
   padding: 4px 6px;
   font-size: 9px;
-  border-bottom: 1px solid #222;
+  border-bottom: 1px solid var(--ui-border-strong);
 }
 
 .activity-action {
   font-weight: 700;
-  color: #e0e0e0;
+  color: var(--ui-text);
   flex-shrink: 0;
   min-width: 50px;
 }
@@ -662,20 +661,20 @@ function highlightTerms(text: string, query: string): string {
 }
 
 .fav-item:hover, .recent-item:hover {
-  border-color: #333;
-  background: #1a1a1a;
+  border-color: var(--ui-text-3);
+  background: var(--ui-glass);
 }
 
 .fav-icon, .recent-icon {
   font-size: 10px;
   flex-shrink: 0;
-  color: #666;
+  color: var(--ui-text-3);
 }
 
 .fav-name, .recent-name {
   font-size: 10px;
   font-weight: 600;
-  color: #ccc;
+  color: var(--ui-text);
   flex: 1;
 }
 
@@ -688,7 +687,7 @@ function highlightTerms(text: string, query: string): string {
 
 .recent-date {
   font-size: 8px;
-  color: #555 !important;
+  color: var(--ui-text-3) !important;
 }
 
 /* Accounts styles */
@@ -712,22 +711,22 @@ function highlightTerms(text: string, query: string): string {
 .account-name {
   font-weight: 600;
   font-size: 11px;
-  color: #e0e0e0;
+  color: var(--ui-text);
 }
 
 .account-meta {
   font-size: 9px;
   margin-top: 1px;
-  color: #666;
+  color: var(--ui-text-3);
 }
 
 .active-badge {
   font-size: 8px;
   font-weight: 700;
   padding: 2px 8px;
-  background: rgba(0, 255, 65, 0.1);
-  color: #00ff41;
-  border: 1px solid rgba(0, 255, 65, 0.2);
+  background: color-mix(in srgb, var(--ui-accent) 10%, transparent);
+  color: var(--ui-accent);
+  border: 1px solid color-mix(in srgb, var(--ui-accent) 20%, transparent);
   border-radius: 3px;
   letter-spacing: 0.5px;
 }
@@ -752,13 +751,13 @@ function highlightTerms(text: string, query: string): string {
 
 .lg-name {
   font-weight: 600;
-  color: #ccc;
+  color: var(--ui-text);
   font-size: 11px;
 }
 
 .lg-count {
   font-size: 9px;
-  color: #666;
+  color: var(--ui-text-3);
 }
 
 /* Style tags */
@@ -772,34 +771,34 @@ function highlightTerms(text: string, query: string): string {
   display: inline-block;
   padding: 2px 8px;
   font-size: 9px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-weight: 600;
-  border: 1px solid #333;
+  border: 1px solid var(--ui-border-strong);
   border-radius: 4px;
-  color: #aaa;
+  color: var(--ui-text-2);
   cursor: pointer;
   transition: all 0.1s;
 }
 
 .style-tag:hover {
-  border-color: #555;
-  color: #e0e0e0;
-  background: #1a1a1a;
+  border-color: var(--ui-text-3);
+  color: var(--ui-text);
+  background: var(--ui-glass);
 }
 
 .bw-dot {
   width: 8px;
   height: 8px;
   display: inline-block;
-  border: 2px solid #555;
+  border: 2px solid var(--ui-text-3);
   background: transparent;
   border-radius: 50%;
   flex-shrink: 0;
 }
 
 .bw-dot-on {
-  background: #00ff41;
-  border-color: #00ff41;
+  background: var(--ui-accent);
+  border-color: var(--ui-accent);
 }
 
 .truncate {
@@ -809,15 +808,15 @@ function highlightTerms(text: string, query: string): string {
 }
 
 .search-result-name :deep(mark) {
-  background: rgba(0, 255, 65, 0.2);
-  color: #00ff41;
+  background: color-mix(in srgb, var(--ui-accent) 20%, transparent);
+  color: var(--ui-accent);
   padding: 0 2px;
   border-radius: 2px;
 }
 
 .search-result-snippet :deep(mark) {
-  background: rgba(255, 255, 255, 0.1);
-  color: #ccc;
+  background: color-mix(in srgb, var(--ui-text) 10%, transparent);
+  color: var(--ui-text);
   padding: 0 2px;
   border-radius: 2px;
 }

@@ -24,6 +24,7 @@
 // default; Google access tokens last ~1h (no browser-safe refresh — the
 // panel asks for a reconnect when Google probes fail).
 
+import { ref } from 'vue'
 import type { Session, SupabaseClient } from '@supabase/supabase-js'
 import { vaultDelete, vaultGet, vaultSet } from './useVault'
 
@@ -262,6 +263,8 @@ export async function finishSupabaseReturn(): Promise<boolean> {
         at: Date.now(),
       })
     }
+    // The popup path is also a sign-in: publish whoever came back.
+    identity.value = identityFromSession(session)
   } catch {
     // Exchange failed (expired code, verifier mismatch) — still clean up.
   }
@@ -280,4 +283,115 @@ function providerFromSession(session: Session | null): OAuthBackend | null {
   const provider = (session?.user?.app_metadata as Record<string, unknown> | undefined)?.provider
   if (provider === 'github' || provider === 'google' || provider === 'gitlab') return provider
   return null
+}
+
+// ── Identity (OAuth sign-in — the only sign-in) ──────────────────────────
+//
+// There is no username/password anywhere in the app any more: the Supabase
+// broker signs you in with Google, GitHub or GitLab, and the session that
+// comes back IS the identity. Sessions live in supabase-js's own
+// localStorage record, so a reload keeps you signed in without a token
+// dance here.
+
+export interface CyberIdentity {
+  id: string
+  email: string
+  name: string
+  avatarUrl: string
+  provider: string
+}
+
+export const identity = ref<CyberIdentity | null>(null)
+
+function identityFromSession(session: Session | null): CyberIdentity | null {
+  const user = session?.user
+  if (!user) return null
+  const meta = (user.user_metadata ?? {}) as Record<string, unknown>
+  const appMeta = (user.app_metadata ?? {}) as Record<string, unknown>
+  const str = (v: unknown): string => (typeof v === 'string' ? v : '')
+  return {
+    id: user.id,
+    email: str(user.email),
+    name: str(meta.full_name) || str(meta.name) || str(meta.preferred_username) || str(user.email) || 'Signed in',
+    avatarUrl: str(meta.avatar_url) || str(meta.picture),
+    provider: str(appMeta.provider) || 'supabase',
+  }
+}
+
+/** Read the current session and publish it as `identity`. */
+export async function refreshIdentity(): Promise<CyberIdentity | null> {
+  identity.value = identityFromSession(await supabaseSession())
+  return identity.value
+}
+
+/**
+ * Begin sign-in with one of the Supabase-brokered providers. Returns the
+ * authorize URL for a popup (same shape as `startSupabaseOAuth`).
+ */
+export async function startSupabaseSignIn(provider: OAuthBackend): Promise<{ url: string }> {
+  const sb = await getSupabaseClient()
+  if (!sb) {
+    throw new Error(
+      'Supabase is not configured — set the OAuth broker URL + key in Settings first'
+    )
+  }
+  const redirectTo = `${window.location.origin}${window.location.pathname}?oauth=popup`
+  const { data, error } = await sb.auth.signInWithOAuth({
+    provider,
+    options: {
+      redirectTo,
+      scopes: 'openid email profile',
+      skipBrowserRedirect: true,
+    },
+  })
+  if (error || !data?.url) {
+    throw new Error(error?.message || 'Supabase did not return an authorize URL')
+  }
+  return { url: data.url }
+}
+
+/**
+ * Full interactive sign-in: opens the provider in a centered popup and waits
+ * for the session to land back in this tab. Throws when popups are blocked
+ * or the flow never completes.
+ */
+export async function signInWithPopup(provider: OAuthBackend): Promise<CyberIdentity> {
+  const before = (await supabaseSession())?.user?.id ?? null
+  const { url } = await startSupabaseSignIn(provider)
+  const width = 520
+  const height = 640
+  const left = Math.max(0, Math.round(window.screen.width / 2 - width / 2))
+  const top = Math.max(0, Math.round(window.screen.height / 2 - height / 2))
+  const popup = window.open(
+    url,
+    'cybermanju-signin',
+    `width=${width},height=${height},left=${left},top=${top},noopener`,
+  )
+  if (!popup) {
+    throw new Error('the browser blocked the sign-in popup — allow popups for this site, then retry')
+  }
+  const deadline = Date.now() + 180_000
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 700))
+    const session = await supabaseSession()
+    const id = identityFromSession(session)
+    // Only accept a session that appeared *during* this flow — a pre-existing
+    // session must not count as a fresh sign-in.
+    if (id && id.id !== before) {
+      identity.value = id
+      return id
+    }
+    if (popup.closed) break
+  }
+  const id = identityFromSession(await supabaseSession())
+  if (id && id.id !== before) {
+    identity.value = id
+    return id
+  }
+  throw new Error('sign-in did not complete — the popup closed before a session appeared')
+}
+
+export async function signOutIdentity(): Promise<void> {
+  await supabaseSignOut()
+  identity.value = null
 }

@@ -315,11 +315,11 @@ function highlightSyntax(code: string, _lang: string): string {
 .code-panel {
   width: 100%;
   height: 100%;
-  background: #000;
+  background: var(--ui-surface);
   overflow-y: auto;
   padding: 16px;
-  font-family: 'Courier New', monospace;
-  color: #FFFFFF;
+  font-family: var(--ui-font);
+  color: var(--ui-text);
 }
 
 .panel-header {
@@ -327,7 +327,7 @@ function highlightSyntax(code: string, _lang: string): string {
   align-items: center;
   justify-content: space-between;
   padding-bottom: 10px;
-  border-bottom: 2px solid #FFFFFF;
+  border-bottom: 1px solid var(--ui-border);
   margin-bottom: 16px;
 }
 
@@ -341,11 +341,11 @@ function highlightSyntax(code: string, _lang: string): string {
   font-weight: 700;
   letter-spacing: 1px;
   padding: 1px 6px;
-  border: 2px solid #FFFFFF;
+  border: 1px solid var(--ui-border);
 }
-.engine-ts { background: #FFFFFF; color: #000; }
-.engine-heu { background: transparent; color: rgba(255,255,255,0.6); border-color: rgba(255,255,255,0.4); }
-.engine-ts-text { color: #FFFFFF; }
+.engine-ts { background: var(--ui-glass-2); color: var(--ui-text); }
+.engine-heu { background: transparent; color: color-mix(in srgb, var(--ui-text) 60%, transparent); border-color: var(--ui-border); }
+.engine-ts-text { color: var(--ui-text); }
 
 .section { margin-bottom: 16px; }
 
@@ -353,40 +353,40 @@ function highlightSyntax(code: string, _lang: string): string {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 1px;
-  color: rgba(255,255,255,0.6);
+  color: color-mix(in srgb, var(--ui-text) 60%, transparent);
   margin: 0 0 8px;
   padding-bottom: 4px;
-  border-bottom: 2px solid rgba(255,255,255,0.2);
+  border-bottom: 1px solid var(--ui-hairline);
 }
 
 .mode-tabs { display: flex; gap: 4px; margin-bottom: 8px; }
 .mode-tab {
   padding: 4px 10px;
   background: transparent;
-  border: 2px solid rgba(255,255,255,0.4);
-  color: rgba(255,255,255,0.6);
-  font-family: 'Courier New', monospace;
+  border: 1px solid var(--ui-hairline);
+  color: color-mix(in srgb, var(--ui-text) 60%, transparent);
+  font-family: var(--ui-font);
   font-size: 10px;
   font-weight: 700;
   cursor: pointer;
 }
-.mode-tab.on { background: #FFFFFF; color: #000; border-color: #FFFFFF; }
+.mode-tab.on { background: var(--ui-glass-2); color: var(--ui-text); border-color: var(--ui-border-strong); }
 .mode-body { display: flex; flex-direction: column; gap: 6px; }
 
-.field-label { display: flex; flex-direction: column; gap: 4px; font-size: 10px; color: rgba(255,255,255,0.6); }
+.field-label { display: flex; flex-direction: column; gap: 4px; font-size: 10px; color: color-mix(in srgb, var(--ui-text) 60%, transparent); }
 .bw-input {
-  background: #000;
-  border: 2px solid #FFFFFF;
-  color: #FFFFFF;
-  font-family: 'Courier New', monospace;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
+  font-family: var(--ui-font);
   font-size: 11px;
   padding: 4px 8px;
 }
 .paste-area {
-  background: #000;
-  border: 2px solid #FFFFFF;
-  color: #FFFFFF;
-  font-family: 'Courier New', monospace;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
+  font-family: var(--ui-font);
   font-size: 11px;
   padding: 6px 8px;
   resize: vertical;
@@ -396,41 +396,41 @@ function highlightSyntax(code: string, _lang: string): string {
 .counter { font-size: 9px; }
 .hint { font-size: 9px; margin: 4px 0 0; }
 .warn { font-size: 10px; }
-.error-line { font-size: 10px; color: #ff8080; margin: 6px 0 0; }
+.error-line { font-size: 10px; color: var(--ui-danger); margin: 6px 0 0; }
 
 .bw-btn {
   padding: 6px 12px;
-  background: #FFFFFF;
-  color: #000;
-  border: 2px solid #FFFFFF;
-  font-family: 'Courier New', monospace;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
+  border: 1px solid var(--ui-border);
+  font-family: var(--ui-font);
   font-size: 10px;
   font-weight: 700;
   cursor: pointer;
   align-self: flex-start;
 }
 
-.bw-btn:hover:not(:disabled) { background: #000; color: #FFFFFF; }
+.bw-btn:hover:not(:disabled) { background: var(--ui-surface); color: var(--ui-text); }
 .bw-btn:disabled { opacity: 0.4; cursor: default; }
 
 .bw-btn-sm {
   padding: 2px 6px;
   background: transparent;
-  border: 2px solid #FFFFFF;
-  color: #FFFFFF;
-  font-family: 'Courier New', monospace;
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
+  font-family: var(--ui-font);
   font-size: 9px;
   font-weight: 700;
   cursor: pointer;
 }
 
-.bw-btn-sm:hover { background: #FFFFFF; color: #000; }
+.bw-btn-sm:hover { background: var(--ui-glass-2); color: var(--ui-text); }
 
 .selected-file {
   font-size: 12px;
-  background: rgba(255,255,255,0.05);
+  background: color-mix(in srgb, var(--ui-text) 6%, transparent);
   padding: 6px 8px;
-  border: 2px solid rgba(255,255,255,0.3);
+  border: 1px solid var(--ui-hairline);
 }
 
 .parse-meta {
@@ -448,10 +448,10 @@ function highlightSyntax(code: string, _lang: string): string {
 }
 
 .meta-key { font-size: 10px; }
-.meta-value { font-size: 10px; font-family: 'Courier New', monospace; font-weight: 700; }
+.meta-value { font-size: 10px; font-family: var(--ui-font); font-weight: 700; }
 
 .language-badge {
-  border: 1px solid #FFFFFF;
+  border: 1px solid var(--ui-border-strong);
   padding: 0 4px;
   font-size: 9px;
 }
@@ -461,8 +461,8 @@ function highlightSyntax(code: string, _lang: string): string {
 .kind-summary { display: flex; flex-wrap: wrap; gap: 4px; }
 .kind-pill {
   font-size: 9px;
-  border: 1px solid rgba(255,255,255,0.4);
-  color: rgba(255,255,255,0.7);
+  border: 1px solid var(--ui-border);
+  color: color-mix(in srgb, var(--ui-text) 70%, transparent);
   padding: 0 5px;
 }
 
@@ -472,16 +472,16 @@ function highlightSyntax(code: string, _lang: string): string {
 .chip {
   padding: 1px 6px;
   background: transparent;
-  border: 1px solid rgba(255,255,255,0.4);
-  color: rgba(255,255,255,0.6);
-  font-family: 'Courier New', monospace;
+  border: 1px solid var(--ui-border);
+  color: color-mix(in srgb, var(--ui-text) 60%, transparent);
+  font-family: var(--ui-font);
   font-size: 9px;
   cursor: pointer;
 }
-.chip.on { background: #FFFFFF; color: #000; border-color: #FFFFFF; }
+.chip.on { background: var(--ui-glass-2); color: var(--ui-text); border-color: var(--ui-border-strong); }
 
 .symbol-tree {
-  border: 2px solid rgba(255,255,255,0.3);
+  border: 1px solid var(--ui-hairline);
   overflow: hidden;
   max-height: 320px;
   overflow-y: auto;
@@ -493,33 +493,33 @@ function highlightSyntax(code: string, _lang: string): string {
   gap: 4px;
   padding: 2px 6px;
   font-size: 10px;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
+  border-bottom: 1px solid var(--ui-border);
   cursor: pointer;
 }
 
 .symbol-row:hover {
-  background: rgba(255,255,255,0.1);
+  background: color-mix(in srgb, var(--ui-text) 10%, transparent);
 }
 
 .symbol-row.active {
-  background: rgba(255,255,255,0.15);
-  border-left: 3px solid #FFFFFF;
+  background: color-mix(in srgb, var(--ui-text) 6%, transparent);
+  border-left: 2px solid var(--ui-border);
 }
 
 .symbol-kind {
   font-size: 8px;
-  color: rgba(255,255,255,0.6);
+  color: color-mix(in srgb, var(--ui-text) 60%, transparent);
   text-transform: uppercase;
   flex-shrink: 0;
   min-width: 40px;
 }
 
-.symbol-name { color: #FFFFFF; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.symbol-name { color: var(--ui-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
 .symbol-lines { flex-shrink: 0; font-size: 9px; }
 
 .source-view {
-  border: 2px solid rgba(255,255,255,0.3);
-  font-family: 'Courier New', monospace;
+  border: 1px solid var(--ui-hairline);
+  font-family: var(--ui-font);
   font-size: 10px;
   max-height: 400px;
   overflow-y: auto;
@@ -532,12 +532,12 @@ function highlightSyntax(code: string, _lang: string): string {
 }
 
 .source-line:hover {
-  background: rgba(255,255,255,0.05);
+  background: color-mix(in srgb, var(--ui-text) 6%, transparent);
 }
 
 .source-line.goto-highlight {
-  background: rgba(255,255,255,0.15);
-  border-left: 3px solid #FFFFFF;
+  background: color-mix(in srgb, var(--ui-text) 6%, transparent);
+  border-left: 2px solid var(--ui-border);
 }
 
 .source-ln {
@@ -545,7 +545,7 @@ function highlightSyntax(code: string, _lang: string): string {
   width: 32px;
   text-align: right;
   padding-right: 8px;
-  color: rgba(255,255,255,0.3);
+  color: color-mix(in srgb, var(--ui-text) 35%, transparent);
   user-select: none;
 }
 
@@ -555,13 +555,13 @@ function highlightSyntax(code: string, _lang: string): string {
   overflow-x: auto;
 }
 
-.text-muted { color: rgba(255,255,255,0.5) !important; }
+.text-muted { color: color-mix(in srgb, var(--ui-text) 50%, transparent) !important; }
 </style>
 
 <style>
-.syn-keyword { color: #FFFFFF; font-weight: 700; }
-.syn-string { color: rgba(255,255,255,0.6); }
-.syn-comment { color: rgba(255,255,255,0.3); font-style: italic; }
-.syn-number { color: #FFFFFF; }
-.syn-type { color: #FFFFFF; text-decoration: underline; }
+.syn-keyword { color: var(--ui-text); font-weight: 700; }
+.syn-string { color: color-mix(in srgb, var(--ui-text) 60%, transparent); }
+.syn-comment { color: color-mix(in srgb, var(--ui-text) 35%, transparent); font-style: italic; }
+.syn-number { color: var(--ui-text); }
+.syn-type { color: var(--ui-text); text-decoration: underline; }
 </style>

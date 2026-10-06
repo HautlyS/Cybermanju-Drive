@@ -58,25 +58,25 @@ function toggle() {
   padding: 3px 8px;
   cursor: pointer;
   font-size: 11px;
-  color: #FFFFFF;
+  color: var(--ui-text);
 }
 
 .tree-node-row:hover {
-  background: rgba(255,255,255,0.08);
+  background: color-mix(in srgb, var(--ui-text) 6%, transparent);
 }
 
 .tree-node-row.selected {
-  background: rgba(255,255,255,0.15);
+  background: color-mix(in srgb, var(--ui-text) 6%, transparent);
   font-weight: 700;
 }
 
 .tree-arrow {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 8px;
   width: 12px;
   flex-shrink: 0;
   text-align: center;
-  color: rgba(255,255,255,0.5);
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent);
 }
 
 .tree-arrow-placeholder {

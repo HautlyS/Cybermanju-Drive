@@ -14,26 +14,28 @@ import { useWindowManager } from '@/composables/useWindowManager'
 const wm = useWindowManager()
 </script>
 
-<style scoped>
-.mobile-nav {
+<style scoped>.mobile-nav {
   display: none;
   position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
   height: 48px;
-  background: #000;
-  border-top: 2px solid #FFFFFF;
+  background: var(--ui-glass);
+  border-top: 1px solid var(--ui-border);
   z-index: 100;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
+  border-radius: var(--ui-radius-lg) var(--ui-radius-lg) 0 0;
+  backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
+  -webkit-backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
 }
 
 .mn-btn {
   flex: 1;
   background: transparent;
   border: none;
-  border-right: 1px solid rgba(255,255,255,0.2);
-  color: rgba(255,255,255,0.4);
+  border-right: 1px solid var(--ui-border);
+  color: color-mix(in srgb, var(--ui-text) 40%, transparent);
   font-size: 14px;
   cursor: pointer;
   display: flex;
@@ -47,13 +49,13 @@ const wm = useWindowManager()
 }
 
 .mn-btn.active {
-  color: #000;
-  background: #FFFFFF;
+  color: var(--ui-text);
+  background: var(--ui-glass-2);
 }
 
 @media (max-width: 768px) {
-  .mobile-nav {
-    display: flex;
-  }
+  .mobile-nav {display: flex;
+  border-radius: var(--ui-radius-lg) var(--ui-radius-lg) 0 0;
+}
 }
 </style>

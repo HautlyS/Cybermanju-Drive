@@ -46,14 +46,12 @@
       </div>
     </div>
 
-    <div v-if="webLocked" class="web-note">
-      DESKTOP-ONLY OPS DISABLED IN WEB MODE — KEY GENERATION AND FILE ENCRYPTION NEED THE TAURI APP. STATUS + KEY LIST ABOVE ARE LIVE.
-    </div>
+    <div class="web-note" :class="{ info: !webLocked }">{{ cryptoNote }}</div>
 
     <div class="section">
       <h3 class="section-title"><AppIcon name="solar:key-bold" :size="13" /> GENERATE KEYPAIR</h3>
       <div class="algo-buttons">
-        <button v-for="(info, algo) in ENCRYPTION_INFO" :key="algo" class="algo-btn" :disabled="webLocked" :title="webLocked ? 'Desktop app only' : 'Generate ' + info.name" @click="handleGenerate(algo as EncryptionAlgo)">
+        <button v-for="(info, algo) in ENCRYPTION_INFO" :key="algo" class="algo-btn" :disabled="webLocked" :title="webLocked ? 'Needs the desktop app or offline build' : 'Generate ' + info.name" @click="handleGenerate(algo as EncryptionAlgo)">
           <div class="algo-top">
             <span class="nist-badge">L{{ info.nistLevel }}</span>
           </div>
@@ -84,7 +82,7 @@
         <select v-model="selectedAlgo" class="encrypt-select">
           <option v-for="(info, algo) in ENCRYPTION_INFO" :key="algo" :value="algo">{{ info.name }} (L{{ info.nistLevel }})</option>
         </select>
-        <button class="encrypt-btn" :disabled="webLocked" :title="webLocked ? 'Desktop app only' : 'Encrypt file'" @click="handleEncrypt"><AppIcon name="solar:lock-bold" :size="14" /></button>
+        <button class="encrypt-btn" :disabled="webLocked" :title="webLocked ? 'Needs the desktop app or offline build' : 'Encrypt file'" @click="handleEncrypt"><AppIcon name="solar:lock-bold" :size="14" /></button>
       </div>
     </div>
   </div>
@@ -94,14 +92,22 @@
 import AppIcon from '@/components/AppIcon.vue'
 import { ref, computed } from 'vue'
 import { useAppStore } from '@/stores/app'
-import { isWebMode } from '@/composables/useTauri'
+import { isStaticHost } from '@/composables/useTauri'
 import type { EncryptionAlgo } from '@/types'
 import { ENCRYPTION_INFO } from '@/types'
 
 const store = useAppStore()
 const emit = defineEmits<{ close: [] }>()
 
-const webLocked = computed(() => isWebMode())
+// Static/offline build: the wasm pack runs the real ciphers, keys live in
+// `.cybermanju`. Dashboard build: no crypto endpoint exists there.
+const staticWasm = isStaticHost()
+const webLocked = computed(() => !staticWasm)
+const cryptoNote = computed(() =>
+  webLocked
+    ? 'ENCRYPTION OPS NEED THE TAURI DESKTOP APP OR THE OFFLINE BROWSER BUILD — THIS DASHBOARD BUILD SERVES NO CRYPTO ENDPOINT. STATUS + KEY LIST ABOVE ARE LIVE.'
+    : 'KEYS AND PER-FILE METADATA LIVE INSIDE .CYBERMANJU. BYTES ARE SEALED WITH CHACHA20-POLY1305 (HKDF-DERIVED FROM YOUR KEYPAIR); THE ML-KEM / FRODO / AES SLOTS USE THE NEAREST WASM CIPHER AND SAY SO.'
+)
 
 const encryptionStatus = computed(() => store.encryptionStatus)
 const encryptionKeys = computed(() => store.encryptionKeys)
@@ -127,12 +133,16 @@ async function handleEncrypt() {
 
 <style scoped>
 .web-note {
-  border: 1px dashed #f3f99d;
-  color: #f3f99d;
+  border: 1px dashed var(--ui-warning);
+  color: var(--ui-warning);
   font-size: 9px;
   line-height: 1.5;
   padding: 8px 10px;
   letter-spacing: 0.3px;
+}
+.web-note.info {
+  border-color: color-mix(in srgb, var(--ui-accent) 60%, transparent);
+  color: var(--ui-accent);
 }
 
 .algo-btn:disabled,
@@ -143,27 +153,27 @@ async function handleEncrypt() {
 .encryption-panel {
   width: 400px;
   height: 100%;
-  background: #000;
-  border-left: 2px solid #FFFFFF;
+  background: var(--ui-surface);
+  border-left: 1px solid var(--ui-border);
   overflow-y: auto;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  font-family: 'Courier New', monospace;
-  color: #FFFFFF;
+  font-family: var(--ui-font);
+  color: var(--ui-text);
 }
 
 .encryption-panel::-webkit-scrollbar { width: 4px; }
-.encryption-panel::-webkit-scrollbar-track { background: #000; }
-.encryption-panel::-webkit-scrollbar-thumb { background: #FFFFFF; }
+.encryption-panel::-webkit-scrollbar-track { background: var(--ui-surface); }
+.encryption-panel::-webkit-scrollbar-thumb { background: var(--ui-glass-2); }
 
 .panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding-bottom: 10px;
-  border-bottom: 2px solid #FFFFFF;
+  border-bottom: 1px solid var(--ui-border);
 }
 
 .header-left {
@@ -173,23 +183,23 @@ async function handleEncrypt() {
 }
 
 .icon-shield {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 16px;
-  color: #FFFFFF;
+  color: var(--ui-text);
 }
 
 .panel-title {
   font-size: 14px;
   font-weight: 800;
   letter-spacing: 1px;
-  color: #FFFFFF;
+  color: var(--ui-text);
   margin: 0;
 }
 
 .close-btn {
   background: none;
-  border: 2px solid #FFFFFF;
-  color: #FFFFFF;
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
   cursor: pointer;
   width: 24px;
   height: 24px;
@@ -197,19 +207,19 @@ async function handleEncrypt() {
   align-items: center;
   justify-content: center;
   font-size: 11px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-weight: 700;
 }
 
 .close-btn:hover {
-  background: #FFFFFF;
-  color: #000;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
 .status-card {
-  border: 2px solid #FFFFFF;
+  border: 1px solid var(--ui-border);
   padding: 12px;
-  background: #000;
+  background: var(--ui-surface);
 }
 
 .status-card.protected {
@@ -228,18 +238,18 @@ async function handleEncrypt() {
   font-weight: 800;
   letter-spacing: 1px;
   padding: 3px 8px;
-  border: 2px solid #FFFFFF;
-  color: #FFFFFF;
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
 }
 
 .badge-protected {
-  background: #FFFFFF;
-  color: #000;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
 .badge-unprotected {
-  background: #000;
-  color: #FFFFFF;
+  background: var(--ui-surface);
+  color: var(--ui-text);
 }
 
 .status-details {
@@ -260,31 +270,31 @@ async function handleEncrypt() {
   font-size: 11px;
 }
 
-.star.filled { color: #FFFFFF; }
-.star.empty { color: rgba(255,255,255,0.3); }
+.star.filled { color: var(--ui-text); }
+.star.empty { color: color-mix(in srgb, var(--ui-text) 35%, transparent); }
 
 .status-meta {
   font-size: 10px;
   display: flex;
   gap: 4px;
-  color: rgba(255,255,255,0.7);
+  color: color-mix(in srgb, var(--ui-text) 70%, transparent);
 }
 
 .meta-label {
-  color: rgba(255,255,255,0.5);
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent);
   min-width: 50px;
 }
 
 .unprotected-msg {
   font-size: 11px;
-  color: rgba(255,255,255,0.7);
+  color: color-mix(in srgb, var(--ui-text) 70%, transparent);
   margin: 0;
 }
 
 .nist-viz {
   margin-top: 10px;
   padding-top: 10px;
-  border-top: 2px solid rgba(255,255,255,0.3);
+  border-top: 1px solid var(--ui-hairline);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -293,7 +303,7 @@ async function handleEncrypt() {
 .nist-label {
   font-size: 9px;
   letter-spacing: 1px;
-  color: rgba(255,255,255,0.5);
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent);
   white-space: nowrap;
 }
 
@@ -305,26 +315,26 @@ async function handleEncrypt() {
 .nist-circle {
   width: 24px;
   height: 24px;
-  border: 2px solid rgba(255,255,255,0.3);
-  background: #000;
+  border: 1px solid var(--ui-hairline);
+  background: var(--ui-surface);
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .nist-circle.filled {
-  border-color: #FFFFFF;
-  background: #FFFFFF;
+  border-color: var(--ui-border-strong);
+  background: var(--ui-glass-2);
 }
 
 .nist-circle.filled .circle-num {
-  color: #000;
+  color: var(--ui-text);
 }
 
 .circle-num {
   font-size: 10px;
   font-weight: 700;
-  color: rgba(255,255,255,0.5);
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent);
 }
 
 .section {
@@ -337,13 +347,13 @@ async function handleEncrypt() {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 1px;
-  color: rgba(255,255,255,0.6);
+  color: color-mix(in srgb, var(--ui-text) 60%, transparent);
   margin: 0;
   display: flex;
   align-items: center;
   gap: 6px;
   padding-bottom: 4px;
-  border-bottom: 2px solid rgba(255,255,255,0.2);
+  border-bottom: 1px solid var(--ui-hairline);
 }
 
 .algo-buttons {
@@ -353,24 +363,24 @@ async function handleEncrypt() {
 }
 
 .algo-btn {
-  background: #000;
-  border: 2px solid #FFFFFF;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
   padding: 8px 10px;
   cursor: pointer;
   text-align: left;
   display: flex;
   flex-direction: column;
   gap: 3px;
-  color: #FFFFFF;
-  font-family: 'Courier New', monospace;
+  color: var(--ui-text);
+  font-family: var(--ui-font);
 }
 
 .algo-btn:hover {
-  background: #FFFFFF;
-  color: #000;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
-.algo-btn:hover .algo-desc { color: #000 !important; }
+.algo-btn:hover .algo-desc { color: var(--ui-text) !important; }
 
 .algo-top {
   display: flex;
@@ -382,8 +392,8 @@ async function handleEncrypt() {
   font-size: 9px;
   font-weight: 800;
   padding: 1px 4px;
-  border: 1px solid #FFFFFF;
-  color: #FFFFFF;
+  border: 1px solid var(--ui-border-strong);
+  color: var(--ui-text);
 }
 
 .nist-badge.small { font-size: 8px; }
@@ -405,12 +415,12 @@ async function handleEncrypt() {
 }
 
 .key-card {
-  border: 2px solid #FFFFFF;
+  border: 1px solid var(--ui-border);
   padding: 8px 10px;
   display: flex;
   flex-direction: column;
   gap: 3px;
-  background: #000;
+  background: var(--ui-surface);
 }
 
 .key-header {
@@ -426,8 +436,8 @@ async function handleEncrypt() {
 
 .key-pub-preview {
   font-size: 10px;
-  color: rgba(255,255,255,0.5);
-  background: rgba(255,255,255,0.05);
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent);
+  background: color-mix(in srgb, var(--ui-text) 6%, transparent);
   padding: 3px 6px;
   word-break: break-all;
 }
@@ -438,10 +448,10 @@ async function handleEncrypt() {
 
 .selected-file-name {
   font-size: 11px;
-  color: #FFFFFF;
-  background: rgba(255,255,255,0.05);
+  color: var(--ui-text);
+  background: color-mix(in srgb, var(--ui-text) 6%, transparent);
   padding: 4px 8px;
-  border: 2px solid rgba(255,255,255,0.3);
+  border: 1px solid var(--ui-hairline);
   word-break: break-all;
   margin: 0;
 }
@@ -453,31 +463,31 @@ async function handleEncrypt() {
 
 .encrypt-select {
   flex: 1;
-  background: #000;
-  color: #FFFFFF;
-  border: 2px solid #FFFFFF;
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  border: 1px solid var(--ui-border);
   padding: 6px 8px;
   font-size: 10px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   cursor: pointer;
 }
 
 .encrypt-btn {
-  background: #FFFFFF;
-  color: #000;
-  border: 2px solid #FFFFFF;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
+  border: 1px solid var(--ui-border);
   padding: 6px 12px;
   font-size: 10px;
   font-weight: 800;
   cursor: pointer;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
 }
 
 .encrypt-btn:hover {
-  background: #000;
-  color: #FFFFFF;
+  background: var(--ui-surface);
+  color: var(--ui-text);
 }
 
-.mono { font-family: 'Courier New', monospace; }
-.text-muted { color: rgba(255,255,255,0.5) !important; }
+.mono { font-family: var(--ui-font); }
+.text-muted { color: color-mix(in srgb, var(--ui-text) 50%, transparent) !important; }
 </style>

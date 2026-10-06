@@ -109,7 +109,7 @@ const commands = computed<CommandGroup[]>(() => [
       { id: 'act-compress', label: 'Compress Selected File', icon: 'solar:archive-bold', shortcut: 'Ctrl+Shift+C', action: () => { wm.open('compression') } },
       { id: 'act-batch-detect', label: 'Batch Face Detection', icon: 'solar:face-scan-circle-bold', action: () => { store.detectFacesBatch() } },
       { id: 'act-refresh', label: 'Refresh Files', icon: 'solar:refresh-bold', action: () => { store.fetchFiles() } },
-      { id: 'act-login', label: 'Login / Register', icon: 'solar:login-bold', action: () => { store.showLoginPopup = true } },
+      { id: 'act-identity', label: 'Accounts — OAuth sign-in & .cybermanju disk', icon: 'solar:login-bold', action: () => { wm.open('accounts') } },
     ],
   },
   {
@@ -204,24 +204,28 @@ watch(() => store.commandPaletteOpen, async (v: boolean) => {
 .cp-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.85);
+  background: color-mix(in srgb, var(--ui-bg-deep) 62%, transparent);
   display: flex;
   align-items: flex-start;
   justify-content: center;
   padding-top: 120px;
   z-index: 10000;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
-.cp-modal {
-  width: 480px;
+.cp-modal {width: 480px;
   max-width: 90vw;
   max-height: 400px;
-  background: #FFFFFF;
-  border: 2px solid #000000;
-  box-shadow: 4px 4px 0 #000000;
+  background: var(--ui-glass-2);
+  border: 1px solid var(--ui-border);
+  box-shadow: var(--ui-shadow-2);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  border-radius: var(--ui-radius-lg);
+  backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
+  -webkit-backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
 }
 
 .cp-header {
@@ -229,13 +233,13 @@ watch(() => store.commandPaletteOpen, async (v: boolean) => {
   align-items: center;
   gap: 8px;
   padding: 10px 12px;
-  border-bottom: 2px solid #000000;
-  background: #000000;
+  border-bottom: 1px solid var(--ui-border);
+  background: var(--ui-surface);
 }
 
 .cp-prompt {
-  color: #FFFFFF;
-  font-family: 'Courier New', monospace;
+  color: var(--ui-text);
+  font-family: var(--ui-font);
   font-size: 13px;
   font-weight: 700;
 }
@@ -244,14 +248,14 @@ watch(() => store.commandPaletteOpen, async (v: boolean) => {
   flex: 1;
   background: transparent;
   border: none;
-  color: #FFFFFF;
-  font-family: 'Courier New', monospace;
+  color: var(--ui-text);
+  font-family: var(--ui-font);
   font-size: 12px;
   outline: none;
 }
 
 .cp-input::placeholder {
-  color: rgba(255, 255, 255, 0.4);
+  color: color-mix(in srgb, var(--ui-text) 40%, transparent);
 }
 
 .cp-results {
@@ -266,10 +270,10 @@ watch(() => store.commandPaletteOpen, async (v: boolean) => {
 
 .cp-group-label {
   padding: 4px 12px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 9px;
   font-weight: 700;
-  color: rgba(0, 0, 0, 0.4);
+  color: color-mix(in srgb, var(--ui-text) 40%, transparent);
   letter-spacing: 1px;
 }
 
@@ -279,15 +283,15 @@ watch(() => store.commandPaletteOpen, async (v: boolean) => {
   gap: 8px;
   padding: 6px 12px;
   cursor: pointer;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 11px;
-  color: #000000;
+  color: var(--ui-text);
 }
 
 .cp-item:hover,
 .cp-item.active {
-  background: #000000;
-  color: #FFFFFF;
+  background: var(--ui-surface);
+  color: var(--ui-text);
 }
 
 .cp-item-icon {
@@ -303,13 +307,13 @@ watch(() => store.commandPaletteOpen, async (v: boolean) => {
 
 .cp-item-shortcut {
   font-size: 9px;
-  color: rgba(0, 0, 0, 0.4);
+  color: color-mix(in srgb, var(--ui-text) 40%, transparent);
   margin-left: 12px;
 }
 
 .cp-item:hover .cp-item-shortcut,
 .cp-item.active .cp-item-shortcut {
-  color: rgba(255, 255, 255, 0.5);
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent);
 }
 
 .cp-empty {

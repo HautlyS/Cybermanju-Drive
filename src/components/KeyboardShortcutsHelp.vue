@@ -64,23 +64,27 @@ const groupedShortcuts = computed(() => {
 .ks-help-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.85);
+  background: color-mix(in srgb, var(--ui-bg-deep) 62%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 10001;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
-.ks-help-modal {
-  width: 520px;
+.ks-help-modal {width: 520px;
   max-width: 90vw;
   max-height: 70vh;
-  background: #FFFFFF;
-  border: 2px solid #000000;
-  box-shadow: 4px 4px 0 #000000;
+  background: var(--ui-glass-2);
+  border: 1px solid var(--ui-border);
+  box-shadow: var(--ui-shadow-2);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  border-radius: var(--ui-radius-lg);
+  backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
+  -webkit-backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
 }
 
 .ks-help-header {
@@ -88,13 +92,13 @@ const groupedShortcuts = computed(() => {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  border-bottom: 2px solid #000000;
-  background: #000000;
-  color: #FFFFFF;
+  border-bottom: 1px solid var(--ui-border);
+  background: var(--ui-surface);
+  color: var(--ui-text);
 }
 
 .ks-help-header h2 {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 13px;
   font-weight: 800;
   letter-spacing: 1px;
@@ -103,22 +107,22 @@ const groupedShortcuts = computed(() => {
 
 .close-btn {
   background: none;
-  border: 2px solid #FFFFFF;
-  color: #FFFFFF;
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
   width: 24px;
   height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 10px;
   font-weight: 700;
 }
 
 .close-btn:hover {
-  background: #FFFFFF;
-  color: #000000;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
 .ks-help-body {
@@ -133,10 +137,10 @@ const groupedShortcuts = computed(() => {
 
 .ks-group-label {
   padding: 2px 16px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 9px;
   font-weight: 700;
-  color: rgba(0, 0, 0, 0.4);
+  color: color-mix(in srgb, var(--ui-text) 40%, transparent);
   letter-spacing: 1px;
   margin-bottom: 2px;
 }
@@ -149,20 +153,20 @@ const groupedShortcuts = computed(() => {
 }
 
 .ks-key {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 10px;
   font-weight: 700;
-  color: #000000;
-  background: rgba(0, 0, 0, 0.06);
+  color: var(--ui-text);
+  background: color-mix(in srgb, var(--ui-bg-deep) 4%, transparent);
   padding: 1px 6px;
-  border: 1px solid #000000;
+  border: 1px solid var(--ui-border-strong);
   min-width: 100px;
   text-align: center;
 }
 
 .ks-desc {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 10px;
-  color: rgba(0, 0, 0, 0.7);
+  color: color-mix(in srgb, var(--ui-text) 70%, transparent);
 }
 </style>

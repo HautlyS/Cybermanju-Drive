@@ -240,7 +240,7 @@ pub async fn db_open() -> Result<JsValue, JsValue> {
     )))
 }
 
-fn envelope_json(ok: bool, data: &serde_json::Value, error: Option<String>) -> String {
+pub(crate) fn envelope_json(ok: bool, data: &serde_json::Value, error: Option<String>) -> String {
     let mut map = serde_json::Map::new();
     map.insert("ok".to_string(), serde_json::Value::Bool(ok));
     if ok {

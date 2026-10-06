@@ -226,27 +226,27 @@ async function handleRefresh() { await store.fetchGeoFiles() }
 .map-view {
   width: 100%;
   height: 100%;
-  background: #000;
-  border: 2px solid #FFFFFF;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
   overflow-y: auto;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  font-family: 'Courier New', monospace;
-  color: #FFFFFF;
+  font-family: var(--ui-font-mono);
+  color: var(--ui-text);
 }
 
 .map-view::-webkit-scrollbar { width: 4px; }
-.map-view::-webkit-scrollbar-track { background: #000; }
-.map-view::-webkit-scrollbar-thumb { background: #FFFFFF; }
+.map-view::-webkit-scrollbar-track { background: var(--ui-surface); }
+.map-view::-webkit-scrollbar-thumb { background: var(--ui-glass-2); }
 
 .panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding-bottom: 10px;
-  border-bottom: 2px solid #FFFFFF;
+  border-bottom: 1px solid var(--ui-border);
 }
 
 .header-left {
@@ -255,13 +255,13 @@ async function handleRefresh() { await store.fetchGeoFiles() }
   gap: 8px;
 }
 
-.icon-map { font-size: 16px; color: #FFFFFF; }
+.icon-map { font-size: 16px; color: var(--ui-text); }
 
 .panel-title {
   font-size: 14px;
   font-weight: 800;
   letter-spacing: 1px;
-  color: #FFFFFF;
+  color: var(--ui-text);
   margin: 0;
 }
 
@@ -275,37 +275,37 @@ async function handleRefresh() { await store.fetchGeoFiles() }
 
 .loc-search-input {
   flex: 1;
-  background: #000;
-  border: 2px solid #FFFFFF;
-  color: #FFFFFF;
-  font-family: 'Courier New', monospace;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
+  font-family: var(--ui-font-mono);
   font-size: 10px;
   padding: 4px 8px;
 }
 
 .loc-search-input::placeholder {
-  color: rgba(255,255,255,0.3);
+  color: color-mix(in srgb, var(--ui-text) 35%, transparent);
 }
 
 .refresh-btn {
-  background: #000;
-  border: 2px solid #FFFFFF;
-  color: #FFFFFF;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
   cursor: pointer;
   padding: 2px 6px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font-mono);
   font-size: 10px;
   font-weight: 700;
 }
 
-.refresh-btn:hover { background: #FFFFFF; color: #000; }
-.refresh-btn.active { background: #FFFFFF; color: #000; }
+.refresh-btn:hover { background: var(--ui-glass-2); color: var(--ui-text); }
+.refresh-btn.active { background: var(--ui-glass-2); color: var(--ui-text); }
 
 .map-container {
   width: 100%;
   position: relative;
   min-height: 300px;
-  border: 2px solid #FFFFFF;
+  border: 1px solid var(--ui-border);
   overflow: hidden;
 }
 
@@ -315,12 +315,12 @@ async function handleRefresh() { await store.fetchGeoFiles() }
   position: absolute;
   bottom: 6px;
   right: 6px;
-  background: #000;
-  border: 2px solid #FFFFFF;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
   padding: 2px 6px;
   font-size: 9px;
-  color: #FFFFFF;
-  font-family: 'Courier New', monospace;
+  color: var(--ui-text);
+  font-family: var(--ui-font-mono);
   z-index: 5;
 }
 
@@ -330,10 +330,10 @@ async function handleRefresh() { await store.fetchGeoFiles() }
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 1px;
-  color: rgba(255,255,255,0.6);
+  color: color-mix(in srgb, var(--ui-text) 60%, transparent);
   margin: 0;
   padding-bottom: 4px;
-  border-bottom: 2px solid rgba(255,255,255,0.2);
+  border-bottom: 1px solid var(--ui-hairline);
   display: flex;
   align-items: center;
   gap: 6px;
@@ -342,7 +342,7 @@ async function handleRefresh() { await store.fetchGeoFiles() }
 .geo-list { display: flex; flex-direction: column; gap: 4px; }
 
 .geo-list-item {
-  border: 2px solid #FFFFFF;
+  border: 1px solid var(--ui-border);
   padding: 6px 10px;
   display: flex;
   align-items: center;
@@ -350,7 +350,7 @@ async function handleRefresh() { await store.fetchGeoFiles() }
   cursor: pointer;
 }
 
-.geo-list-item:hover { background: rgba(255,255,255,0.1); }
+.geo-list-item:hover { background: color-mix(in srgb, var(--ui-text) 10%, transparent); }
 
 .geo-list-pin { flex-shrink: 0; font-size: 11px; }
 
@@ -364,7 +364,7 @@ async function handleRefresh() { await store.fetchGeoFiles() }
 
 .geo-list-name { font-size: 11px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .geo-list-address { font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.geo-list-coords { font-size: 9px; color: rgba(255,255,255,0.5); flex-shrink: 0; }
+.geo-list-coords { font-size: 9px; color: color-mix(in srgb, var(--ui-text) 50%, transparent); flex-shrink: 0; }
 
 .empty-state {
   display: flex;
@@ -375,13 +375,13 @@ async function handleRefresh() { await store.fetchGeoFiles() }
   text-align: center;
 }
 
-.empty-state p { font-size: 11px; color: rgba(255,255,255,0.5); margin: 0; }
+.empty-state p { font-size: 11px; color: color-mix(in srgb, var(--ui-text) 50%, transparent); margin: 0; }
 
 .loading-spinner {
   width: 24px;
   height: 24px;
-  border: 3px solid rgba(255,255,255,0.2);
-  border-top-color: #FFFFFF;
+  border: 3px solid var(--ui-border);
+  border-top-color: var(--ui-border-strong);
   animation: spin 0.8s linear infinite;
 }
 
@@ -390,25 +390,25 @@ async function handleRefresh() { await store.fetchGeoFiles() }
 .status-footer {
   margin-top: auto;
   padding-top: 10px;
-  border-top: 2px solid rgba(255,255,255,0.2);
+  border-top: 1px solid var(--ui-hairline);
   font-size: 9px;
-  color: rgba(255,255,255,0.3);
+  color: color-mix(in srgb, var(--ui-text) 35%, transparent);
   text-align: center;
 }
 
-.mono { font-family: 'Courier New', monospace; }
-.text-muted { color: rgba(255,255,255,0.5) !important; }
+.mono { font-family: var(--ui-font-mono); }
+.text-muted { color: color-mix(in srgb, var(--ui-text) 50%, transparent) !important; }
 </style>
 
 <style>
 .maplibregl-popup-content {
-  background: #000 !important;
-  border: 2px solid #FFFFFF !important;
-  box-shadow: 3px 3px 0 #000 !important;
+  background: var(--ui-surface) !important;
+  border: 1px solid var(--ui-border) !important;
+  box-shadow: var(--ui-shadow-2);
   padding: 6px 10px !important;
-  color: #FFFFFF !important;
-  font-family: 'Courier New', monospace !important;
+  color: var(--ui-text) !important;
+  font-family: var(--ui-font-mono);
   font-size: 11px !important;
 }
-.maplibregl-popup-tip { border-top-color: #000 !important; }
+.maplibregl-popup-tip { border-top-color: var(--ui-border-strong) !important; }
 </style>

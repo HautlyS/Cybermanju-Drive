@@ -11,23 +11,24 @@
       <h3 class="section-title"><AppIcon name="solar:monitor-bold" :size="13" /> VIEW PREFERENCES</h3>
       <div class="setting-row">
         <span class="setting-label text-muted">DEFAULT VIEW</span>
-        <select v-model="store.viewMode" class="bw-input" style="flex:1;">
-          <option value="grid">GRID</option>
-          <option value="list">LIST</option>
-          <option value="masonry">MASONRY</option>
-        </select>
+        <UiSelect
+          :model-value="store.viewMode"
+          :options="['grid', 'list', 'masonry']"
+          style="flex:1;"
+          @update:model-value="store.viewMode = $event as 'grid' | 'list' | 'masonry'"
+        />
       </div>
       <div class="setting-row">
         <span class="setting-label text-muted">MATRIX RAIN</span>
-        <button class="bw-btn" :class="{ 'bw-btn-inverse': store.matrixRainEnabled }" @click="store.matrixRainEnabled = !store.matrixRainEnabled">
-          <AppIcon :name="store.matrixRainEnabled ? 'solar:check-circle-bold' : 'solar:close-circle-bold'" :size="14" />
-        </button>
+        <UiToggle v-model="store.matrixRainEnabled" aria-label="MATRIX RAIN" />
       </div>
       <div class="setting-row">
         <span class="setting-label text-muted">SIDEBAR DEFAULT</span>
-        <button class="bw-btn" :class="{ 'bw-btn-inverse': !store.sidebarCollapsed }" @click="store.sidebarCollapsed = !store.sidebarCollapsed">
-          {{ store.sidebarCollapsed ? 'COLLAPSED' : 'EXPANDED' }}
-        </button>
+        <UiToggle
+          :model-value="!store.sidebarCollapsed"
+          aria-label="SIDEBAR DEFAULT"
+          @update:model-value="store.sidebarCollapsed = !$event"
+        />
       </div>
     </div>
 
@@ -57,16 +58,15 @@
         <span class="setting-label text-muted">REMOTE<br/>DASHBOARD</span>
         <div style="flex:1;display:flex;flex-direction:column;gap:6px;">
           <div style="display:flex;gap:6px;">
-            <input
+            <UiInput
               v-model="serverUrlDraft"
-              class="bw-input"
               style="flex:1;"
               placeholder="https://my-server:3456 (empty = auto)"
               aria-label="Remote dashboard URL"
-              @keyup.enter="saveServerUrl"
+              @enter="saveServerUrl"
             />
-            <button class="bw-btn" @click="saveServerUrl" title="SAVE" aria-label="SAVE SERVER URL"><AppIcon name="solar:diskette-bold" :size="13" /></button>
-            <button v-if="serverUrlDraft || currentServerUrl" class="bw-btn" @click="clearServerUrl" title="Forget the remote dashboard" aria-label="CLEAR SERVER URL"><AppIcon name="solar:close-bold" :size="13" /></button>
+            <UiButton variant="primary" size="sm" icon="solar:diskette-bold" title="SAVE" aria-label="SAVE SERVER URL" @click="saveServerUrl" />
+            <UiButton v-if="serverUrlDraft || currentServerUrl" size="sm" icon="solar:close-bold" title="Forget the remote dashboard" aria-label="CLEAR SERVER URL" @click="clearServerUrl" />
           </div>
           <p class="text-muted" style="font-size:9px;margin:0;">STATIC BUILD + YOUR OWN SERVER = FULL OAUTH, SYNC + QUOTA HERE. PAGE RELOADS TO RECONNECT.</p>
         </div>
@@ -81,9 +81,8 @@
       </div>
       <div class="setting-row" style="align-items:flex-start;">
         <span class="setting-label text-muted">PROJECT<br/>URL</span>
-        <input
+        <UiInput
           v-model="supabaseUrlDraft"
-          class="bw-input"
           style="flex:1;"
           placeholder="https://xyzcompany.supabase.co"
           aria-label="Supabase project URL"
@@ -94,17 +93,16 @@
         <span class="setting-label text-muted">ANON/<br/>PUBLISHABLE<br/>KEY</span>
         <div style="flex:1;display:flex;flex-direction:column;gap:6px;">
           <div style="display:flex;gap:6px;">
-            <input
+            <UiInput
               v-model="supabaseKeyDraft"
-              class="bw-input"
               style="flex:1;"
               type="password"
               placeholder="sb_publishable_… or eyJ…"
               aria-label="Supabase anon key"
               autocomplete="off"
             />
-            <button class="bw-btn" @click="saveSupabase" title="SAVE" aria-label="SAVE SUPABASE CONFIG"><AppIcon name="solar:diskette-bold" :size="13" /></button>
-            <button v-if="supabaseConfiguredNow" class="bw-btn" @click="clearSupabase" title="Forget Supabase config" aria-label="CLEAR SUPABASE CONFIG"><AppIcon name="solar:close-bold" :size="13" /></button>
+            <UiButton variant="primary" size="sm" icon="solar:diskette-bold" title="SAVE" aria-label="SAVE SUPABASE CONFIG" @click="saveSupabase" />
+            <UiButton v-if="supabaseConfiguredNow" size="sm" icon="solar:close-bold" title="Forget Supabase config" aria-label="CLEAR SUPABASE CONFIG" @click="clearSupabase" />
           </div>
           <p class="text-muted" style="font-size:9px;margin:0;">STATIC BUILD OAUTH BROKER: GITHUB / GOOGLE / GITLAB LOGIN WITHOUT YOUR OWN SERVER. ENABLE THE PROVIDERS IN SUPABASE → AUTHENTICATION → SIGN-IN, AND ADD THIS PAGE'S URL TO REDIRECT URLS.</p>
         </div>
@@ -115,19 +113,18 @@
       <h3 class="section-title"><AppIcon name="solar:refresh-bold" :size="13" /> AUTO-REFRESH</h3>
       <div class="setting-row">
         <span class="setting-label text-muted">INTERVAL</span>
-        <select v-model.number="store.autoRefreshInterval" class="bw-input" style="flex:1;">
-          <option :value="0">DISABLED</option>
-          <option :value="10">10 SECONDS</option>
-          <option :value="30">30 SECONDS</option>
-          <option :value="60">1 MINUTE</option>
-          <option :value="300">5 MINUTES</option>
-        </select>
+        <UiSelect
+          :model-value="String(store.autoRefreshInterval)"
+          :options="REFRESH_OPTIONS"
+          style="flex:1;"
+          @update:model-value="store.autoRefreshInterval = Number($event)"
+        />
       </div>
     </div>
 
     <div class="section">
       <h3 class="section-title"><AppIcon name="solar:database-bold" :size="13" /> MANAGE</h3>
-      <button class="bw-btn" style="width:100%;" @click="handleRefresh">[REFRESH ALL DATA]</button>
+      <UiButton block icon="solar:refresh-bold" @click="handleRefresh">REFRESH ALL DATA</UiButton>
       <p class="text-muted" style="font-size:9px;margin-top:4px;">RE-FETCH FILES, ACCOUNTS, COLLECTIONS, FACE GROUPS, AND SYNC CONFIGS.</p>
     </div>
 
@@ -137,13 +134,12 @@
       <div class="gesture-table">
         <div v-for="gesture in touchConfig.getAllGestures()" :key="gesture" class="gesture-row">
           <span class="gesture-label text-muted">{{ touchConfig.getGestureLabel(gesture) }}</span>
-          <select
+          <UiSelect
             class="gesture-select"
-            :value="touchConfig.getAction(gesture)"
-            @change="onGestureChange(gesture, ($event.target as HTMLSelectElement).value)"
-          >
-            <option v-for="a in touchConfig.getAllActions()" :key="a" :value="a">{{ touchConfig.getActionLabel(a) }}</option>
-          </select>
+            :model-value="touchConfig.getAction(gesture)"
+            :options="touchConfig.getAllActions().map(a => ({ label: touchConfig.getActionLabel(a), value: a }))"
+            @update:model-value="onGestureChange(gesture, $event)"
+          />
           <button class="gesture-reset" @click="onGestureReset(gesture)" title="RESET" aria-label="RESET GESTURE"><AppIcon name="solar:undo-left-round-bold" :size="13" /></button>
         </div>
       </div>
@@ -166,9 +162,9 @@
         </div>
       </div>
       <div class="gesture-actions">
-        <button class="bw-btn" @click="touchConfig.resetAll()">[RESET ALL GESTURES]</button>
-        <button class="bw-btn" @click="exportTouchConfig"><AppIcon name="solar:download-bold" :size="13" /> EXPORT GESTURES</button>
-        <button class="bw-btn" @click="importTouchConfig"><AppIcon name="solar:upload-bold" :size="13" /> IMPORT GESTURES</button>
+        <UiButton icon="solar:undo-left-round-bold" @click="touchConfig.resetAll()">RESET ALL GESTURES</UiButton>
+        <UiButton icon="solar:download-bold" @click="exportTouchConfig">EXPORT GESTURES</UiButton>
+        <UiButton icon="solar:upload-bold" @click="importTouchConfig">IMPORT GESTURES</UiButton>
       </div>
       <input ref="touchImportRef" type="file" accept=".json" style="display:none" @change="handleTouchImport" />
     </div>
@@ -193,9 +189,9 @@
         </div>
       </div>
       <div class="sc-actions">
-        <button class="bw-btn" @click="exportKeymap"><AppIcon name="solar:download-bold" :size="13" /> EXPORT KEYMAP</button>
-        <button class="bw-btn" @click="importKeymap"><AppIcon name="solar:upload-bold" :size="13" /> IMPORT KEYMAP</button>
-        <button class="bw-btn" @click="resetAllBindings"><AppIcon name="solar:undo-left-round-bold" :size="13" /> RESET ALL</button>
+        <UiButton icon="solar:download-bold" @click="exportKeymap">EXPORT KEYMAP</UiButton>
+        <UiButton icon="solar:upload-bold" @click="importKeymap">IMPORT KEYMAP</UiButton>
+        <UiButton icon="solar:undo-left-round-bold" @click="resetAllBindings">RESET ALL</UiButton>
       </div>
       <input
         ref="importInputRef"
@@ -236,6 +232,14 @@ const activeTransport = computed(() => {
 const store = useAppStore()
 const shortcuts = inject(ShortcutsKey, null)
 const touchConfig = useTouchConfig()
+
+const REFRESH_OPTIONS = [
+  { label: 'DISABLED', value: '0' },
+  { label: '10 SECONDS', value: '10' },
+  { label: '30 SECONDS', value: '30' },
+  { label: '1 MINUTE', value: '60' },
+  { label: '5 MINUTES', value: '300' },
+]
 
 const currentServerUrl = computed(() => getServerUrl())
 const serverUrlDraft = ref(getServerUrl())
@@ -441,11 +445,11 @@ async function handleRefresh() {
 .settings-panel {
   width: 100%;
   height: 100%;
-  background: #000;
+  background: var(--ui-surface);
   overflow-y: auto;
   padding: 16px;
-  font-family: 'Courier New', monospace;
-  color: #FFFFFF;
+  font-family: var(--ui-font);
+  color: var(--ui-text);
 }
 
 .panel-header {
@@ -453,7 +457,7 @@ async function handleRefresh() {
   align-items: center;
   justify-content: space-between;
   padding-bottom: 10px;
-  border-bottom: 2px solid #FFFFFF;
+  border-bottom: 1px solid var(--ui-border);
   margin-bottom: 16px;
 }
 
@@ -467,10 +471,10 @@ async function handleRefresh() {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 1px;
-  color: rgba(255,255,255,0.6);
+  color: color-mix(in srgb, var(--ui-text) 60%, transparent);
   margin: 0 0 8px;
   padding-bottom: 4px;
-  border-bottom: 2px solid rgba(255,255,255,0.2);
+  border-bottom: 1px solid var(--ui-hairline);
 }
 
 .setting-row {
@@ -487,7 +491,7 @@ async function handleRefresh() {
 }
 
 .info-card {
-  border: 2px solid #FFFFFF;
+  border: 1px solid var(--ui-border);
   padding: 8px;
   display: flex;
   flex-direction: column;
@@ -502,34 +506,34 @@ async function handleRefresh() {
 
 .info-key { font-size: 10px; }
 .info-value { font-size: 10px; font-weight: 700; }
-.mono { font-family: 'Courier New', monospace; }
+.mono { font-family: var(--ui-font); }
 
 .bw-input {
-  background: #000;
-  border: 2px solid #FFFFFF;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
   padding: 4px 8px;
-  color: #FFFFFF;
-  font-family: 'Courier New', monospace;
+  color: var(--ui-text);
+  font-family: var(--ui-font);
   font-size: 10px;
 }
 
 .bw-btn {
   padding: 4px 12px;
-  background: #000000;
-  border: 2px solid #FFFFFF;
-  color: #FFFFFF;
-  font-family: 'Courier New', monospace;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
+  font-family: var(--ui-font);
   font-size: 10px;
   font-weight: 700;
   cursor: pointer;
 }
 
-.bw-btn:hover { background: #FFFFFF; color: #000000; }
-.bw-btn-inverse { background: #FFFFFF; color: #000000; }
-.bw-btn-inverse:hover { background: #000000; color: #FFFFFF; }
+.bw-btn:hover { background: var(--ui-glass-2); color: var(--ui-text); }
+.bw-btn-inverse { background: var(--ui-glass-2); color: var(--ui-text); }
+.bw-btn-inverse:hover { background: var(--ui-surface); color: var(--ui-text); }
 
 .shortcuts-table {
-  border: 2px solid rgba(255,255,255,0.3);
+  border: 1px solid var(--ui-hairline);
   max-height: 300px;
   overflow-y: auto;
   margin-bottom: 8px;
@@ -541,7 +545,7 @@ async function handleRefresh() {
   justify-content: space-between;
   padding: 3px 8px;
   font-size: 10px;
-  border-bottom: 1px solid rgba(255,255,255,0.08);
+  border-bottom: 1px solid var(--ui-border);
 }
 
 .sc-action {
@@ -560,10 +564,10 @@ async function handleRefresh() {
 
 .sc-input {
   width: 120px;
-  background: #000;
-  border: 2px solid #FFFFFF;
-  color: #FFFFFF;
-  font-family: 'Courier New', monospace;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
+  font-family: var(--ui-font);
   font-size: 9px;
   padding: 2px 4px;
   cursor: pointer;
@@ -571,23 +575,23 @@ async function handleRefresh() {
 }
 
 .sc-input:focus {
-  background: #FFFFFF;
-  color: #000;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
 .sc-reset {
   background: transparent;
-  border: 1px solid rgba(255,255,255,0.3);
-  color: rgba(255,255,255,0.6);
-  font-family: 'Courier New', monospace;
+  border: 1px solid var(--ui-border);
+  color: color-mix(in srgb, var(--ui-text) 60%, transparent);
+  font-family: var(--ui-font);
   font-size: 8px;
   padding: 1px 4px;
   cursor: pointer;
 }
 
 .sc-reset:hover {
-  background: #FFFFFF;
-  color: #000;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
 .sc-actions {
@@ -597,7 +601,7 @@ async function handleRefresh() {
 }
 
 .gesture-table {
-  border: 2px solid rgba(255,255,255,0.3);
+  border: 1px solid var(--ui-hairline);
   max-height: 300px;
   overflow-y: auto;
   margin-bottom: 8px;
@@ -609,7 +613,7 @@ async function handleRefresh() {
   gap: 6px;
   padding: 3px 6px;
   font-size: 9px;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  border-bottom: 1px solid var(--ui-border);
 }
 
 .gesture-label {
@@ -622,28 +626,28 @@ async function handleRefresh() {
 
 .gesture-select {
   width: 140px;
-  background: #000;
-  border: 2px solid #FFFFFF;
-  color: #FFFFFF;
-  font-family: 'Courier New', monospace;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
+  font-family: var(--ui-font);
   font-size: 8px;
   padding: 1px 2px;
 }
 
 .gesture-reset {
   background: transparent;
-  border: 1px solid rgba(255,255,255,0.3);
-  color: rgba(255,255,255,0.5);
-  font-family: 'Courier New', monospace;
+  border: 1px solid var(--ui-border);
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent);
+  font-family: var(--ui-font);
   font-size: 8px;
   padding: 1px 4px;
   cursor: pointer;
 }
 
-.gesture-reset:hover { background: #FFFFFF; color: #000; }
+.gesture-reset:hover { background: var(--ui-glass-2); color: var(--ui-text); }
 
 .gesture-settings {
-  border: 2px solid rgba(255,255,255,0.3);
+  border: 1px solid var(--ui-hairline);
   padding: 6px;
   margin-bottom: 8px;
 }
@@ -659,10 +663,10 @@ async function handleRefresh() {
 .gs-label { font-size: 9px; }
 .gs-input {
   width: 60px;
-  background: #000;
-  border: 2px solid #FFFFFF;
-  color: #FFFFFF;
-  font-family: 'Courier New', monospace;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
+  font-family: var(--ui-font);
   font-size: 9px;
   padding: 1px 4px;
   text-align: center;
@@ -674,5 +678,5 @@ async function handleRefresh() {
   flex-wrap: wrap;
 }
 
-.text-muted { color: rgba(255,255,255,0.5) !important; }
+.text-muted { color: color-mix(in srgb, var(--ui-text) 50%, transparent) !important; }
 </style>

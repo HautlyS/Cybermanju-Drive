@@ -28,8 +28,8 @@ const sizeClass = computed(() => `spinner-${props.size}`)
 }
 
 .spinner-ring {
-  border: 3px solid rgba(0, 0, 0, 0.1);
-  border-top-color: #000000;
+  border: 3px solid color-mix(in srgb, var(--ui-text) 4%, transparent);
+  border-top-color: var(--ui-accent);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
@@ -39,9 +39,9 @@ const sizeClass = computed(() => `spinner-${props.size}`)
 .spinner-lg .spinner-ring { width: 36px; height: 36px; border-width: 4px; }
 
 .spinner-label {
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 10px;
-  color: rgba(0, 0, 0, 0.5);
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent);
 }
 
 @keyframes spin {

@@ -40,7 +40,7 @@ const ICONS: Record<NotificationType, string> = {
   z-index: 10000;
   display: flex;
   flex-direction: column-reverse;
-  gap: 6px;
+  gap: 8px;
   pointer-events: none;
   max-width: 380px;
 }
@@ -48,66 +48,88 @@ const ICONS: Record<NotificationType, string> = {
 .notification-item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background: #FFFFFF;
-  border: 2px solid #000000;
-  box-shadow: 3px 3px 0 #000000;
-  color: #000000;
-  font-family: 'Courier New', monospace;
-  font-size: 10px;
+  gap: 9px;
+  padding: 9px 12px;
+  background: var(--ui-glass-2);
+  backdrop-filter: blur(var(--ui-blur-strong)) saturate(var(--ui-saturate));
+  -webkit-backdrop-filter: blur(var(--ui-blur-strong)) saturate(var(--ui-saturate));
+  border: 1px solid var(--ui-border);
+  border-left: 3px solid var(--ui-info);
+  border-radius: var(--ui-radius-md);
+  box-shadow: var(--ui-shadow-3);
+  color: var(--ui-text);
+  font-family: var(--ui-font);
+  font-size: var(--ui-fs-sm);
   font-weight: 600;
   cursor: pointer;
   pointer-events: auto;
+  overflow: hidden;
 }
 
 .notif-error {
-  border-color: #000000;
-  border-width: 3px;
+  border-left-color: var(--ui-danger);
+}
+
+.notif-error .notif-icon {
+  color: var(--ui-danger);
 }
 
 .notif-success {
-  border-color: #000000;
+  border-left-color: var(--ui-accent);
+}
+
+.notif-success .notif-icon {
+  color: var(--ui-accent);
 }
 
 .notif-warning {
-  border-color: #000000;
+  border-left-color: var(--ui-warning);
+}
+
+.notif-warning .notif-icon {
+  color: var(--ui-warning);
+}
+
+.notif-info .notif-icon {
+  color: var(--ui-info);
 }
 
 .notif-icon {
-  font-size: 12px;
+  font-size: 14px;
   flex-shrink: 0;
+  display: flex;
 }
 
 .notif-msg {
   flex: 1;
-  line-height: 1.3;
+  line-height: 1.35;
 }
 
 .notif-close {
   background: none;
-  border: 2px solid #000000;
-  color: #000000;
-  width: 18px;
-  height: 18px;
+  border: none;
+  border-radius: var(--ui-radius-sm);
+  color: var(--ui-text-3);
+  width: 20px;
+  height: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 8px;
-  font-weight: 700;
   cursor: pointer;
   flex-shrink: 0;
-  font-family: 'Courier New', monospace;
+  transition:
+    background-color var(--ui-dur-fast) var(--ui-ease-out),
+    color var(--ui-dur-fast) var(--ui-ease-out);
 }
 
 .notif-close:hover {
-  background: #000000;
-  color: #FFFFFF;
+  background: color-mix(in srgb, var(--ui-danger) 16%, transparent);
+  color: var(--ui-danger);
 }
 
 .nstack-enter-active,
 .nstack-leave-active {
-  transition: all 0.25s ease;
+  transition: all var(--ui-dur) var(--ui-ease-out);
 }
 
 .nstack-enter-from {

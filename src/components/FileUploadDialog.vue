@@ -119,23 +119,27 @@ async function startUpload() {
 .upload-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.8);
+  background: color-mix(in srgb, var(--ui-bg-deep) 62%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 200;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
 
-.upload-modal {
-  background: #000;
-  border: 2px solid #FFFFFF;
+.upload-modal {background: var(--ui-glass-2);
+  border: 1px solid var(--ui-border);
   width: 480px;
   max-width: 90vw;
   max-height: 80vh;
   display: flex;
   flex-direction: column;
-  color: #FFFFFF;
+  color: var(--ui-text);
+  border-radius: var(--ui-radius-lg);
+  backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
+  -webkit-backdrop-filter: blur(var(--ui-blur)) saturate(var(--ui-saturate));
 }
 
 .upload-header {
@@ -143,7 +147,7 @@ async function startUpload() {
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
-  border-bottom: 2px solid #FFFFFF;
+  border-bottom: 1px solid var(--ui-border);
   font-weight: 700;
   font-size: 12px;
   letter-spacing: 1px;
@@ -151,34 +155,34 @@ async function startUpload() {
 
 .upload-close {
   background: transparent;
-  border: 2px solid #FFFFFF;
-  color: #FFFFFF;
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
   padding: 2px 6px;
   cursor: pointer;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 9px;
 }
 
 .upload-close:hover {
-  background: #FFFFFF;
-  color: #000;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
 .drop-zone {
-  border: 2px dashed rgba(255,255,255,0.3);
+  border: 2px dashed var(--ui-border);
   margin: 12px;
   padding: 32px;
   text-align: center;
   cursor: pointer;
   font-size: 10px;
-  color: rgba(255,255,255,0.5);
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent);
   transition: border-color 0.15s, background 0.15s;
 }
 
 .drop-zone:hover,
 .drop-zone.drop-active {
-  border-color: #FFFFFF;
-  background: rgba(255,255,255,0.05);
+  border-color: var(--ui-border-strong);
+  background: color-mix(in srgb, var(--ui-text) 6%, transparent);
 }
 
 .file-input-hidden {
@@ -200,18 +204,18 @@ async function startUpload() {
   align-items: center;
   gap: 8px;
   padding: 4px 8px;
-  border: 1px solid rgba(255,255,255,0.2);
+  border: 1px solid var(--ui-border);
   font-size: 9px;
 }
 
 .upload-file-row.done {
-  border-color: rgba(255,255,255,0.5);
+  border-color: var(--ui-border);
   opacity: 0.6;
 }
 
 .upload-file-row.error {
-  border-color: #FFFFFF;
-  background: rgba(255,255,255,0.08);
+  border-color: var(--ui-border-strong);
+  background: color-mix(in srgb, var(--ui-text) 6%, transparent);
 }
 
 .uf-name { flex: 1; }
@@ -224,28 +228,28 @@ async function startUpload() {
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
-  border-top: 2px solid #FFFFFF;
+  border-top: 1px solid var(--ui-border);
 }
 
 .upload-progress-text {
   font-size: 10px;
-  color: rgba(255,255,255,0.5);
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent);
 }
 
 .bw-btn {
   background: transparent;
-  border: 2px solid #FFFFFF;
-  color: #FFFFFF;
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
   padding: 4px 12px;
   cursor: pointer;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 10px;
   font-weight: 700;
 }
 
 .bw-btn:hover {
-  background: #FFFFFF;
-  color: #000;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
 .bw-btn:disabled {
@@ -253,6 +257,6 @@ async function startUpload() {
   cursor: not-allowed;
 }
 
-.text-muted { color: rgba(255,255,255,0.5) !important; }
+.text-muted { color: color-mix(in srgb, var(--ui-text) 50%, transparent) !important; }
 .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

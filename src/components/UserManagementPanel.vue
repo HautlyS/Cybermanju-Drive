@@ -78,11 +78,11 @@ async function handleRole(userId: string, role: string) {
 .user-panel {
   width: 100%;
   height: 100%;
-  background: #000;
+  background: var(--ui-surface);
   overflow-y: auto;
   padding: 16px;
-  font-family: 'Courier New', monospace;
-  color: #FFFFFF;
+  font-family: var(--ui-font);
+  color: var(--ui-text);
 }
 
 .panel-header {
@@ -90,7 +90,7 @@ async function handleRole(userId: string, role: string) {
   align-items: center;
   justify-content: space-between;
   padding-bottom: 10px;
-  border-bottom: 2px solid #FFFFFF;
+  border-bottom: 1px solid var(--ui-border);
   margin-bottom: 16px;
 }
 
@@ -104,14 +104,14 @@ async function handleRole(userId: string, role: string) {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 1px;
-  color: rgba(255,255,255,0.6);
+  color: color-mix(in srgb, var(--ui-text) 60%, transparent);
   margin: 0 0 8px;
 }
 
 .user-list { display: flex; flex-direction: column; gap: 6px; }
 
 .user-card {
-  border: 2px solid #FFFFFF;
+  border: 1px solid var(--ui-border);
   padding: 8px 10px;
 }
 
@@ -122,10 +122,10 @@ async function handleRole(userId: string, role: string) {
 }
 
 .user-name { font-size: 12px; font-weight: 700; flex: 1; }
-.user-role { font-size: 9px; border: 1px solid #FFFFFF; padding: 0 4px; }
+.user-role { font-size: 9px; border: 1px solid var(--ui-border-strong); padding: 0 4px; }
 .user-active { font-size: 9px; font-weight: 700; }
-.user-active.on { color: #FFFFFF; }
-.user-active:not(.on) { color: rgba(255,255,255,0.3); }
+.user-active.on { color: var(--ui-text); }
+.user-active:not(.on) { color: color-mix(in srgb, var(--ui-text) 35%, transparent); }
 
 .user-actions {
   display: flex;
@@ -134,31 +134,31 @@ async function handleRole(userId: string, role: string) {
 
 .user-action-btn {
   background: transparent;
-  border: 2px solid #FFFFFF;
-  color: #FFFFFF;
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
   padding: 1px 4px;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 8px;
   font-weight: 700;
   cursor: pointer;
 }
 
 .user-action-btn:hover {
-  background: #FFFFFF;
-  color: #000;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
 .create-section {
   margin-top: 16px;
   padding-top: 12px;
-  border-top: 2px solid #FFFFFF;
+  border-top: 1px solid var(--ui-border);
 }
 
 .bw-input {
-  background: #000;
-  border: 2px solid #FFFFFF;
-  color: #FFFFFF;
-  font-family: 'Courier New', monospace;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
+  font-family: var(--ui-font);
   font-size: 10px;
   padding: 4px 6px;
   width: 100%;
@@ -166,25 +166,25 @@ async function handleRole(userId: string, role: string) {
 }
 
 .bw-input::placeholder {
-  color: rgba(255,255,255,0.3);
+  color: color-mix(in srgb, var(--ui-text) 35%, transparent);
 }
 
 .bw-btn {
   background: transparent;
-  border: 2px solid #FFFFFF;
-  color: #FFFFFF;
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
   padding: 4px 12px;
   cursor: pointer;
-  font-family: 'Courier New', monospace;
+  font-family: var(--ui-font);
   font-size: 10px;
   font-weight: 700;
   width: 100%;
 }
 
 .bw-btn:hover {
-  background: #FFFFFF;
-  color: #000;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
-.text-muted { color: rgba(255,255,255,0.5) !important; }
+.text-muted { color: color-mix(in srgb, var(--ui-text) 50%, transparent) !important; }
 </style>

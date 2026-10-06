@@ -58,11 +58,11 @@ async function handleBatchDetect() {
 .face-panel {
   width: 100%;
   height: 100%;
-  background: #000;
+  background: var(--ui-surface);
   overflow-y: auto;
   padding: 16px;
-  font-family: 'Courier New', monospace;
-  color: #FFFFFF;
+  font-family: var(--ui-font);
+  color: var(--ui-text);
 }
 
 .panel-header {
@@ -70,7 +70,7 @@ async function handleBatchDetect() {
   align-items: center;
   justify-content: space-between;
   padding-bottom: 10px;
-  border-bottom: 2px solid #FFFFFF;
+  border-bottom: 1px solid var(--ui-border);
   margin-bottom: 16px;
 }
 
@@ -84,25 +84,25 @@ async function handleBatchDetect() {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 1px;
-  color: rgba(255,255,255,0.6);
+  color: color-mix(in srgb, var(--ui-text) 60%, transparent);
   margin: 0 0 8px;
 }
 
 .bw-btn {
   padding: 6px 12px;
-  background: #FFFFFF;
-  color: #000;
-  border: 2px solid #FFFFFF;
-  font-family: 'Courier New', monospace;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
+  border: 1px solid var(--ui-border);
+  font-family: var(--ui-font);
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
 }
 
-.bw-btn:hover { background: #000; color: #FFFFFF; }
+.bw-btn:hover { background: var(--ui-surface); color: var(--ui-text); }
 
 .stats-card {
-  border: 2px solid #FFFFFF;
+  border: 1px solid var(--ui-border);
   padding: 8px;
   display: flex;
   flex-direction: column;
@@ -116,7 +116,7 @@ async function handleBatchDetect() {
 }
 
 .stat-key { font-size: 10px; }
-.stat-value { font-size: 11px; font-weight: 700; font-family: 'Courier New', monospace; }
+.stat-value { font-size: 11px; font-weight: 700; font-family: var(--ui-font); }
 
 .group-list {
   display: flex;
@@ -125,7 +125,7 @@ async function handleBatchDetect() {
 }
 
 .group-card {
-  border: 2px solid #FFFFFF;
+  border: 1px solid var(--ui-border);
   padding: 10px;
 }
 
@@ -138,7 +138,7 @@ async function handleBatchDetect() {
 .avatar {
   width: 28px;
   height: 28px;
-  border: 2px solid #FFFFFF;
+  border: 1px solid var(--ui-border);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -150,5 +150,5 @@ async function handleBatchDetect() {
 .group-name { font-size: 12px; font-weight: 700; }
 .group-meta { font-size: 10px; }
 
-.text-muted { color: rgba(255,255,255,0.5) !important; }
+.text-muted { color: color-mix(in srgb, var(--ui-text) 50%, transparent) !important; }
 </style>

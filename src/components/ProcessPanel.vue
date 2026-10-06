@@ -178,9 +178,9 @@ onBeforeUnmount(() => {
 .process-panel {
   height: 100%;
   overflow-y: auto;
-  background: #000;
-  color: #fff;
-  font-family: 'Courier New', monospace;
+  background: var(--ui-surface);
+  color: var(--ui-text);
+  font-family: var(--ui-font);
   font-size: 13px;
 }
 
@@ -189,7 +189,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+  border-bottom: 1px solid var(--ui-border);
 }
 
 .header-left {
@@ -199,7 +199,7 @@ onBeforeUnmount(() => {
 }
 
 .icon-processes {
-  color: #9aedfe;
+  color: var(--ui-info);
 }
 
 .panel-title {
@@ -210,8 +210,8 @@ onBeforeUnmount(() => {
 
 .ghost-btn {
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  color: rgba(255, 255, 255, 0.75);
+  border: 1px solid var(--ui-border);
+  color: color-mix(in srgb, var(--ui-text) 70%, transparent);
   font-family: inherit;
   font-size: 11px;
   padding: 3px 8px;
@@ -219,8 +219,8 @@ onBeforeUnmount(() => {
 }
 
 .ghost-btn:hover:not(:disabled) {
-  color: #fff;
-  border-color: #fff;
+  color: var(--ui-text);
+  border-color: var(--ui-border-strong);
 }
 
 .ghost-btn:disabled {
@@ -229,14 +229,14 @@ onBeforeUnmount(() => {
 }
 
 .ghost-btn.danger {
-  color: #ff5f56;
-  border-color: rgba(255, 95, 86, 0.6);
+  color: var(--ui-danger);
+  border-color: color-mix(in srgb, var(--ui-danger) 60%, transparent);
 }
 
 .ghost-btn.danger:hover {
-  color: #000;
-  background: #ff5f56;
-  border-color: #ff5f56;
+  color: var(--ui-text);
+  background: var(--ui-danger);
+  border-color: var(--ui-danger);
 }
 
 .stats-row {
@@ -244,7 +244,7 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   gap: 18px;
   padding: 10px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid var(--ui-border);
 }
 
 .stat {
@@ -255,7 +255,7 @@ onBeforeUnmount(() => {
 
 .stat-key {
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.45);
+  color: color-mix(in srgb, var(--ui-text) 40%, transparent);
   letter-spacing: 1px;
 }
 
@@ -271,7 +271,7 @@ onBeforeUnmount(() => {
   margin: 0 0 8px;
   font-size: 11px;
   letter-spacing: 1.5px;
-  color: rgba(255, 255, 255, 0.55);
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent);
 }
 
 .task-table {
@@ -282,14 +282,14 @@ onBeforeUnmount(() => {
 .task-table th {
   text-align: left;
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.45);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+  color: color-mix(in srgb, var(--ui-text) 40%, transparent);
+  border-bottom: 1px solid var(--ui-border);
   padding: 4px 6px;
 }
 
 .task-table td {
   padding: 5px 6px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  border-bottom: 1px solid var(--ui-border);
   vertical-align: middle;
 }
 
@@ -302,23 +302,23 @@ onBeforeUnmount(() => {
 }
 
 .state-running {
-  color: #5af78e;
+  color: var(--ui-accent);
 }
 
 .state-pending {
-  color: #f3f99d;
+  color: var(--ui-warning);
 }
 
 .state-done {
-  color: rgba(255, 255, 255, 0.55);
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent);
 }
 
 .state-failed {
-  color: #ff5f56;
+  color: var(--ui-danger);
 }
 
 .state-killed {
-  color: #ff6ac1;
+  color: var(--ui-info);
 }
 
 .progress-cell {
@@ -331,18 +331,18 @@ onBeforeUnmount(() => {
   display: inline-block;
   width: 80px;
   height: 8px;
-  background: rgba(255, 255, 255, 0.12);
+  background: color-mix(in srgb, var(--ui-text) 6%, transparent);
 }
 
 .bar-fill {
   display: block;
   height: 100%;
-  background: #5af78e;
+  background: var(--ui-accent);
 }
 
 .pct {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.65);
+  color: color-mix(in srgb, var(--ui-text) 60%, transparent);
 }
 
 .jobs {
@@ -356,7 +356,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--ui-border);
   padding: 6px 8px;
 }
 
@@ -380,9 +380,9 @@ onBeforeUnmount(() => {
 
 .path-input {
   flex: 1;
-  background: #000;
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  color: #fff;
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  color: var(--ui-text);
   font-family: inherit;
   font-size: 12px;
   padding: 4px 6px;
@@ -390,13 +390,13 @@ onBeforeUnmount(() => {
 }
 
 .path-input:focus {
-  border-color: #5af78e;
+  border-color: var(--ui-accent);
 }
 
 .note {
   margin: 8px 0 0;
   font-size: 11px;
-  color: #9aedfe;
+  color: var(--ui-info);
   white-space: pre-wrap;
 }
 
@@ -406,6 +406,6 @@ onBeforeUnmount(() => {
 }
 
 .text-muted {
-  color: rgba(255, 255, 255, 0.5) !important;
+  color: color-mix(in srgb, var(--ui-text) 50%, transparent) !important;
 }
 </style>

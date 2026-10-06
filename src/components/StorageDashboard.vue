@@ -144,11 +144,11 @@ const byType = computed(() => {
 .storage-panel {
   width: 100%;
   height: 100%;
-  background: #000;
+  background: var(--ui-surface);
   overflow-y: auto;
   padding: 16px;
-  font-family: 'Courier New', monospace;
-  color: #FFFFFF;
+  font-family: var(--ui-font);
+  color: var(--ui-text);
 }
 
 .panel-header {
@@ -156,7 +156,7 @@ const byType = computed(() => {
   align-items: center;
   justify-content: space-between;
   padding-bottom: 10px;
-  border-bottom: 2px solid #FFFFFF;
+  border-bottom: 1px solid var(--ui-border);
   margin-bottom: 16px;
 }
 
@@ -170,7 +170,7 @@ const byType = computed(() => {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 1px;
-  color: rgba(255,255,255,0.6);
+  color: color-mix(in srgb, var(--ui-text) 60%, transparent);
   margin: 0 0 8px;
 }
 
@@ -181,7 +181,7 @@ const byType = computed(() => {
 }
 
 .stat-card {
-  border: 2px solid #FFFFFF;
+  border: 1px solid var(--ui-border);
   padding: 10px;
   text-align: center;
 }
@@ -220,7 +220,7 @@ const byType = computed(() => {
 .type-bar {
   flex: 1;
   height: 10px;
-  border: 1px solid #FFFFFF;
+  border: 1px solid var(--ui-border-strong);
   position: relative;
   background: transparent;
 }
@@ -228,18 +228,18 @@ const byType = computed(() => {
 .type-bar-fill {
   display: block;
   height: 100%;
-  background: #FFFFFF;
+  background: var(--ui-glass-2);
 }
 
 .type-size {
   width: 70px;
   text-align: right;
   flex-shrink: 0;
-  color: rgba(255,255,255,0.6);
+  color: color-mix(in srgb, var(--ui-text) 60%, transparent);
 }
 
 .info-card {
-  border: 2px solid #FFFFFF;
+  border: 1px solid var(--ui-border);
   padding: 10px;
 }
 
@@ -248,25 +248,25 @@ const byType = computed(() => {
   justify-content: space-between;
   font-size: 10px;
   padding: 3px 0;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
+  border-bottom: 1px solid var(--ui-border);
 }
 
 .info-row:last-child {
   border-bottom: none;
 }
 
-.info-key { color: rgba(255,255,255,0.5); }
+.info-key { color: color-mix(in srgb, var(--ui-text) 50%, transparent); }
 .info-value { font-weight: 700; }
 
 .df-bar {
   height: 16px;
-  background: rgba(255,255,255,0.12);
-  border: 1px solid rgba(255,255,255,0.25);
+  background: color-mix(in srgb, var(--ui-text) 6%, transparent);
+  border: 1px solid var(--ui-border);
 }
 
 .df-used {
   height: 100%;
-  background: linear-gradient(90deg, #5af78e, #57c7ff);
+  background: linear-gradient(90deg, var(--ui-accent), var(--ui-info));
 }
 
 .df-figures {
@@ -280,8 +280,8 @@ const byType = computed(() => {
 .open-disks {
   margin-top: 8px;
   background: transparent;
-  border: 1px solid #FFFFFF;
-  color: #FFFFFF;
+  border: 1px solid var(--ui-border-strong);
+  color: var(--ui-text);
   font-family: inherit;
   font-size: 10px;
   padding: 4px 8px;
@@ -289,9 +289,9 @@ const byType = computed(() => {
 }
 
 .open-disks:hover {
-  background: #FFFFFF;
-  color: #000000;
+  background: var(--ui-glass-2);
+  color: var(--ui-text);
 }
 
-.text-muted { color: rgba(255,255,255,0.5) !important; }
+.text-muted { color: color-mix(in srgb, var(--ui-text) 50%, transparent) !important; }
 </style>
