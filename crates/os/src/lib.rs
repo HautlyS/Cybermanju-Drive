@@ -33,7 +33,10 @@ pub use task::{
 /// `cybsh` — the system terminal: tokenizer, parser and the command table.
 pub mod shell;
 
-pub use shell::{command_table, completions, execute, parse_ai_command, parse_sync_start, run, AiCommand, SyncStart};
+pub use shell::{
+    command_table, completions, execute, parse_ai_command, parse_sync_start, run, AiCommand,
+    SyncStart,
+};
 
 /// Compute fan-out: worker scoring (`workers`) and the job scheduler
 /// (`jobs`, `compute run`).

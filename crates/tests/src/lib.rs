@@ -12,9 +12,9 @@ mod types;
 mod web;
 // <<< AGENT-4 item 9 — REST/auth suites, one module per route family >>>
 #[cfg(test)]
-mod api_users;
-#[cfg(test)]
 mod agent;
+#[cfg(test)]
+mod api_users;
 #[cfg(test)]
 mod share;
 #[cfg(test)]

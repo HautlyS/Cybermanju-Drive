@@ -63,8 +63,8 @@ struct PromptRequest {
 
 #[cfg(target_arch = "wasm32")]
 async fn agent_prompt_inner(req_json: &str) -> Result<String, String> {
-    let req: PromptRequest = serde_json::from_str(req_json)
-        .map_err(|e| format!("invalid: request is not JSON: {e}"))?;
+    let req: PromptRequest =
+        serde_json::from_str(req_json).map_err(|e| format!("invalid: request is not JSON: {e}"))?;
     if req.url.trim().is_empty() {
         return Err("invalid: url is required".to_string());
     }
@@ -98,11 +98,17 @@ async fn agent_prompt_inner(req_json: &str) -> Result<String, String> {
             .set(name, value)
             .map_err(|_| format!("invalid: bad header {name}"))?;
     }
-    if request.headers().get("Content-Type").unwrap_or_default().is_none() {
+    if request
+        .headers()
+        .get("Content-Type")
+        .unwrap_or_default()
+        .is_none()
+    {
         let _ = request.headers().set("Content-Type", "application/json");
     }
 
-    let window = web_sys::window().ok_or_else(|| "unsupported: no window (not a browser)".to_string())?;
+    let window =
+        web_sys::window().ok_or_else(|| "unsupported: no window (not a browser)".to_string())?;
     let resp_value = JsFuture::from(window.fetch_with_request(&request))
         .await
         .map_err(|_| {
@@ -131,7 +137,11 @@ async fn agent_prompt_inner(req_json: &str) -> Result<String, String> {
                     .map(str::to_string)
             })
             .unwrap_or_else(|| format!("HTTP {status}"));
-        return Err(cybermanju_agent::protocol::classify_provider_error(Some(status), &msg, ""));
+        return Err(cybermanju_agent::protocol::classify_provider_error(
+            Some(status),
+            &msg,
+            "",
+        ));
     }
     let turn = if openai {
         cybermanju_agent::protocol::openai_parse(&value)
@@ -150,7 +160,7 @@ async fn agent_prompt_inner(req_json: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
 
     #[test]
     fn catalog_serializes_ten_presets() {

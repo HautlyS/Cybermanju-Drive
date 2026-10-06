@@ -62,10 +62,7 @@ pub fn apply_edit(
 /// indentation width). `Ok(Some(range))` on a unique match, `Ok(None)` when
 /// absent, `Err(count)` when it matches more than once (ambiguity must be
 /// reported, never silently resolved).
-fn fuzzy_locate(
-    haystack: &str,
-    needle: &str,
-) -> Result<Option<std::ops::Range<usize>>, usize> {
+fn fuzzy_locate(haystack: &str, needle: &str) -> Result<Option<std::ops::Range<usize>>, usize> {
     /// Collapse whitespace runs to one space; `map[i]` is the original byte
     /// offset where normalized byte `i` came from (so every mapped span lands
     /// on char boundaries by construction).
@@ -132,8 +129,13 @@ mod tests {
 
     #[test]
     fn anchored_edit_replaces_exactly_once() {
-        let out = apply_edit("fn a() {}\nfn b() {}\n", "fn a() {}", "fn a() {\n  1\n}", None)
-            .expect("edit");
+        let out = apply_edit(
+            "fn a() {}\nfn b() {}\n",
+            "fn a() {}",
+            "fn a() {\n  1\n}",
+            None,
+        )
+        .expect("edit");
         assert!(out.contains("fn a() {\n  1\n}"));
         assert!(out.contains("fn b() {}"));
     }
@@ -154,8 +156,13 @@ mod tests {
     #[test]
     fn whitespace_differences_fall_back_to_fuzzy_match() {
         // Model retyped with spaces what the file holds as a tab.
-        let out = apply_edit("fn a() {\n\treturn 1;\n}\n", "fn a() {\n  return 1;\n}", "fn a() {\n  return 2;\n}", None)
-            .expect("fuzzy");
+        let out = apply_edit(
+            "fn a() {\n\treturn 1;\n}\n",
+            "fn a() {\n  return 1;\n}",
+            "fn a() {\n  return 2;\n}",
+            None,
+        )
+        .expect("fuzzy");
         assert!(out.contains("return 2;"), "{out}");
         assert!(!out.contains("\treturn"), "{out}");
 

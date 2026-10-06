@@ -210,7 +210,8 @@ mod tests {
 
     #[test]
     fn jwt_shapes_redact_without_markers() {
-        let token = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
+        let token =
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c";
         let (out, n) = redact(&format!("got {token} ok"));
         assert_eq!(n, 1, "{out}");
         assert!(!out.contains("SflKxw"));

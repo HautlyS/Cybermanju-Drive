@@ -263,7 +263,7 @@ impl McpServerConfig {
                 }
                 if cmd.contains('/') || cmd.contains('\\') {
                     return Err(
-                        "invalid: stdio command must be a bare binary name on PATH".to_string(),
+                        "invalid: stdio command must be a bare binary name on PATH".to_string()
                     );
                 }
                 Ok(())

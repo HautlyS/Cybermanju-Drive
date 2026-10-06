@@ -8,7 +8,6 @@
 use crate::web::{bearer, body_of, bootstrap_session, call, mk_dashboard, status_of};
 use cybermanju_types::schema::FileNode;
 use cybermanju_web::WebDashboard;
-use redb::ReadableTable;
 use std::sync::Arc;
 
 fn seed_file(

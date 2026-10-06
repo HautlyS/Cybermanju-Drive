@@ -1,9 +1,15 @@
 // Native agent REST contract: providers, keyless configs, sessions,
 // detached jobs with approvals, and the `cybsh ai` intercept.
 
-use crate::web::{bearer, body_of, bootstrap_session, call, mint, mk_dashboard, now_secs, status_of};
+use crate::web::{
+    bearer, body_of, bootstrap_session, call, mint, mk_dashboard, now_secs, status_of,
+};
 
-fn authed() -> (tempfile::TempDir, std::sync::Arc<cybermanju_web::WebDashboard>, String) {
+fn authed() -> (
+    tempfile::TempDir,
+    std::sync::Arc<cybermanju_web::WebDashboard>,
+    String,
+) {
     let (dir, d) = mk_dashboard(3456);
     let token = bootstrap_session(&d, "agent", "correct horse battery");
     let auth = bearer(&token);
@@ -20,7 +26,10 @@ fn make_config(d: &cybermanju_web::WebDashboard, auth: &str) -> String {
     assert_eq!(status_of(&resp), 200, "create config: {resp}");
     let value: serde_json::Value = serde_json::from_str(body_of(&resp)).expect("json");
     assert_eq!(value["hasKey"], false);
-    assert!(value.get("apiKey").is_none(), "key material leaked: {value}");
+    assert!(
+        value.get("apiKey").is_none(),
+        "key material leaked: {value}"
+    );
     value["id"].as_str().expect("config id").to_string()
 }
 
@@ -32,7 +41,11 @@ fn agent_routes_are_auth_gated() {
         ("GET", "/api/agent/configs", ""),
         ("GET", "/api/agent/sessions", ""),
         ("GET", "/api/agent/jobs", ""),
-        ("POST", "/api/agent/prompt", r#"{"configId":"x","prompt":"hi"}"#),
+        (
+            "POST",
+            "/api/agent/prompt",
+            r#"{"configId":"x","prompt":"hi"}"#,
+        ),
         ("POST", "/api/os/exec", r#"{"line":"ai ask hi"}"#),
     ] {
         let resp = call(&d, method, path, body, None);
@@ -66,13 +79,22 @@ fn config_keys_never_serialize_back() {
     );
     assert_eq!(status_of(&resp), 200, "{resp}");
 
-    for path in [format!("/api/agent/configs/{id}"), "/api/agent/configs".to_string()] {
+    for path in [
+        format!("/api/agent/configs/{id}"),
+        "/api/agent/configs".to_string(),
+    ] {
         let resp = call(&d, "GET", &path, "", Some(&auth));
         assert_eq!(status_of(&resp), 200, "{resp}");
         let body = body_of(&resp);
         assert!(!body.contains("sk-test-secret"), "key leaked in {path}");
     }
-    let resp = call(&d, "GET", &format!("/api/agent/configs/{id}"), "", Some(&auth));
+    let resp = call(
+        &d,
+        "GET",
+        &format!("/api/agent/configs/{id}"),
+        "",
+        Some(&auth),
+    );
     let value: serde_json::Value = serde_json::from_str(body_of(&resp)).expect("json");
     assert_eq!(value["hasKey"], true);
 
@@ -156,7 +178,11 @@ fn prompt_validates_before_spawning() {
     for (method, path, body) in [
         ("GET", "/api/agent/jobs/nope", ""),
         ("POST", "/api/agent/jobs/nope/abort", ""),
-        ("POST", "/api/agent/jobs/nope/approve", r#"{"approved":true}"#),
+        (
+            "POST",
+            "/api/agent/jobs/nope/approve",
+            r#"{"approved":true}"#,
+        ),
     ] {
         let resp = call(&d, method, path, body, Some(&auth));
         assert_eq!(status_of(&resp), 404, "{method} {path}: {resp}");
@@ -199,7 +225,13 @@ fn sessions_crud_and_import_rekey() {
     let imported: serde_json::Value = serde_json::from_str(body_of(&resp)).expect("json");
     assert_ne!(imported["id"].as_str(), Some(sid.as_str()));
 
-    let resp = call(&d, "DELETE", &format!("/api/agent/sessions/{sid}"), "", Some(&auth));
+    let resp = call(
+        &d,
+        "DELETE",
+        &format!("/api/agent/sessions/{sid}"),
+        "",
+        Some(&auth),
+    );
     assert_eq!(status_of(&resp), 200, "{resp}");
 }
 
@@ -207,12 +239,21 @@ fn sessions_crud_and_import_rekey() {
 fn cybsh_ai_without_configs_answers_honestly() {
     let (_dir, d, auth) = authed();
     // No configs exist: the intercept answers ok:false, HTTP stays 200.
-    let resp = call(&d, "POST", "/api/os/exec", r#"{"line":"ai ask hello"}"#, Some(&auth));
+    let resp = call(
+        &d,
+        "POST",
+        "/api/os/exec",
+        r#"{"line":"ai ask hello"}"#,
+        Some(&auth),
+    );
     assert_eq!(status_of(&resp), 200, "{resp}");
     let body: serde_json::Value = serde_json::from_str(body_of(&resp)).expect("json");
     assert_eq!(body["ok"], false);
     assert!(
-        body["output"].as_str().unwrap_or_default().contains("no agent configs"),
+        body["output"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("no agent configs"),
         "{body}"
     );
 }
@@ -233,7 +274,12 @@ fn code_parse_still_serves_alongside_agent_routes() {
 #[test]
 fn mcp_management_is_admin_gated_and_validated() {
     let (_dir, d) = mk_dashboard(3456);
-    let admin = bearer(&mint(&d, "admin", now_secs() + 3_600, "jti-agent-mcp-admin"));
+    let admin = bearer(&mint(
+        &d,
+        "admin",
+        now_secs() + 3_600,
+        "jti-agent-mcp-admin",
+    ));
     let member = bearer(&mint(&d, "user", now_secs() + 3_600, "jti-agent-mcp-user"));
 
     // Any authenticated user may create a config; seed one as member.
@@ -243,8 +289,7 @@ fn mcp_management_is_admin_gated_and_validated() {
         "autoApprove":false,"maxTurns":5}}"#;
     let resp = call(&d, "POST", "/api/agent/configs", body, Some(&member));
     assert_eq!(status_of(&resp), 200, "{resp}");
-    let id: String = serde_json::from_str::<serde_json::Value>(body_of(&resp))
-        .expect("json")["id"]
+    let id: String = serde_json::from_str::<serde_json::Value>(body_of(&resp)).expect("json")["id"]
         .as_str()
         .expect("id")
         .to_string();
@@ -266,10 +311,7 @@ fn mcp_management_is_admin_gated_and_validated() {
     assert_eq!(status_of(&resp), 403, "{resp}");
 
     // Unknown transport → 400 even for admins.
-    let resp = attach(
-        &admin,
-        r#"{"name":"fs","server":{"transport":"ssh"}}"#,
-    );
+    let resp = attach(&admin, r#"{"name":"fs","server":{"transport":"ssh"}}"#);
     assert_eq!(status_of(&resp), 400, "{resp}");
 
     // Slash in the name → 400 (names become tool ids).
@@ -308,7 +350,13 @@ fn mcp_management_is_admin_gated_and_validated() {
     assert_eq!(status_of(&resp), 403, "{resp}");
 
     // Tools discovery on unknown config → 404.
-    let resp = call(&d, "GET", "/api/agent/configs/nope/mcp/tools", "", Some(&admin));
+    let resp = call(
+        &d,
+        "GET",
+        "/api/agent/configs/nope/mcp/tools",
+        "",
+        Some(&admin),
+    );
     assert_eq!(status_of(&resp), 404, "{resp}");
 }
 
@@ -338,7 +386,8 @@ fn compact_validates_before_any_network() {
         Some(&auth),
     );
     assert_eq!(status_of(&resp), 200, "{resp}");
-    let sid: String = serde_json::from_str::<serde_json::Value>(body_of(&resp)).expect("json")["id"]
+    let sid: String = serde_json::from_str::<serde_json::Value>(body_of(&resp)).expect("json")
+        ["id"]
         .as_str()
         .expect("sid")
         .to_string();
@@ -372,7 +421,12 @@ fn init_validates_config_without_spawning() {
 fn mcp_dead_servers_fail_loudly_not_silently() {
     let (_dir, d) = mk_dashboard(3456);
     let admin = bearer(&mint(&d, "admin", now_secs() + 3_600, "jti-agent-mcp-live"));
-    let member = bearer(&mint(&d, "user", now_secs() + 3_600, "jti-agent-mcp-live-user"));
+    let member = bearer(&mint(
+        &d,
+        "user",
+        now_secs() + 3_600,
+        "jti-agent-mcp-live-user",
+    ));
 
     let body = r#"{"config":{
         "id":"","name":"MCP2","providerId":"ollama","model":"llama3.1:8b",

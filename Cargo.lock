@@ -1245,6 +1245,7 @@ dependencies = [
  "base64 0.22.1",
  "blake3",
  "chrono",
+ "cybermanju-agent",
  "cybermanju-compression",
  "cybermanju-crypto",
  "cybermanju-db",

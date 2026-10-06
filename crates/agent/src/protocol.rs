@@ -5,9 +5,7 @@
 // `fetch` in drive-wasm, the dashboard proxy later). Errors carry the house
 // machine prefixes (`auth:`, `rate_limited:`, `network:`, `integrity:`).
 
-use cybermanju_types::agent::{
-    AuthScheme, ChatMessage, ProviderPreset, TokenUsage, ToolCall,
-};
+use cybermanju_types::agent::{AuthScheme, ChatMessage, ProviderPreset, TokenUsage, ToolCall};
 
 // ─── tool schemas (one set, every transport) ──────────────────────────────
 
@@ -20,7 +18,12 @@ pub const TOOL_NAMES: &[&str] = &[
     "read", "write", "edit", "list", "grep", "glob", "bash", "task",
 ];
 
-fn tool_def(name: &str, description: &str, properties: serde_json::Value, required: &[&str]) -> serde_json::Value {
+fn tool_def(
+    name: &str,
+    description: &str,
+    properties: serde_json::Value,
+    required: &[&str],
+) -> serde_json::Value {
     serde_json::json!({
         "name": name,
         "description": description,
@@ -112,9 +115,7 @@ pub fn tool_definitions() -> Vec<serde_json::Value> {
 pub fn openai_tools() -> serde_json::Value {
     tool_definitions()
         .into_iter()
-        .map(|d| {
-            serde_json::json!({ "type": "function", "function": d })
-        })
+        .map(|d| serde_json::json!({ "type": "function", "function": d }))
         .collect()
 }
 
@@ -141,10 +142,13 @@ pub fn as_openai_tool(def: &serde_json::Value) -> serde_json::Value {
         .get("description")
         .cloned()
         .unwrap_or(serde_json::Value::Null);
-    let parameters = def.get("input_schema").cloned().unwrap_or(serde_json::json!({
-        "type": "object",
-        "properties": {},
-    }));
+    let parameters = def
+        .get("input_schema")
+        .cloned()
+        .unwrap_or(serde_json::json!({
+            "type": "object",
+            "properties": {},
+        }));
     serde_json::json!({
         "type": "function",
         "function": { "name": name, "description": description, "parameters": parameters },
@@ -164,7 +168,10 @@ pub fn auth_headers(preset: &ProviderPreset, api_key: &str) -> Vec<(String, Stri
             }
         }
         AuthScheme::Header => {
-            let name = preset.auth_name.clone().unwrap_or_else(|| "x-api-key".into());
+            let name = preset
+                .auth_name
+                .clone()
+                .unwrap_or_else(|| "x-api-key".into());
             headers.push((name, api_key.to_string()));
         }
         AuthScheme::Query | AuthScheme::None => {}
@@ -244,10 +251,7 @@ pub fn openai_parse(body: &serde_json::Value) -> Result<ParsedTurn, String> {
             .get("message")
             .and_then(|m| m.as_str())
             .unwrap_or("unknown provider error");
-        let code = err
-            .get("code")
-            .and_then(|c| c.as_str())
-            .unwrap_or_default();
+        let code = err.get("code").and_then(|c| c.as_str()).unwrap_or_default();
         return Err(classify_provider_error(None, msg, code));
     }
     let choice = body
@@ -339,7 +343,11 @@ pub fn anthropic_request(
             }
             "system" => continue,
             role => {
-                let api_role = if role == "assistant" { "assistant" } else { "user" };
+                let api_role = if role == "assistant" {
+                    "assistant"
+                } else {
+                    "user"
+                };
                 wire.push(serde_json::json!({ "role": api_role, "content": m.content }));
             }
         }
@@ -430,8 +438,16 @@ pub fn anthropic_parse(body: &serde_json::Value) -> Result<ParsedTurn, String> {
 /// `network:`. Used by every transport so the UI hints stay uniform.
 pub fn classify_provider_error(status: Option<u16>, message: &str, code: &str) -> String {
     let haystack = format!("{message} {code}").to_lowercase();
-    let authy = ["invalid api key", "incorrect api key", "unauthorized", "authentication",
-        "invalid_api_key", "authentication_error", "permission_denied", "account_deactivated"];
+    let authy = [
+        "invalid api key",
+        "incorrect api key",
+        "unauthorized",
+        "authentication",
+        "invalid_api_key",
+        "authentication_error",
+        "permission_denied",
+        "account_deactivated",
+    ];
     if status == Some(401) || status == Some(403) || authy.iter().any(|s| haystack.contains(s)) {
         return format!("auth: provider rejected credentials: {message}");
     }
@@ -511,7 +527,11 @@ pub fn get_json(url: &str, headers: &[(String, String)]) -> Result<serde_json::V
         .json()
         .map_err(|e| format!("network: unreadable provider reply: {e}"))?;
     if !(200..300).contains(&status) {
-        return Err(classify_provider_error(Some(status), "models request failed", ""));
+        return Err(classify_provider_error(
+            Some(status),
+            "models request failed",
+            "",
+        ));
     }
     Ok(value)
 }
@@ -534,7 +554,9 @@ pub fn post_raw(
     for (name, value) in headers {
         req = req.header(name.as_str(), value.as_str());
     }
-    let resp = req.send().map_err(|e| format!("network: request failed: {e}"))?;
+    let resp = req
+        .send()
+        .map_err(|e| format!("network: request failed: {e}"))?;
     let status = resp.status().as_u16();
     let mut out_headers = Vec::new();
     for (name, value) in resp.headers().iter() {
@@ -631,7 +653,9 @@ mod tests {
         assert_eq!(turn.usage.output_tokens, 3);
 
         let err = serde_json::json!({ "error": { "type": "overloaded_error", "message": "busy" } });
-        assert!(anthropic_parse(&err).expect_err("limited").starts_with("rate_limited:"));
+        assert!(anthropic_parse(&err)
+            .expect_err("limited")
+            .starts_with("rate_limited:"));
     }
 
     #[test]
@@ -651,6 +675,9 @@ mod tests {
         };
         let headers = auth_headers(&preset, "k");
         assert!(headers.iter().any(|(n, v)| n == "x-api-key" && v == "k"));
-        assert_eq!(with_query_key("https://h.test/v", "key", "k"), "https://h.test/v?key=k");
+        assert_eq!(
+            with_query_key("https://h.test/v", "key", "k"),
+            "https://h.test/v?key=k"
+        );
     }
 }

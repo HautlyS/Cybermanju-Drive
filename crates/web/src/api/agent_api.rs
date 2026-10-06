@@ -14,7 +14,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
-use cybermanju_agent::{agent_loop, config as agent_config, edit as agent_edit, protocol, providers};
+use cybermanju_agent::{
+    agent_loop, config as agent_config, edit as agent_edit, protocol, providers,
+};
 use cybermanju_db::Database;
 use cybermanju_types::agent::{
     AgentConfig, AgentKind, AgentSession, ChatMessage, LlmDialect, McpServerConfig, TokenUsage,
@@ -106,8 +108,7 @@ pub fn list_configs(db: &Database) -> Result<Vec<AgentConfig>, String> {
     let mut out = Vec::new();
     for entry in table.iter().map_err(|e| e.to_string())? {
         let (_, value) = entry.map_err(|e| e.to_string())?;
-        let config: AgentConfig =
-            serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
+        let config: AgentConfig = serde_json::from_str(value.value()).map_err(|e| e.to_string())?;
         out.push(with_has_key(db, config)?);
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
@@ -235,12 +236,13 @@ pub fn save_key(db: &Database, config_id: &str, api_key: &str) -> Result<bool, S
 pub fn list_models(db: &Database, config_id: &str) -> Result<Vec<String>, String> {
     let config = get_config(db, config_id)?;
     let endpoint = providers::resolve(&config)?;
-    let models_url = providers::models_url(&endpoint.base_url, endpoint.dialect).ok_or_else(|| {
-        format!(
-            "unsupported: provider '{}' has no models endpoint — enter the model id manually",
-            config.provider_id
-        )
-    })?;
+    let models_url =
+        providers::models_url(&endpoint.base_url, endpoint.dialect).ok_or_else(|| {
+            format!(
+                "unsupported: provider '{}' has no models endpoint — enter the model id manually",
+                config.provider_id
+            )
+        })?;
     let key = load_key(db, config_id)?;
     let headers = endpoint_headers(&endpoint, &key);
     let body = protocol::get_json(&models_url, &headers)?;
@@ -429,7 +431,10 @@ fn set_state(job: &AgentJob, f: impl FnOnce(&mut JobState)) {
 /// Headers for a chat call from a resolved endpoint. Mirrors
 /// `protocol::auth_headers` without needing a catalog preset (custom
 /// providers have none).
-fn endpoint_headers(endpoint: &providers::ResolvedEndpoint, api_key: &str) -> Vec<(String, String)> {
+fn endpoint_headers(
+    endpoint: &providers::ResolvedEndpoint,
+    api_key: &str,
+) -> Vec<(String, String)> {
     use cybermanju_types::agent::AuthScheme;
     let mut headers = endpoint.extra_headers.clone();
     match endpoint.auth {
@@ -506,8 +511,8 @@ fn volume_root() -> PathBuf {
 
 fn tool_read(root: &Path, vol: &Path, path: &str) -> Result<String, String> {
     let full = join_contained(root, vol, path)?;
-    let bytes = std::fs::read(&full)
-        .map_err(|_| format!("not_found: '{}' does not exist", path.trim()))?;
+    let bytes =
+        std::fs::read(&full).map_err(|_| format!("not_found: '{}' does not exist", path.trim()))?;
     if bytes.len() > MAX_TOOL_BYTES {
         return Err(format!(
             "too_large: '{}' is {} bytes, tool limit is {}",
@@ -546,14 +551,24 @@ fn tool_list(root: &Path, vol: &Path, path: &str) -> Result<String, String> {
         names.push(format!("{name}{suffix}"));
     }
     names.sort();
-    let mut out = names.into_iter().take(MAX_LIST_ENTRIES).collect::<Vec<_>>().join("\n");
+    let mut out = names
+        .into_iter()
+        .take(MAX_LIST_ENTRIES)
+        .collect::<Vec<_>>()
+        .join("\n");
     if out.is_empty() {
         out.push_str("(empty directory)");
     }
     Ok(out)
 }
 
-fn tool_grep(root: &Path, vol: &Path, pattern: &str, sub: &str, limit: usize) -> Result<String, String> {
+fn tool_grep(
+    root: &Path,
+    vol: &Path,
+    pattern: &str,
+    sub: &str,
+    limit: usize,
+) -> Result<String, String> {
     if pattern.is_empty() {
         return Err("invalid: pattern is required".to_string());
     }
@@ -565,7 +580,15 @@ fn tool_grep(root: &Path, vol: &Path, pattern: &str, sub: &str, limit: usize) ->
     } else {
         join_contained(root, vol, sub)?
     };
-    const SKIP_DIRS: &[&str] = &[".git", "node_modules", "target", "dist", "build", ".hg", ".svn"];
+    const SKIP_DIRS: &[&str] = &[
+        ".git",
+        "node_modules",
+        "target",
+        "dist",
+        "build",
+        ".hg",
+        ".svn",
+    ];
     let limit = limit.clamp(1, MAX_GREP_MATCHES);
     let mut matches = Vec::new();
     let mut files_seen = 0usize;
@@ -616,7 +639,11 @@ fn tool_grep(root: &Path, vol: &Path, pattern: &str, sub: &str, limit: usize) ->
         }
     }
     if matches.is_empty() {
-        let mode = if matcher.is_regex() { "regex" } else { "literal (pattern is not valid regex)" };
+        let mode = if matcher.is_regex() {
+            "regex"
+        } else {
+            "literal (pattern is not valid regex)"
+        };
         return Ok(format!("no matches for `{pattern}` ({mode})"));
     }
     Ok(matches.join("\n"))
@@ -624,7 +651,13 @@ fn tool_grep(root: &Path, vol: &Path, pattern: &str, sub: &str, limit: usize) ->
 
 /// Glob files without walking whole trees: `*` stays in one segment, `**`
 /// crosses separators. Results are volume-relative paths, capped.
-fn tool_glob(root: &Path, vol: &Path, pattern: &str, sub: &str, limit: usize) -> Result<String, String> {
+fn tool_glob(
+    root: &Path,
+    vol: &Path,
+    pattern: &str,
+    sub: &str,
+    limit: usize,
+) -> Result<String, String> {
     const MAX_GLOB_PATHS: usize = 200;
     const MAX_GLOB_FILES: usize = 2000;
     let base = if sub.trim().is_empty() {
@@ -634,7 +667,15 @@ fn tool_glob(root: &Path, vol: &Path, pattern: &str, sub: &str, limit: usize) ->
     };
     let pattern = pattern.trim();
     let pattern = if pattern.is_empty() { "**" } else { pattern };
-    const SKIP_DIRS: &[&str] = &[".git", "node_modules", "target", "dist", "build", ".hg", ".svn"];
+    const SKIP_DIRS: &[&str] = &[
+        ".git",
+        "node_modules",
+        "target",
+        "dist",
+        "build",
+        ".hg",
+        ".svn",
+    ];
     let limit = limit.clamp(1, MAX_GLOB_PATHS);
     let mut hits = Vec::new();
     let mut files_seen = 0usize;
@@ -788,18 +829,22 @@ fn tool_bash(root: &Path, command: &str, timeout_secs: u64) -> Result<String, St
         out.truncate(TOOL_OUTPUT_CAP);
         out.push_str("\n… truncated at 64 KiB");
     }
-    let code = status.code().map(|c| c.to_string()).unwrap_or_else(|| "signal".into());
+    let code = status
+        .code()
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| "signal".into());
     Ok(format!("exit {code}\n{out}"))
 }
 
 /// Dispatch one approved tool call to native execution.
-fn exec_tool(
-    db: &Database,
-    root: &Path,
-    vol: &Path,
-    call: &ToolCall,
-) -> Result<String, String> {
-    let get = |key: &str| call.input.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
+fn exec_tool(db: &Database, root: &Path, vol: &Path, call: &ToolCall) -> Result<String, String> {
+    let get = |key: &str| {
+        call.input
+            .get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
     match call.name.as_str() {
         "read" => tool_read(root, vol, &get("path")),
         "list" => tool_list(root, vol, &get("path")),
@@ -817,14 +862,35 @@ fn exec_tool(
                 .get("limit")
                 .and_then(|v| v.as_u64())
                 .unwrap_or(200) as usize;
-            let pattern = call.input.get("pattern").and_then(|v| v.as_str()).unwrap_or("**");
+            let pattern = call
+                .input
+                .get("pattern")
+                .and_then(|v| v.as_str())
+                .unwrap_or("**");
             tool_glob(root, vol, pattern, &get("path"), limit)
         }
-        "write" => tool_write(db, root, vol, &get("path"), call.input.get("content").and_then(|v| v.as_str()).unwrap_or("")),
+        "write" => tool_write(
+            db,
+            root,
+            vol,
+            &get("path"),
+            call.input
+                .get("content")
+                .and_then(|v| v.as_str())
+                .unwrap_or(""),
+        ),
         "edit" => {
             let path = get("path");
-            let old_block = call.input.get("old_block").and_then(|v| v.as_str()).unwrap_or("");
-            let new_block = call.input.get("new_block").and_then(|v| v.as_str()).unwrap_or("");
+            let old_block = call
+                .input
+                .get("old_block")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let new_block = call
+                .input
+                .get("new_block")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let expected = call.input.get("expected_hash").and_then(|v| v.as_str());
             let current = tool_read(root, vol, &path)?;
             let updated = agent_edit::apply_edit(&current, old_block, new_block, expected)?;
@@ -909,7 +975,6 @@ fn load_project_rules(root: &Path) -> String {
 /// `mcp__<server>__<tool>` so permission rules match it like any tool.
 /// Servers that fail to connect fail the run loudly — a silently missing
 /// tool would be worse than no run at all.
-
 use cybermanju_agent::mcp as mcp_proto;
 
 /// One live MCP connection for the duration of a run.
@@ -1006,12 +1071,14 @@ fn mcp_connect_stdio(
         .stderr(Stdio::null())
         .spawn()
         .map_err(|e| format!("network: cannot spawn MCP server '{name}' ({command}): {e}"))?;
-    let stdin = child.stdin.take().ok_or_else(|| {
-        format!("network: MCP server '{name}' gave no stdin pipe")
-    })?;
-    let stdout = child.stdout.take().ok_or_else(|| {
-        format!("network: MCP server '{name}' gave no stdout pipe")
-    })?;
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| format!("network: MCP server '{name}' gave no stdin pipe"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| format!("network: MCP server '{name}' gave no stdout pipe"))?;
     let lines: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));
     let feed = Arc::clone(&lines);
     std::thread::Builder::new()
@@ -1041,7 +1108,12 @@ fn mcp_connect_stdio(
         http_session: Mutex::new(None),
     };
     // Handshake: initialize → notifications/initialized → tools/list.
-    let init = mcp_request(&conn, "initialize", mcp_proto::initialize_params("cybermanju"), 15)?;
+    let init = mcp_request(
+        &conn,
+        "initialize",
+        mcp_proto::initialize_params("cybermanju"),
+        15,
+    )?;
     let server_version = init
         .get("protocolVersion")
         .and_then(|v| v.as_str())
@@ -1065,19 +1137,23 @@ fn mcp_request(
     };
     let line = mcp_proto::request(id, method, params).to_string() + "\n";
     {
-        let stdin = conn.stdin.as_ref().ok_or_else(|| {
-            "network: MCP stdio pipe is gone".to_string()
-        })?;
+        let stdin = conn
+            .stdin
+            .as_ref()
+            .ok_or_else(|| "network: MCP stdio pipe is gone".to_string())?;
         let mut stdin = stdin.lock().unwrap_or_else(|p| p.into_inner());
         use std::io::Write as _;
         stdin
             .write_all(line.as_bytes())
             .map_err(|e| format!("network: MCP write failed: {e}"))?;
-        stdin.flush().map_err(|e| format!("network: MCP flush failed: {e}"))?;
+        stdin
+            .flush()
+            .map_err(|e| format!("network: MCP flush failed: {e}"))?;
     }
-    let lines = conn.lines.as_ref().ok_or_else(|| {
-        "network: MCP stdio reader is gone".to_string()
-    })?;
+    let lines = conn
+        .lines
+        .as_ref()
+        .ok_or_else(|| "network: MCP stdio reader is gone".to_string())?;
     let deadline = Instant::now() + Duration::from_secs(timeout_secs);
     loop {
         if let Ok(mut queue) = lines.lock() {
@@ -1094,28 +1170,29 @@ fn mcp_request(
             }
         }
         if Instant::now() >= deadline {
-            return Err(format!("network: MCP '{method}' timed out after {timeout_secs}s"));
+            return Err(format!(
+                "network: MCP '{method}' timed out after {timeout_secs}s"
+            ));
         }
         std::thread::sleep(Duration::from_millis(50));
     }
 }
 
 /// Fire-and-forget notification (never waits for a reply).
-fn mcp_notify(
-    conn: &McpConnection,
-    method: &str,
-    params: serde_json::Value,
-) -> Result<(), String> {
+fn mcp_notify(conn: &McpConnection, method: &str, params: serde_json::Value) -> Result<(), String> {
     use std::io::Write;
     let line = mcp_proto::notification(method, params).to_string() + "\n";
-    let stdin = conn.stdin.as_ref().ok_or_else(|| {
-        "network: MCP stdio pipe is gone".to_string()
-    })?;
+    let stdin = conn
+        .stdin
+        .as_ref()
+        .ok_or_else(|| "network: MCP stdio pipe is gone".to_string())?;
     let mut stdin = stdin.lock().unwrap_or_else(|p| p.into_inner());
     stdin
         .write_all(line.as_bytes())
         .map_err(|e| format!("network: MCP notify failed: {e}"))?;
-    stdin.flush().map_err(|e| format!("network: MCP flush failed: {e}"))?;
+    stdin
+        .flush()
+        .map_err(|e| format!("network: MCP flush failed: {e}"))?;
     Ok(())
 }
 
@@ -1135,7 +1212,12 @@ fn mcp_connect_http(
         http_headers: cfg.headers.clone(),
         http_session: Mutex::new(None),
     };
-    let init = mcp_http_roundtrip(&conn, "initialize", mcp_proto::initialize_params("cybermanju"), 15)?;
+    let init = mcp_http_roundtrip(
+        &conn,
+        "initialize",
+        mcp_proto::initialize_params("cybermanju"),
+        15,
+    )?;
     let server_version = init
         .get("protocolVersion")
         .and_then(|v| v.as_str())
@@ -1161,7 +1243,10 @@ fn mcp_http_roundtrip(
     };
     let mut headers = conn.http_headers.clone();
     headers.push(("Content-Type".into(), "application/json".into()));
-    headers.push(("Accept".into(), "application/json, text/event-stream".into()));
+    headers.push((
+        "Accept".into(),
+        "application/json, text/event-stream".into(),
+    ));
     if let Ok(session) = conn.http_session.lock() {
         if let Some(session) = session.as_ref() {
             headers.push(("Mcp-Session-Id".into(), session.clone()));
@@ -1242,9 +1327,15 @@ fn reconnect_mcp(
 }
 
 fn mcp_call_error_is_breach(message: &str) -> bool {
-    ["pipe is gone", "write failed", "flush failed", "timed out", "reader is gone"]
-        .iter()
-        .any(|s| message.contains(s))
+    [
+        "pipe is gone",
+        "write failed",
+        "flush failed",
+        "timed out",
+        "reader is gone",
+    ]
+    .iter()
+    .any(|s| message.contains(s))
 }
 fn mcp_call(
     set: &McpSet,
@@ -1383,10 +1474,7 @@ given, if any. Keep it under 100 lines.";
 
 /// Start a repository-init run: a normal detached job with the canned
 /// `INIT_PROMPT` in a fresh session. The agent writes AGENTS.md itself.
-pub fn start_init_job(
-    db: &Arc<RwLock<Database>>,
-    config_id: &str,
-) -> Result<JobSnapshot, String> {
+pub fn start_init_job(db: &Arc<RwLock<Database>>, config_id: &str) -> Result<JobSnapshot, String> {
     start_job(db, config_id, None, INIT_PROMPT.to_string())
 }
 
@@ -1441,7 +1529,8 @@ pub fn approve_job(
         let job = registry
             .get(job_id)
             .ok_or_else(|| format!("Agent job not found: {}", job_id))?;
-        let tool = job.state
+        let tool = job
+            .state
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .pending
@@ -1451,10 +1540,7 @@ pub fn approve_job(
     };
     {
         let mut pending = approvals().lock().unwrap_or_else(|p| p.into_inner());
-        pending.insert(
-            job_id.to_string(),
-            ApprovalAnswer { approved, answer },
-        );
+        pending.insert(job_id.to_string(), ApprovalAnswer { approved, answer });
     }
     if approved && remember {
         if let Some(tool) = tool {
@@ -1466,10 +1552,7 @@ pub fn approve_job(
                         let config_id = job.config_id.clone();
                         drop(registry);
                         if let Ok(mut config) = get_config(&guard, &config_id) {
-                            cybermanju_agent::config::remember_allow(
-                                &mut config.permission,
-                                &tool,
-                            );
+                            cybermanju_agent::config::remember_allow(&mut config.permission, &tool);
                             drop(guard);
                             if let Ok(guard) = db.read() {
                                 if let Err(e) = save_config(&guard, config) {
@@ -1534,11 +1617,7 @@ fn post_with_retry(
 
 /// Merge discovered MCP tools into a built request body (both dialects keep
 /// their envelope shape; the canonical defs are Anthropic-shaped).
-fn merge_mcp_tools(
-    body: &mut serde_json::Value,
-    dialect: LlmDialect,
-    defs: &[serde_json::Value],
-) {
+fn merge_mcp_tools(body: &mut serde_json::Value, dialect: LlmDialect, defs: &[serde_json::Value]) {
     if defs.is_empty() {
         return;
     }
@@ -1559,7 +1638,11 @@ fn merge_mcp_tools(
 /// honest, portable choice). Repeated turns then stop re-paying the full
 /// system + tool-schema prefix.
 fn anthropic_cache(body: &mut serde_json::Value) {
-    if let Some(text) = body.get("system").and_then(|s| s.as_str()).map(str::to_string) {
+    if let Some(text) = body
+        .get("system")
+        .and_then(|s| s.as_str())
+        .map(str::to_string)
+    {
         body["system"] = serde_json::json!([{
             "type": "text",
             "text": text,
@@ -1582,7 +1665,11 @@ fn anthropic_cache(body: &mut serde_json::Value) {
 fn repo_overview(root: &Path) -> String {
     match tool_list(root, root, "") {
         Ok(listing) => {
-            let entries: Vec<String> = listing.lines().take(OVERVIEW_CAP).map(str::to_string).collect();
+            let entries: Vec<String> = listing
+                .lines()
+                .take(OVERVIEW_CAP)
+                .map(str::to_string)
+                .collect();
             agent_loop::repo_overview_snippet(&entries, OVERVIEW_CAP)
         }
         Err(_) => "(working root is not readable)".to_string(),
@@ -1633,7 +1720,10 @@ fn run_agent_job(
     if !root.exists() {
         fail(
             job,
-            format!("not_found: working root '{}' does not exist", root.display()),
+            format!(
+                "not_found: working root '{}' does not exist",
+                root.display()
+            ),
         );
         return;
     }
@@ -1647,8 +1737,7 @@ fn run_agent_job(
         tool_input: None,
     });
     persist_turn(db, &session);
-    let mut turn =
-        agent_loop::AgentTurn::new(session.messages.clone(), config.max_turns, 0);
+    let mut turn = agent_loop::AgentTurn::new(session.messages.clone(), config.max_turns, 0);
     let kind = match config.agent_kind {
         AgentKind::Build => "build",
         AgentKind::Plan => "plan",
@@ -1705,8 +1794,14 @@ fn run_agent_job(
             });
             break;
         }
-        let (mut url, headers, mut body) =
-            turn.build_request(&endpoint.base_url, endpoint.dialect, &model, &system, headers.clone(), true);
+        let (mut url, headers, mut body) = turn.build_request(
+            &endpoint.base_url,
+            endpoint.dialect,
+            &model,
+            &system,
+            headers.clone(),
+            true,
+        );
         merge_mcp_tools(&mut body, endpoint.dialect, &mcp_defs);
         if endpoint.dialect == LlmDialect::Anthropic {
             anthropic_cache(&mut body);
@@ -1797,9 +1892,12 @@ fn run_agent_job(
                         stop = true;
                         break;
                     }
-                    let input_json =
-                        serde_json::to_string(&call.input).unwrap_or_default();
-                    if last_sig.as_ref().map(|sig| sig.0 == call.name && sig.1 == input_json).unwrap_or(false) {
+                    let input_json = serde_json::to_string(&call.input).unwrap_or_default();
+                    if last_sig
+                        .as_ref()
+                        .map(|sig| sig.0 == call.name && sig.1 == input_json)
+                        .unwrap_or(false)
+                    {
                         repeats += 1;
                     } else {
                         last_sig = Some((call.name.clone(), input_json));
@@ -1868,11 +1966,18 @@ fn run_one_tool(
         return run_subagent(db, job, config, root, vol, turn, call);
     }
 
-    let decision = agent_config::decide(&config.permission, config.agent_kind, &call.name, &call.input);
+    let decision = agent_config::decide(
+        &config.permission,
+        config.agent_kind,
+        &call.name,
+        &call.input,
+    );
     match decision {
         agent_config::PermissionDecision::Allow => {}
         agent_config::PermissionDecision::Deny { reason } => {
-            return ToolOutcome::Continue(format!("{reason} — adjust the permission ruleset to allow it"));
+            return ToolOutcome::Continue(format!(
+                "{reason} — adjust the permission ruleset to allow it"
+            ));
         }
         agent_config::PermissionDecision::Ask { summary } => {
             if config.auto_approve {
@@ -2009,7 +2114,9 @@ fn run_subagent(
     }
     let decision = agent_config::decide(&config.permission, config.agent_kind, "task", &call.input);
     if matches!(decision, agent_config::PermissionDecision::Deny { .. }) {
-        return ToolOutcome::Continue("deny: `task` is denied by the permission ruleset".to_string());
+        return ToolOutcome::Continue(
+            "deny: `task` is denied by the permission ruleset".to_string(),
+        );
     }
     if !config.auto_approve {
         // Subagents spawn workers — always ask first unless auto mode.
@@ -2060,7 +2167,11 @@ fn run_subagent(
         Ok(endpoint) => endpoint,
         Err(e) => return ToolOutcome::Continue(format!("error: {e}")),
     };
-    let api_key = match db.read().ok().and_then(|guard| load_key(&guard, &config.id).ok()) {
+    let api_key = match db
+        .read()
+        .ok()
+        .and_then(|guard| load_key(&guard, &config.id).ok())
+    {
         Some(key) => key,
         None => return ToolOutcome::Continue("error: database unavailable".to_string()),
     };
@@ -2097,8 +2208,14 @@ fn run_subagent(
         if job.cancel.load(Ordering::SeqCst) {
             return ToolOutcome::Continue("subagent cancelled with the parent run".to_string());
         }
-        let (mut url, headers, mut body) =
-            sub.build_request(&endpoint.base_url, endpoint.dialect, &model, &system, headers.clone(), true);
+        let (mut url, headers, mut body) = sub.build_request(
+            &endpoint.base_url,
+            endpoint.dialect,
+            &model,
+            &system,
+            headers.clone(),
+            true,
+        );
         if endpoint.auth == cybermanju_types::agent::AuthScheme::Query {
             let name = endpoint.auth_name.as_deref().unwrap_or("key");
             url = protocol::with_query_key(&url, name, &api_key);
@@ -2153,7 +2270,10 @@ fn run_subagent(
                             let guard = match db.read() {
                                 Ok(guard) => guard,
                                 Err(e) => {
-                                    sub.append_tool_result(call, format!("error: database unavailable: {e}"));
+                                    sub.append_tool_result(
+                                        call,
+                                        format!("error: database unavailable: {e}"),
+                                    );
                                     continue;
                                 }
                             };
@@ -2248,7 +2368,8 @@ pub fn try_ai_exec(
                         None => {
                             return Some(ai_err(
                                 line,
-                                "no agent configs — create one in the Agent panel first".to_string(),
+                                "no agent configs — create one in the Agent panel first"
+                                    .to_string(),
                                 origin,
                             ))
                         }
@@ -2270,9 +2391,9 @@ pub fn try_ai_exec(
         cybermanju_os::shell::AiCommand::Status { job_id } => {
             let snapshot = match job_id {
                 Some(id) => job_status(&id).ok(),
-                None => list_jobs().into_iter().find(|j| {
-                    j.status == "running" || j.status == "waiting_approval"
-                }),
+                None => list_jobs()
+                    .into_iter()
+                    .find(|j| j.status == "running" || j.status == "waiting_approval"),
             };
             match snapshot {
                 Some(job) => Some(ai_ok(
@@ -2298,25 +2419,38 @@ pub fn try_ai_exec(
         cybermanju_os::shell::AiCommand::Abort { job_id } => {
             let id = match job_id {
                 Some(id) => id,
-                None => match list_jobs().into_iter().find(|j| {
-                    j.status == "running" || j.status == "waiting_approval"
-                }) {
+                None => match list_jobs()
+                    .into_iter()
+                    .find(|j| j.status == "running" || j.status == "waiting_approval")
+                {
                     Some(job) => job.job_id,
-                    None => return Some(ai_ok(line, "no running agent job to abort".to_string(), origin)),
+                    None => {
+                        return Some(ai_ok(
+                            line,
+                            "no running agent job to abort".to_string(),
+                            origin,
+                        ))
+                    }
                 },
             };
             match abort_job(&id) {
                 Ok(true) => Some(ai_ok(line, format!("agent job {id} aborted"), origin)),
-                Ok(false) => Some(ai_ok(line, format!("agent job {id} already finished"), origin)),
+                Ok(false) => Some(ai_ok(
+                    line,
+                    format!("agent job {id} already finished"),
+                    origin,
+                )),
                 Err(message) => Some(ai_err(line, message, origin)),
             }
         }
         cybermanju_os::shell::AiCommand::Sessions => {
             let guard = shared.read().ok()?;
             match list_sessions(&guard) {
-                Ok(sessions) if sessions.is_empty() => {
-                    Some(ai_ok(line, "no agent sessions yet — `ai ask \"…\"` starts one".to_string(), origin))
-                }
+                Ok(sessions) if sessions.is_empty() => Some(ai_ok(
+                    line,
+                    "no agent sessions yet — `ai ask \"…\"` starts one".to_string(),
+                    origin,
+                )),
                 Ok(sessions) => {
                     let mut out = format!("{} session(s):\n", sessions.len());
                     for session in sessions.iter().take(20) {
@@ -2345,7 +2479,8 @@ pub fn try_ai_exec(
                         None => {
                             return Some(ai_err(
                                 line,
-                                "no agent configs — create one in the Agent panel first".to_string(),
+                                "no agent configs — create one in the Agent panel first"
+                                    .to_string(),
                                 origin,
                             ))
                         }
@@ -2446,10 +2581,17 @@ pub fn compact_session(
         1,
         0,
     );
-    let system = "You compress session transcripts into actionable handoffs. Output the summary only.";
+    let system =
+        "You compress session transcripts into actionable handoffs. Output the summary only.";
     let headers = endpoint_headers(&endpoint, &key);
-    let (mut url, headers, mut body) =
-        turn.build_request(&endpoint.base_url, endpoint.dialect, &config.model, system, headers, false);
+    let (mut url, headers, mut body) = turn.build_request(
+        &endpoint.base_url,
+        endpoint.dialect,
+        &config.model,
+        system,
+        headers,
+        false,
+    );
     if endpoint.dialect == LlmDialect::Anthropic {
         anthropic_cache(&mut body);
     }
@@ -2462,7 +2604,9 @@ pub fn compact_session(
     match turn.ingest_reply(endpoint.dialect, &reply)? {
         agent_loop::LoopEvent::TextDone => {}
         other => {
-            return Err(format!("integrity: compaction turn ended unexpectedly: {other:?}"));
+            return Err(format!(
+                "integrity: compaction turn ended unexpectedly: {other:?}"
+            ));
         }
     }
     let summary = turn
@@ -2478,7 +2622,10 @@ pub fn compact_session(
     let now = chrono::Utc::now().to_rfc3339();
     let compacted = AgentSession {
         id: uuid::Uuid::new_v4().to_string(),
-        title: format!("{} (compacted)", session.title.chars().take(48).collect::<String>()),
+        title: format!(
+            "{} (compacted)",
+            session.title.chars().take(48).collect::<String>()
+        ),
         config_id: session.config_id.clone(),
         provider_id: session.provider_id.clone(),
         model: session.model.clone(),
@@ -2549,8 +2696,8 @@ pub fn mcp_tools_for(config: &AgentConfig) -> Result<Vec<McpToolView>, String> {
         if !server.enabled {
             continue;
         }
-        let (_conn, tools) = mcp_connect(name, server)
-            .map_err(|e| format!("MCP server '{name}' failed: {e}"))?;
+        let (_conn, tools) =
+            mcp_connect(name, server).map_err(|e| format!("MCP server '{name}' failed: {e}"))?;
         for tool in tools {
             out.push(McpToolView {
                 server: name.clone(),

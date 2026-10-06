@@ -93,10 +93,13 @@ pub fn parse_tools_list(result: &serde_json::Value) -> Vec<McpToolDef> {
                 .chars()
                 .take(2000)
                 .collect(),
-            input_schema: tool.get("inputSchema").cloned().unwrap_or(serde_json::json!({
-                "type": "object",
-                "properties": {},
-            })),
+            input_schema: tool
+                .get("inputSchema")
+                .cloned()
+                .unwrap_or(serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                })),
         });
         if out.len() >= 128 {
             break;
@@ -128,7 +131,10 @@ pub fn render_call_result(result: &serde_json::Value) -> String {
                     }
                     text.push_str(&format!(
                         "[{} content omitted — describe it in text instead]",
-                        block.get("type").and_then(|t| t.as_str()).unwrap_or("media")
+                        block
+                            .get("type")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("media")
                     ));
                 }
                 _ => {
@@ -152,7 +158,10 @@ pub fn render_call_result(result: &serde_json::Value) -> String {
         text.truncate(CAP);
         text.push_str("\n… truncated at 32 KiB");
     }
-    let is_error = result.get("isError").and_then(|v| v.as_bool()).unwrap_or(false);
+    let is_error = result
+        .get("isError")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     if is_error {
         format!("error: MCP tool reported failure:\n{text}")
     } else {
@@ -269,7 +278,9 @@ mod tests {
         let err = serde_json::json!({ "error": { "code": -32601, "message": "nope" } });
         assert!(unwrap_response(&err).expect_err("err").contains("-32601"));
         let ok = serde_json::json!({ "result": { "tools": [] } });
-        assert!(unwrap_response(&ok).expect("ok")["tools"].as_array().is_some());
+        assert!(unwrap_response(&ok).expect("ok")["tools"]
+            .as_array()
+            .is_some());
         assert!(unwrap_response(&serde_json::json!({})).is_err());
     }
 }

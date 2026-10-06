@@ -180,7 +180,11 @@ pub fn extract_symbols_heuristic(content: &str, language: &str) -> Vec<Value> {
                         .find_map(|kw| trimmed.strip_prefix(kw).map(|_| (*kw, 2usize)))
                 });
             if let Some((kw, name_ix)) = spec {
-                let kind = if kw.starts_with("trait") { "interface" } else { "class" };
+                let kind = if kw.starts_with("trait") {
+                    "interface"
+                } else {
+                    "class"
+                };
                 let name = trimmed
                     .split_whitespace()
                     .nth(name_ix)

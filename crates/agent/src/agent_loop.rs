@@ -13,7 +13,6 @@
 
 use cybermanju_types::agent::{ChatMessage, LlmDialect, TokenUsage, ToolCall};
 
-
 /// Nobody nests deeper than one subagent level.
 pub const MAX_TASK_DEPTH: u32 = 1;
 
@@ -219,7 +218,12 @@ pub fn system_prompt(
 
 /// Format a capped directory listing for the system prompt.
 pub fn repo_overview_snippet(entries: &[String], cap: usize) -> String {
-    let mut out = entries.iter().take(cap).cloned().collect::<Vec<_>>().join("\n");
+    let mut out = entries
+        .iter()
+        .take(cap)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\n");
     if entries.len() > cap {
         out.push_str(&format!("\n… {} more entries", entries.len() - cap));
     }
@@ -263,7 +267,8 @@ mod tests {
             "usage": { "prompt_tokens": 5, "completion_tokens": 2 },
         });
         assert_eq!(
-            turn.ingest_reply(LlmDialect::OpenAi, &reply).expect("ingest"),
+            turn.ingest_reply(LlmDialect::OpenAi, &reply)
+                .expect("ingest"),
             LoopEvent::TextDone
         );
         assert_eq!(turn.turns_used, 1);
@@ -275,9 +280,11 @@ mod tests {
                 "message": { "content": "again" } }],
             "usage": { "prompt_tokens": 1, "completion_tokens": 1 },
         });
-        turn.ingest_reply(LlmDialect::OpenAi, &reply2).expect("ingest");
+        turn.ingest_reply(LlmDialect::OpenAi, &reply2)
+            .expect("ingest");
         assert_eq!(
-            turn.ingest_reply(LlmDialect::OpenAi, &reply2).expect("limit"),
+            turn.ingest_reply(LlmDialect::OpenAi, &reply2)
+                .expect("limit"),
             LoopEvent::LimitReached
         );
     }

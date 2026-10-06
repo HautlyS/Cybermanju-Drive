@@ -1428,9 +1428,10 @@ fn route_request(
         // ─── AI agent: providers, configs (keyless rows), sessions ──
         // Secrets never serialize: keys live in `sync_secrets` as
         // `agent:key:<config_id>`; rows report `hasKey` only.
-        ["api", "agent", "providers"] if method == "GET" => {
-            api_response(Ok::<_, String>(cybermanju_agent::providers::all_presets()), origin)
-        }
+        ["api", "agent", "providers"] if method == "GET" => api_response(
+            Ok::<_, String>(cybermanju_agent::providers::all_presets()),
+            origin,
+        ),
         ["api", "agent", "configs"] if method == "GET" => {
             api_response(api::agent_api::list_configs(db), origin)
         }
@@ -1470,7 +1471,10 @@ fn route_request(
                 server: cybermanju_types::agent::McpServerConfig,
             }
             let req: McpAddBody = json_body!(body, origin);
-            api_response(api::agent_api::mcp_add(db, id, req.name, req.server), origin)
+            api_response(
+                api::agent_api::mcp_add(db, id, req.name, req.server),
+                origin,
+            )
         }
         ["api", "agent", "configs", id, "mcp", name] if method == "DELETE" => {
             api_response(api::agent_api::mcp_remove(db, id, name), origin)

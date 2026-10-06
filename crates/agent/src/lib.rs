@@ -12,9 +12,9 @@
 //! tool-schema set (OpenAI function format — the shape wllama and most
 //! gateways accept).
 
+pub mod agent_loop;
 pub mod config;
 pub mod edit;
-pub mod agent_loop;
 pub mod mcp;
 pub mod protocol;
 pub mod providers;

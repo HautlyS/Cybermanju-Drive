@@ -22,9 +22,13 @@ pub fn remember_allow(rules: &mut PermissionRuleset, tool: &str) {
 pub enum PermissionDecision {
     Allow,
     /// Pause the job and ask the user (carries a human summary).
-    Ask { summary: String },
+    Ask {
+        summary: String,
+    },
     /// Refuse with an `unsupported:`-style machine prefix.
-    Deny { reason: String },
+    Deny {
+        reason: String,
+    },
 }
 
 /// `*` = any run, `?` = exactly one char, everything else literal.
@@ -78,7 +82,11 @@ pub fn match_glob(pattern: &str, path: &str) -> bool {
         }
         match_wildcard(px[0], ix[0]) && go(&px[1..], &ix[1..])
     }
-    let pattern = if pattern.trim().is_empty() { "**" } else { pattern };
+    let pattern = if pattern.trim().is_empty() {
+        "**"
+    } else {
+        pattern
+    };
     let (psegs, isegs) = (segments(pattern), segments(path));
     let psegs: Vec<&str> = psegs.iter().map(String::as_str).collect();
     let isegs: Vec<&str> = isegs.iter().map(String::as_str).collect();
@@ -235,7 +243,10 @@ mod tests {
         // tool prefix must not be required.
         assert!(match_wildcard("git *", "git status"));
         assert!(!match_wildcard("git *", "bash git status"));
-        assert_eq!(salient_arg(&serde_json::json!({ "command": "git status" })), "git status");
+        assert_eq!(
+            salient_arg(&serde_json::json!({ "command": "git status" })),
+            "git status"
+        );
         assert_eq!(salient_arg(&serde_json::json!({})), "");
     }
 

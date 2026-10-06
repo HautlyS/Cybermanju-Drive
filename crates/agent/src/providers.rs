@@ -164,7 +164,10 @@ pub struct ResolvedEndpoint {
 /// Merge a config with the catalog into a callable endpoint.
 pub fn resolve(config: &cybermanju_types::agent::AgentConfig) -> Result<ResolvedEndpoint, String> {
     if config.provider_id == "custom" {
-        let base_url = config.base_url_override.clone().filter(|s| !s.trim().is_empty())
+        let base_url = config
+            .base_url_override
+            .clone()
+            .filter(|s| !s.trim().is_empty())
             .ok_or_else(|| "invalid: custom provider needs base_url_override".to_string())?;
         return Ok(ResolvedEndpoint {
             base_url,
