@@ -5,7 +5,7 @@ edition = "2021"
 description = "Storage sync backends (local, GitHub, GitLab, Google Drive, Google Photos, Telegram)"
 
 [dependencies]
-base64 = "0.22"
+base64 = "0.23"
 chrono = { version = "0.4", features = ["serde"] }
 cybermanju-compression = { path = "../compression" }
 cybermanju-db = { path = "../db" }

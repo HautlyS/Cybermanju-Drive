@@ -6,7 +6,7 @@ description = "redb database layer with parent index"
 
 [dependencies]
 anyhow = "1"
-base64 = "0.22"
+base64 = "0.23"
 chrono = { version = "0.4", features = ["serde"] }
 cybermanju-types = { path = "../types" }
 rand_core = { version = "0.6", features = ["getrandom"] }
