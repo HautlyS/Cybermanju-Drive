@@ -97,7 +97,12 @@ impl CanalConfig {
     /// Mount root + a listing prefix, normalised to one slash and no
     /// leading/trailing slashes (or `""` for the root itself).
     pub fn full_prefix(&self, relative: &str) -> String {
-        let base = self.base_path.as_deref().unwrap_or("").trim().trim_matches('/');
+        let base = self
+            .base_path
+            .as_deref()
+            .unwrap_or("")
+            .trim()
+            .trim_matches('/');
         let rel = relative.trim().trim_matches('/');
         match (base.is_empty(), rel.is_empty()) {
             (true, true) => String::new(),
@@ -466,13 +471,14 @@ async fn fetch_raw(url: &str, headers: &[(&str, &str)]) -> Result<(u16, Vec<u8>)
     }
     // `window()` is `None` inside `db-worker` — a Dedicated Worker has no
     // window, only a WorkerGlobalScope, and both expose `fetch`.
+    // web-sys binds WorkerGlobalScope from JsValue, not js_sys::Object.
     let promise = match web_sys::window() {
         Some(window) => window.fetch_with_request(&request),
         None => {
-            let scope: web_sys::WorkerGlobalScope =
-                js_sys::global().try_into().map_err(|_| {
-                    "unsupported: this realm has no fetch() global (not a browser)".to_string()
-                })?;
+            let global: JsValue = js_sys::global().into();
+            let scope: web_sys::WorkerGlobalScope = global.try_into().map_err(|_| {
+                "unsupported: this realm has no fetch() global (not a browser)".to_string()
+            })?;
             scope.fetch_with_request(&request)
         }
     };

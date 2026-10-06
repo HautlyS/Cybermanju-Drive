@@ -23,6 +23,8 @@ COPY vite-plugin-wasm-stub.ts ./
 COPY public/ ./public/
 COPY keymaps/ ./keymaps/
 COPY src/ ./src/
+# prebuild:wasm:frontend runs `npm run icons` → scripts/generate-icon-set.mjs
+COPY scripts/ ./scripts/
 
 # DOCKER_BUILD=true tells vite.config.wasm.ts to use base: "/" instead of
 # the GitHub Pages prefix "/cybermanju-drive/". The docker image serves the

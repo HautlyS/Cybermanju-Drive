@@ -83,8 +83,7 @@ const AGENT_SESSIONS_TABLE: TableDefinition<'static, &'static str, &'static str>
 // any other session state the browser build keeps inside `.cybermanju`.
 // Keys are namespaced by convention (`secret:`, `config:`, `content:`,
 // `volume:`), values are raw UTF-8 strings.
-const KV_TABLE: TableDefinition<'static, &'static str, &'static str> =
-    TableDefinition::new("kv");
+const KV_TABLE: TableDefinition<'static, &'static str, &'static str> = TableDefinition::new("kv");
 
 /// Rows kept in `sync_runs` — enough for a UI history page, few enough that
 /// the prune scan stays trivial.

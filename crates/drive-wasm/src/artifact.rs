@@ -131,7 +131,9 @@ fn decrypt_with_key(key: &[u8], nonce: &[u8], ciphertext: &[u8]) -> Result<Vec<u
         return Err("integrity: bad nonce length".to_string());
     }
     let cipher = cipher(key)?;
-    cipher.decrypt(Nonce::from_slice(nonce), ciphertext).map_err(|_| DECRYPT_ERROR.to_string())
+    cipher
+        .decrypt(Nonce::from_slice(nonce), ciphertext)
+        .map_err(|_| DECRYPT_ERROR.to_string())
 }
 
 fn cipher(key: &[u8]) -> Result<ChaCha20Poly1305, String> {
@@ -164,7 +166,9 @@ fn brotli_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
     use std::io::Write;
 
     let mut decompressor = brotli::DecompressorWriter::new(Vec::new(), 4096);
-    decompressor.write_all(data).map_err(|e| format!("integrity: brotli rejected ({e})"))?;
+    decompressor
+        .write_all(data)
+        .map_err(|e| format!("integrity: brotli rejected ({e})"))?;
     // `into_inner` hands back the partial output on `Err` — an incomplete
     // stream is exactly how "this was not brotli" shows up.
     decompressor
@@ -178,7 +182,9 @@ fn zstd_decompress(data: &[u8]) -> Result<Vec<u8>, String> {
     let mut decoder = ruzstd::decoding::StreamingDecoder::new(std::io::Cursor::new(data))
         .map_err(|_| "integrity: not a valid zstd frame".to_string())?;
     let mut out = Vec::new();
-    decoder.read_to_end(&mut out).map_err(|_| "integrity: zstd frame truncated")?;
+    decoder
+        .read_to_end(&mut out)
+        .map_err(|_| "integrity: zstd frame truncated")?;
     Ok(out)
 }
 
@@ -277,7 +283,9 @@ mod tests {
 
     #[test]
     fn triple_chain_round_trips() {
-        let payload: Vec<u8> = (0u8..60).map(|i| i.wrapping_mul(7).wrapping_add(3)).collect();
+        let payload: Vec<u8> = (0u8..60)
+            .map(|i| i.wrapping_mul(7).wrapping_add(3))
+            .collect();
         let lz4 = lz4_flex::compress_prepend_size(&payload);
         let framed = zstd_raw_frame(&lz4);
         let wrapped = brotli_compress(&framed);
