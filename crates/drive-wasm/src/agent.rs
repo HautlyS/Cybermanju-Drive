@@ -18,6 +18,7 @@ use web_sys::{Request, RequestInit, Response};
 
 /// Provider presets as JSON (endpoints, families, default models, dialects).
 /// No key material — presets never held any.
+#[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn agent_catalog() -> String {
     serde_json::to_string(&cybermanju_agent::providers::all_presets())
@@ -86,9 +87,9 @@ async fn agent_prompt_inner(req_json: &str) -> Result<String, String> {
     let body_str =
         serde_json::to_string(&body).map_err(|e| format!("invalid: cannot encode body: {e}"))?;
 
-    let mut opts = RequestInit::new();
-    opts.method("POST");
-    opts.body(Some(&JsValue::from_str(&body_str)));
+    let opts = RequestInit::new();
+    opts.set_method("POST");
+    opts.set_body(&JsValue::from_str(&body_str));
     let request = Request::new_with_str_and_init(&req.url, &opts)
         .map_err(|_| "invalid: malformed provider url".to_string())?;
     for (name, value) in &req.headers {
@@ -153,7 +154,8 @@ mod tests {
 
     #[test]
     fn catalog_serializes_ten_presets() {
-        let json = agent_catalog();
+        let json = serde_json::to_string(&cybermanju_agent::providers::all_presets())
+            .unwrap_or_else(|_| "[]".to_string());
         let presets: Vec<serde_json::Value> = serde_json::from_str(&json).expect("json");
         assert_eq!(presets.len(), 10);
         assert!(presets.iter().any(|p| p["id"] == "ollama"));

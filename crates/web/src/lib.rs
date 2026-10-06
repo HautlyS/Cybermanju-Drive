@@ -632,7 +632,9 @@ fn api_response<T: Serialize>(result: Result<T, String>, origin: Option<&str>) -
     match result {
         Ok(value) => json_ok(&value, origin),
         Err(message) => {
-            let status = if message.to_lowercase().contains("not found") {
+            let status = if message.to_lowercase().contains("not found")
+                || message.starts_with("not_found:")
+            {
                 404
             } else {
                 400
@@ -872,6 +874,7 @@ fn route_request(
     match path_segments.as_slice() {
         ["api", "agent", "prompt"] if method == "POST" => {
             #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
             struct PromptBody {
                 #[serde(default)]
                 config_id: String,
@@ -907,17 +910,38 @@ fn route_request(
                 approved: bool,
                 #[serde(default)]
                 answer: Option<String>,
+                #[serde(default)]
+                remember: bool,
             }
             let req: ApproveBody = json_body!(body, origin);
             return api_response(
-                api::agent_api::approve_job(job_id, req.approved, req.answer),
+                api::agent_api::approve_job(db, job_id, req.approved, req.answer, req.remember),
                 origin,
             );
+        }
+        ["api", "agent", "init"] if method == "POST" => {
+            // Lockless like prompt: spawns a worker with its own locks.
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct InitBody {
+                config_id: String,
+            }
+            let req: InitBody = json_body!(body, origin);
+            return match api::agent_api::start_init_job(db, &req.config_id) {
+                Ok(job) => http_response(
+                    202,
+                    "application/json",
+                    &serde_json::to_string(&job).unwrap_or_else(|_| "{}".to_string()),
+                    origin,
+                ),
+                Err(e) => api_response::<()>(Err(e), origin),
+            };
         }
         ["api", "agent", "sessions", session_id, "compact"] if method == "POST" => {
             // Lockless: compaction is a full provider round trip — it must
             // never hold the request lock. Reads/writes inside are brief.
             #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
             struct CompactBody {
                 config_id: String,
             }
@@ -1426,6 +1450,7 @@ fn route_request(
         }
         ["api", "agent", "configs", id, "key"] if method == "PUT" => {
             #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
             struct KeyBody {
                 #[serde(default)]
                 api_key: String,
@@ -1455,6 +1480,7 @@ fn route_request(
         }
         ["api", "agent", "sessions"] if method == "POST" => {
             #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
             struct NewSessionBody {
                 config_id: String,
                 #[serde(default)]

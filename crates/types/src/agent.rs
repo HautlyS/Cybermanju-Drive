@@ -150,14 +150,15 @@ pub struct AgentConfig {
     #[serde(default)]
     pub mcp_servers: std::collections::BTreeMap<String, McpServerConfig>,
     /// Attached MCP servers by name (validated on save, connected per run).
-    #[serde(default)]
-    pub mcp_servers: std::collections::BTreeMap<String, McpServerConfig>,
     #[serde(default = "default_max_turns")]
     pub max_turns: u32,
     /// A key is stored server-side (never echoed back).
     #[serde(default)]
     pub has_key: bool,
+    /// Server-assigned; clients may omit them on create/update.
+    #[serde(default)]
     pub created_at: String,
+    #[serde(default)]
     pub updated_at: String,
 }
 

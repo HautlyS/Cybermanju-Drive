@@ -27,7 +27,28 @@ pub fn apply_edit(
     }
     let hits = current.matches(old_block).count();
     if hits == 0 {
-        return Err("not_found: old_block does not occur in the file — re-read and retry".to_string());
+        // Second chance: whitespace-normalized match (tabs vs spaces, trailing
+        // whitespace). Still requires exactly one candidate, and the
+        // replacement keeps the model's own whitespace — only *locating* is
+        // fuzzy, never the written bytes.
+        match fuzzy_locate(current, old_block) {
+            Ok(Some(unique)) => {
+                let mut out = current.to_string();
+                out.replace_range(unique, new_block);
+                return Ok(out);
+            }
+            Ok(None) => {
+                return Err(
+                    "not_found: old_block does not occur in the file — re-read and retry"
+                        .to_string(),
+                )
+            }
+            Err(count) => {
+                return Err(format!(
+                    "conflict: old_block occurs {count} times (whitespace-normalized) — resend a larger, unique block"
+                ));
+            }
+        }
     }
     if hits > 1 {
         return Err(format!(
@@ -35,6 +56,69 @@ pub fn apply_edit(
         ));
     }
     Ok(current.replacen(old_block, new_block, 1))
+}
+
+/// Locate `needle` in `haystack` ignoring runs of whitespace (and
+/// indentation width). `Ok(Some(range))` on a unique match, `Ok(None)` when
+/// absent, `Err(count)` when it matches more than once (ambiguity must be
+/// reported, never silently resolved).
+fn fuzzy_locate(
+    haystack: &str,
+    needle: &str,
+) -> Result<Option<std::ops::Range<usize>>, usize> {
+    /// Collapse whitespace runs to one space; `map[i]` is the original byte
+    /// offset where normalized byte `i` came from (so every mapped span lands
+    /// on char boundaries by construction).
+    fn squash(text: &str) -> (String, Vec<usize>) {
+        let mut out = String::new();
+        let mut map = Vec::new();
+        let mut in_gap = false;
+        for (byte, ch) in text.char_indices() {
+            if ch.is_whitespace() {
+                if !in_gap {
+                    out.push(' ');
+                    map.push(byte);
+                    in_gap = true;
+                }
+                continue;
+            }
+            in_gap = false;
+            let before = out.len();
+            out.push(ch);
+            map.extend(std::iter::repeat(byte).take(out.len() - before));
+        }
+        (out, map)
+    }
+    let (hay, map) = squash(haystack);
+    let (ndl, _) = squash(needle);
+    if ndl.trim().is_empty() {
+        return Ok(None);
+    }
+    let mut occurrences: Vec<usize> = Vec::new();
+    let mut from = 0;
+    while let Some(at) = hay[from..].find(&ndl) {
+        occurrences.push(from + at);
+        from += at + ndl.len();
+        if from >= hay.len() {
+            break;
+        }
+    }
+    if occurrences.len() > 1 {
+        return Err(occurrences.len());
+    }
+    let first = match occurrences.first() {
+        Some(first) => *first,
+        None => return Ok(None),
+    };
+    let start = map[first];
+    let end = map
+        .get(first + ndl.len())
+        .copied()
+        .unwrap_or(haystack.len());
+    if start >= end {
+        return Ok(None);
+    }
+    Ok(Some(start..end))
 }
 
 /// BLAKE3 hex of bytes (the anchor primitive).
@@ -65,6 +149,31 @@ mod tests {
         assert!(apply_edit("", "", "y", None)
             .expect_err("empty")
             .starts_with("invalid:"));
+    }
+
+    #[test]
+    fn whitespace_differences_fall_back_to_fuzzy_match() {
+        // Model retyped with spaces what the file holds as a tab.
+        let out = apply_edit("fn a() {\n\treturn 1;\n}\n", "fn a() {\n  return 1;\n}", "fn a() {\n  return 2;\n}", None)
+            .expect("fuzzy");
+        assert!(out.contains("return 2;"), "{out}");
+        assert!(!out.contains("\treturn"), "{out}");
+
+        // Trailing whitespace is ignored while locating.
+        let out = apply_edit("x = 1;  \n", "x = 1;", "x = 2;", None).expect("trailing");
+        assert!(out.contains("x = 2;"), "{out}");
+
+        // …but ambiguity is still refused, fuzzy or not.
+        assert!(apply_edit("a  b\na\tb\n", "a b", "c", None)
+            .expect_err("ambiguous")
+            .starts_with("conflict:"));
+    }
+
+    #[test]
+    fn fuzzy_match_is_byte_exact_on_unicode() {
+        let content = "héllo wörld\n";
+        let out = apply_edit(content, "héllo   wörld", "héllo Rust", None).expect("unicode");
+        assert_eq!(out, "héllo Rust\n");
     }
 
     #[test]

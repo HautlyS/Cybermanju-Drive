@@ -15,7 +15,7 @@ pub fn tool_name(server: &str, tool: &str) -> String {
 pub fn split_tool_name(name: &str) -> Option<(&str, &str)> {
     let rest = name.strip_prefix("mcp__")?;
     let (server, tool) = rest.split_once("__")?;
-    if server.is_empty() || tool.is_empty() || server.contains("__") {
+    if server.is_empty() || tool.is_empty() || server.contains("__") || tool.contains("__") {
         return None;
     }
     Some((server, tool))

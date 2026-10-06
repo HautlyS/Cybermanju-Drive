@@ -169,31 +169,37 @@ pub fn extract_symbols_heuristic(content: &str, language: &str) -> Vec<Value> {
             }
         }
 
-        // Rust-specific: pub trait, pub struct, pub enum
-        if language == "rust"
-            && (trimmed.starts_with("pub trait ") || trimmed.starts_with("trait "))
-        {
-            let name = trimmed
-                .split_whitespace()
-                .nth(if trimmed.starts_with("pub trait ") {
-                    2
-                } else {
-                    1
-                })
-                .and_then(|n| n.split('<').next())
-                .unwrap_or("anonymous")
-                .split('{')
-                .next()
-                .unwrap_or("anonymous")
-                .trim();
-            symbols.push(json!({
-                "name": name,
-                "kind": "interface",
-                "start_line": line_num,
-                "end_line": line_num,
-                "detail": trimmed,
-                "children": [],
-            }));
+        // Rust-specific: trait / struct / enum, with or without `pub`
+        if language == "rust" {
+            let spec = ["trait ", "struct ", "enum "]
+                .iter()
+                .find_map(|kw| trimmed.strip_prefix(kw).map(|_| (*kw, 1usize)))
+                .or_else(|| {
+                    ["pub trait ", "pub struct ", "pub enum "]
+                        .iter()
+                        .find_map(|kw| trimmed.strip_prefix(kw).map(|_| (*kw, 2usize)))
+                });
+            if let Some((kw, name_ix)) = spec {
+                let kind = if kw.starts_with("trait") { "interface" } else { "class" };
+                let name = trimmed
+                    .split_whitespace()
+                    .nth(name_ix)
+                    .unwrap_or("anonymous")
+                    .split(['<', '{', ';'])
+                    .next()
+                    .unwrap_or("anonymous")
+                    .trim();
+                let name = if name.is_empty() { "anonymous" } else { name };
+                symbols.push(json!({
+                    "name": name,
+                    "kind": kind,
+                    "start_line": line_num,
+                    "end_line": line_num,
+                    "detail": trimmed,
+                    "children": [],
+                }));
+                continue;
+            }
         }
     }
 

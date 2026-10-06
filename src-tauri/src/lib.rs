@@ -219,6 +219,7 @@ pub fn run() {
             commands::agent::list_agent_jobs,
             commands::agent::abort_agent_job,
             commands::agent::approve_agent_job,
+            commands::agent::init_agent_run,
             commands::agent::compact_agent_session,
             commands::agent::mcp_add_server,
             commands::agent::mcp_remove_server,

@@ -842,7 +842,14 @@ const REST_ROUTES: Record<string, RestMapping> = {
   approve_agent_job: {
     method: 'POST',
     buildPath: (args) => `/api/agent/jobs/${args.jobId}/approve`,
-    transformRequest: (args) => ({ approved: args.approved, answer: args.answer }),
+    transformRequest: (args) => ({ approved: args.approved, answer: args.answer, remember: args.remember ?? false }),
+  },
+
+  init_agent_run: {
+    method: 'POST',
+    buildPath: () => '/api/agent/init',
+    transformRequest: (args) => ({ configId: args.configId }),
+    transformResponse: (raw) => transformResponseKeys(raw),
   },
 
   compact_agent_session: {
@@ -1001,7 +1008,7 @@ const REST_FIRST = new Set([
   'list_agent_sessions', 'get_agent_session', 'create_agent_session',
   'delete_agent_session', 'import_agent_session', 'start_agent_run',
   'agent_job_status', 'list_agent_jobs', 'abort_agent_job',
-  'approve_agent_job', 'compact_agent_session',
+  'approve_agent_job', 'init_agent_run', 'compact_agent_session',
   'mcp_add_server', 'mcp_remove_server', 'mcp_list_tools',
 ])
 

@@ -18,6 +18,7 @@ pub mod agent_loop;
 pub mod mcp;
 pub mod protocol;
 pub mod providers;
+pub mod redact;
 
 pub use config::{decide, match_wildcard, PermissionDecision};
 pub use providers::{all_presets, find_preset, resolve, ResolvedEndpoint};

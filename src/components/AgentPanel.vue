@@ -182,6 +182,9 @@
           <option v-for="c in configs" :key="c.id" :value="c.id">{{ c.name }} ({{ c.model }})</option>
         </select>
         <button class="bw-btn small" :disabled="!chatConfigId" @click="newSession">+ NEW</button>
+        <button class="bw-btn small" :disabled="!chatConfigId || jobActive" @click="initRepo" title="Analyze the repo and write AGENTS.md with a detached run">
+          INIT REPO
+        </button>
         <button class="bw-btn small" @click="importClick">IMPORT</button>
         <input ref="importEl" type="file" accept="application/json" hidden @change="importFile" />
       </div>
@@ -229,6 +232,9 @@
         </div>
         <div class="w-actions">
           <button class="bw-btn small primary" @click="answerApproval(true)">ALLOW</button>
+          <button class="bw-btn small" @click="answerApproval(true, true)" title="Allow this tool for the rest of the config (stored as an explicit rule)">
+            ALLOW ALWAYS
+          </button>
           <button class="bw-btn small danger" @click="answerApproval(false)">DENY</button>
         </div>
       </div>
@@ -464,8 +470,20 @@ function localSystemPrompt(config: AgentConfig): string {
     `You are Cybermanju, an AI coding agent running fully in the browser over a local file volume.\n` +
     `Working root: ${root}\n` +
     `Agent mode: ${config.agentKind} (plan = read-only, never edit).\n` +
-    `Rules: use the provided tools instead of guessing; prefer small verified steps; ` +
-    `never invent file contents; report errors with their machine prefix.`
+    `SANDBOX: browser file volume — read/list/grep/glob/write/edit only. There is NO bash, ` +
+    `NO subagents, NO MCP servers here; those tools answer unsupported:, so never call them.\n` +
+    `TOOLS — paths: leading / = volume root, else working-dir-relative.\n` +
+    `- read {path}: always read a file before editing it.\n` +
+    `- list {path?}: one directory level; orient at / first.\n` +
+    `- grep {pattern, path?, limit?}: regex over contents (invalid regex searches literally).\n` +
+    `- glob {pattern, path?}: find files (* stays in one segment, ** crosses).\n` +
+    `- edit {path, old_block, new_block}: replace ONE exact block; missing → not_found:, ` +
+    `ambiguous → conflict:, then re-read and send a larger block.\n` +
+    `- write {path, content}: full-file create/overwrite; prefer edit for small changes.\n` +
+    `WORKFLOW: orient (list/glob) → read → act → verify. Small verified steps; ` +
+    `never invent file contents. Denials are information — work around them, never ` +
+    `retry identically. Report errors with their machine prefix. Answer concisely; ` +
+    `lead with what changed (file:line).`
   )
 }
 
@@ -944,7 +962,7 @@ async function abortJob() {
   if (job) await store.abortAgentJob(job.jobId)
 }
 
-async function answerApproval(approved: boolean) {
+async function answerApproval(approved: boolean, remember = false) {
   if (wasmMode.value) {
     const pending = agent.pendingApproval.value
     agent.pendingApproval.value = null
@@ -954,8 +972,18 @@ async function answerApproval(approved: boolean) {
   }
   const job = activeJob.value
   if (!job) return
-  await store.approveAgentJob(job.jobId, approved, approved ? answerInput.value || undefined : undefined)
+  await store.approveAgentJob(job.jobId, approved, approved ? answerInput.value || undefined : undefined, remember)
   answerInput.value = ''
+  if (remember && approved) void store.fetchAgentConfigs()
+}
+
+async function initRepo() {
+  if (!chatConfigId.value || jobActive.value) return
+  if (wasmMode.value) {
+    store.notifyError('Repo-init needs a worker', 'use a desktop/Docker config — the browser loop cannot run detached jobs')
+    return
+  }
+  await store.initAgentRun(chatConfigId.value)
 }
 
 function roleLabel(m: { role: string; toolName?: string | null }) {

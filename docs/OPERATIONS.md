@@ -66,13 +66,23 @@ the same lock-free intercept), `ai status [job]`, `ai abort [job]`,
 (`agent:key:<config_id>`); configs/sessions are plain JSON rows. Transcripts
 sync like any file via export → striped placement.
 
+Agent tools: `read/write/edit/list/grep/glob/bash/task/question` (+
+`mcp__*`). `grep` is real regex (invalid patterns search literally);
+`glob` supports `**` across separators; permission patterns match the bare
+argument too (`git *` matches the command, tool prefix not required).
+
 Agent loop hardening (all on by default): rate-limit backoff (3 retries),
 doom-loop guard (identical tool call ×3 denied), `length`-finish truncation
 notes, abort-checked retries and post-call polling, Anthropic prompt-caching
 markers, read-only depth-1 subagents. `POST …/compact` summarizes a session
 into a fresh one (old kept for revert). MCP servers (`stdio` local commands,
 `http` Streamable) attach per config behind admin role; tools appear as
-`mcp__server__tool` under the same permission rules.
+`mcp__server__tool` under the same permission rules. Tool outputs are
+secret-redacted before entering transcripts; crashed MCP children reconnect
+once mid-run; project rules load from `AGENTS.md`, `SKILL.md`,
+`.cybermanju/rules.md` (8 KiB each, 24 KiB total); approvals can store
+"allow always" as an explicit config row; `ai init` runs repo analysis that
+writes `AGENTS.md` with the agent's own tools.
 
 ## 5. Durability: scrub / repair / gc / leases
 

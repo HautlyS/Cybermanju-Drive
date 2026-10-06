@@ -426,15 +426,6 @@ fn set_state(job: &AgentJob, f: impl FnOnce(&mut JobState)) {
     }
 }
 
-// ─── endpoints, headers, working root ────────────────────────────────────
-
-fn set_state(job: &AgentJob, f: impl FnOnce(&mut JobState)) {
-    match job.state.lock() {
-        Ok(mut state) => f(&mut state),
-        Err(poisoned) => f(&mut poisoned.into_inner()),
-    }
-}
-
 /// Headers for a chat call from a resolved endpoint. Mirrors
 /// `protocol::auth_headers` without needing a catalog preset (custom
 /// providers have none).
@@ -566,6 +557,9 @@ fn tool_grep(root: &Path, vol: &Path, pattern: &str, sub: &str, limit: usize) ->
     if pattern.is_empty() {
         return Err("invalid: pattern is required".to_string());
     }
+    // Real regex when it compiles, literal substring when it does not —
+    // an invalid regex searches literally instead of failing the tool.
+    let matcher = cybermanju_agent::config::GrepPattern::compile(pattern);
     let base = if sub.trim().is_empty() {
         root.to_path_buf()
     } else {
@@ -610,7 +604,7 @@ fn tool_grep(root: &Path, vol: &Path, pattern: &str, sub: &str, limit: usize) ->
                 Err(_) => continue,
             };
             for (i, line) in text.lines().enumerate() {
-                if line.contains(pattern) {
+                if matcher.is_match(line) {
                     let rel = path.strip_prefix(root).unwrap_or(&path).to_string_lossy();
                     let snippet: String = line.trim().chars().take(240).collect();
                     matches.push(format!("{}:{}: {}", rel, i + 1, snippet));
@@ -622,9 +616,71 @@ fn tool_grep(root: &Path, vol: &Path, pattern: &str, sub: &str, limit: usize) ->
         }
     }
     if matches.is_empty() {
-        return Ok(format!("no matches for `{pattern}`"));
+        let mode = if matcher.is_regex() { "regex" } else { "literal (pattern is not valid regex)" };
+        return Ok(format!("no matches for `{pattern}` ({mode})"));
     }
     Ok(matches.join("\n"))
+}
+
+/// Glob files without walking whole trees: `*` stays in one segment, `**`
+/// crosses separators. Results are volume-relative paths, capped.
+fn tool_glob(root: &Path, vol: &Path, pattern: &str, sub: &str, limit: usize) -> Result<String, String> {
+    const MAX_GLOB_PATHS: usize = 200;
+    const MAX_GLOB_FILES: usize = 2000;
+    let base = if sub.trim().is_empty() {
+        root.to_path_buf()
+    } else {
+        join_contained(root, vol, sub)?
+    };
+    let pattern = pattern.trim();
+    let pattern = if pattern.is_empty() { "**" } else { pattern };
+    const SKIP_DIRS: &[&str] = &[".git", "node_modules", "target", "dist", "build", ".hg", ".svn"];
+    let limit = limit.clamp(1, MAX_GLOB_PATHS);
+    let mut hits = Vec::new();
+    let mut files_seen = 0usize;
+    let mut stack = vec![base.clone()];
+    while let Some(dir) = stack.pop() {
+        if hits.len() >= limit || files_seen >= MAX_GLOB_FILES {
+            break;
+        }
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            if hits.len() >= limit || files_seen >= MAX_GLOB_FILES {
+                break;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with('.') || SKIP_DIRS.contains(&name.as_str()) {
+                continue;
+            }
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            files_seen += 1;
+            let rel = path
+                .strip_prefix(&base)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            if cybermanju_agent::config::match_glob(pattern, &rel) {
+                let display = if &base == vol {
+                    format!("/{rel}")
+                } else {
+                    rel.clone()
+                };
+                hits.push(display);
+            }
+        }
+    }
+    hits.sort();
+    if hits.is_empty() {
+        return Ok(format!("no files match `{pattern}`"));
+    }
+    Ok(hits.join("\n"))
 }
 
 fn tool_write(
@@ -755,6 +811,15 @@ fn exec_tool(
                 .unwrap_or(MAX_GREP_MATCHES as u64) as usize;
             tool_grep(root, vol, &get("pattern"), &get("path"), limit)
         }
+        "glob" => {
+            let limit = call
+                .input
+                .get("limit")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(200) as usize;
+            let pattern = call.input.get("pattern").and_then(|v| v.as_str()).unwrap_or("**");
+            tool_glob(root, vol, pattern, &get("path"), limit)
+        }
         "write" => tool_write(db, root, vol, &get("path"), call.input.get("content").and_then(|v| v.as_str()).unwrap_or("")),
         "edit" => {
             let path = get("path");
@@ -780,6 +845,60 @@ fn exec_tool(
         }
         other => Err(format!("unsupported: unknown tool '{other}'")),
     }
+}
+
+/// Strip secrets from a tool result before it enters the transcript.
+/// The transcript persists to disk and syncs across providers — a leaked
+/// key there would outlive the run. A redaction note keeps the model aware
+/// that something was hidden (otherwise it retries the failing read).
+fn clean_output(output: String) -> String {
+    let (mut redacted, count) = cybermanju_agent::redact::redact(&output);
+    if redacted.len() > TOOL_OUTPUT_CAP {
+        redacted.truncate(TOOL_OUTPUT_CAP);
+        while !redacted.is_char_boundary(redacted.len()) {
+            redacted.pop();
+        }
+        redacted.push_str("\n… truncated at 64 KiB");
+    }
+    if count == 0 {
+        return redacted;
+    }
+    format!("{redacted}\n(redacted {count} secret(s) from tool output)")
+}
+
+/// Project rules folded into every system prompt (opencode reads
+/// `AGENTS.md`; we additionally honor `SKILL.md` and
+/// `.cybermanju/rules.md`). Each file capped, total capped, missing or
+/// binary files silently skipped — rules guide, never break, a run.
+fn load_project_rules(root: &Path) -> String {
+    const PER_FILE_CAP: usize = 8192;
+    const TOTAL_CAP: usize = 24_576;
+    let mut out = String::new();
+    for name in ["AGENTS.md", "SKILL.md", ".cybermanju/rules.md"] {
+        if out.len() >= TOTAL_CAP {
+            break;
+        }
+        let bytes = match std::fs::read(root.join(name)) {
+            Ok(bytes) => bytes,
+            Err(_) => continue,
+        };
+        if bytes.len() > PER_FILE_CAP {
+            continue;
+        }
+        let text = match String::from_utf8(bytes) {
+            Ok(text) => text,
+            Err(_) => continue,
+        };
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        out.push_str(&format!("\n--- project rules ({name}) ---\n{trimmed}\n"));
+    }
+    if out.len() > TOTAL_CAP {
+        out.truncate(TOTAL_CAP);
+    }
+    out
 }
 
 // ─── MCP servers (admin-managed tools) ───────────────────────────────────
@@ -876,7 +995,7 @@ fn mcp_connect_stdio(
     name: &str,
     cfg: &McpServerConfig,
 ) -> Result<(McpConnection, Vec<cybermanju_agent::mcp::McpToolDef>), String> {
-    use std::io::{BufRead, BufReader, Write};
+    use std::io::{BufRead, BufReader};
     use std::process::{Command, Stdio};
     let command = cfg.command.clone().unwrap_or_default();
     let mut child = Command::new(&command)
@@ -933,16 +1052,12 @@ fn mcp_connect_stdio(
     Ok((conn, mcp_proto::parse_tools_list(&listed)))
 }
 
-use std::collections::VecDeque;
-
-/// One JSON-RPC round trip over a stdio connection.
 fn mcp_request(
     conn: &McpConnection,
     method: &str,
     params: serde_json::Value,
     timeout_secs: u64,
 ) -> Result<serde_json::Value, String> {
-    use std::io::Write;
     let id = {
         let mut next = conn.next_id.lock().unwrap_or_else(|p| p.into_inner());
         *next += 1;
@@ -1107,7 +1222,30 @@ fn http_post_raw(
     protocol::post_raw(url, headers, body, timeout_secs)
 }
 
-/// Call one namespaced tool on a live set.
+/// Reconnect one MCP server inside a live set after a transport breach
+/// (crashed child, severed pipe): drop the dead connection, dial fresh,
+/// and let the caller retry once. Anything else is reported, not retried.
+fn reconnect_mcp(
+    set: &mut McpSet,
+    servers: &std::collections::BTreeMap<String, McpServerConfig>,
+    full_name: &str,
+) -> Result<(), String> {
+    let (server, _) = mcp_proto::split_tool_name(full_name)
+        .ok_or_else(|| format!("unsupported: '{full_name}' is not an MCP tool"))?;
+    let cfg = servers
+        .get(server)
+        .ok_or_else(|| format!("not_found: MCP server '{server}' is not attached"))?;
+    set.conns.retain(|c| c.server != server);
+    let (conn, _) = mcp_connect(server, cfg)?;
+    set.conns.push(conn);
+    Ok(())
+}
+
+fn mcp_call_error_is_breach(message: &str) -> bool {
+    ["pipe is gone", "write failed", "flush failed", "timed out", "reader is gone"]
+        .iter()
+        .any(|s| message.contains(s))
+}
 fn mcp_call(
     set: &McpSet,
     full_name: &str,
@@ -1232,6 +1370,26 @@ pub fn start_job(
     Ok(snapshot(&job))
 }
 
+/// The `ai init` prompt: analyze the repo and write `AGENTS.md` with the
+/// agent's own tools. A convention, not a code path — the model does the
+/// work through the normal loop, so permissions, approvals and versions
+/// apply unchanged.
+pub const INIT_PROMPT: &str = "Analyze this repository: list the top-level layout, \
+identify the languages and build/test commands, and note conventions worth \
+following. Then write (or update) AGENTS.md at the working root summarizing: \
+project overview, how to build/test/lint, code style rules, and anything an \
+AI agent must know before editing. Use the project-rules section you were \
+given, if any. Keep it under 100 lines.";
+
+/// Start a repository-init run: a normal detached job with the canned
+/// `INIT_PROMPT` in a fresh session. The agent writes AGENTS.md itself.
+pub fn start_init_job(
+    db: &Arc<RwLock<Database>>,
+    config_id: &str,
+) -> Result<JobSnapshot, String> {
+    start_job(db, config_id, None, INIT_PROMPT.to_string())
+}
+
 /// Poll one job.
 pub fn job_status(job_id: &str) -> Result<JobSnapshot, String> {
     crate::security::validate_id(job_id)?;
@@ -1268,20 +1426,62 @@ pub fn abort_job(job_id: &str) -> Result<bool, String> {
 
 /// Answer a parked approval (`approved`) or question (`answer`).
 /// Returns false when nothing is waiting — the UI polls, so a stale tap
-/// must not error loudly.
-pub fn approve_job(job_id: &str, approved: bool, answer: Option<String>) -> Result<bool, String> {
+/// must not error loudly. With `remember`, an approval additionally stores
+/// "allow always" for that tool in the config (explicit row, reversible).
+pub fn approve_job(
+    db: &Arc<RwLock<Database>>,
+    job_id: &str,
+    approved: bool,
+    answer: Option<String>,
+    remember: bool,
+) -> Result<bool, String> {
     crate::security::validate_id(job_id)?;
-    {
+    let tool: Option<String> = {
         let registry = jobs().lock().unwrap_or_else(|p| p.into_inner());
-        if !registry.contains_key(job_id) {
-            return Err(format!("Agent job not found: {}", job_id));
+        let job = registry
+            .get(job_id)
+            .ok_or_else(|| format!("Agent job not found: {}", job_id))?;
+        let tool = job.state
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .pending
+            .as_ref()
+            .map(|pending| pending.tool.clone());
+        tool
+    };
+    {
+        let mut pending = approvals().lock().unwrap_or_else(|p| p.into_inner());
+        pending.insert(
+            job_id.to_string(),
+            ApprovalAnswer { approved, answer },
+        );
+    }
+    if approved && remember {
+        if let Some(tool) = tool {
+            // Best effort: the approval itself is already recorded above.
+            // A failure here must not turn an approval into an error.
+            if let Ok(guard) = db.read() {
+                if let Ok(registry) = jobs().lock() {
+                    if let Some(job) = registry.get(job_id) {
+                        let config_id = job.config_id.clone();
+                        drop(registry);
+                        if let Ok(mut config) = get_config(&guard, &config_id) {
+                            cybermanju_agent::config::remember_allow(
+                                &mut config.permission,
+                                &tool,
+                            );
+                            drop(guard);
+                            if let Ok(guard) = db.read() {
+                                if let Err(e) = save_config(&guard, config) {
+                                    log::debug!("remember-allow rule not persisted: {e}");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
-    let mut pending = approvals().lock().unwrap_or_else(|p| p.into_inner());
-    pending.insert(
-        job_id.to_string(),
-        ApprovalAnswer { approved, answer },
-    );
     Ok(true)
 }
 
@@ -1453,10 +1653,15 @@ fn run_agent_job(
         AgentKind::Build => "build",
         AgentKind::Plan => "plan",
     };
-    let system = agent_loop::system_prompt(
-        &root.to_string_lossy(),
-        kind,
-        &repo_overview(&root),
+    let system = format!(
+        "{}{}",
+        agent_loop::system_prompt(
+            &root.to_string_lossy(),
+            kind,
+            &repo_overview(&root),
+            agent_loop::Sandbox::Native
+        ),
+        load_project_rules(&root)
     );
     let headers = endpoint_headers(&endpoint, &api_key);
     let model = config.model.clone();
@@ -1490,7 +1695,7 @@ fn run_agent_job(
     if mcp_defs.len() > 256 {
         mcp_defs.truncate(256);
     }
-    let mcp_set = McpSet { conns: mcp_conns };
+    let mut mcp_set = McpSet { conns: mcp_conns };
 
     loop {
         if job.cancel.load(Ordering::SeqCst) {
@@ -1604,9 +1809,9 @@ fn run_agent_job(
                         turn.append_tool_result(call, "denied: identical tool call repeated 3 times (doom-loop guard) — vary the input or explain".to_string());
                         continue;
                     }
-                    match run_one_tool(db, job, &config, &root, &vol, &mcp_set, call) {
+                    match run_one_tool(db, job, &config, &root, &vol, &mut mcp_set, &turn, call) {
                         ToolOutcome::Continue(output) => {
-                            turn.append_tool_result(call, output);
+                            turn.append_tool_result(call, clean_output(output));
                         }
                         ToolOutcome::Stop => {
                             stop = true;
@@ -1654,7 +1859,8 @@ fn run_one_tool(
     config: &AgentConfig,
     root: &Path,
     vol: &Path,
-    mcp: &McpSet,
+    mcp: &mut McpSet,
+    turn: &agent_loop::AgentTurn,
     call: &ToolCall,
 ) -> ToolOutcome {
     // Nested subagents run a bounded inline loop — no registry, no parking.
@@ -1742,14 +1948,8 @@ fn run_one_tool(
 
     // Namespaced MCP tools run on the live per-run connection set.
     if mcp_proto::split_tool_name(&call.name).is_some() {
-        match mcp_call(mcp, &call.name, &call.input, &job.cancel) {
-            Ok(mut output) => {
-                if output.len() > TOOL_OUTPUT_CAP {
-                    output.truncate(TOOL_OUTPUT_CAP);
-                    output.push_str("\n… truncated at 64 KiB");
-                }
-                return ToolOutcome::Continue(output);
-            }
+        let output = match mcp_call(mcp, &call.name, &call.input, &job.cancel) {
+            Ok(output) => output,
             Err(e) if e == "cancelled" => {
                 set_state(job, |s| {
                     s.status = "cancelled".to_string();
@@ -1757,8 +1957,20 @@ fn run_one_tool(
                 });
                 return ToolOutcome::Stop;
             }
-            Err(e) => return ToolOutcome::Continue(format!("error: {e}")),
-        }
+            Err(e) if mcp_call_error_is_breach(&e) => {
+                // One reconnect, then one retry — a restarted server
+                // rejoins mid-run instead of failing every later call.
+                match reconnect_mcp(mcp, &config.mcp_servers, &call.name) {
+                    Ok(()) => match mcp_call(mcp, &call.name, &call.input, &job.cancel) {
+                        Ok(output) => output,
+                        Err(e) => format!("error: {e}"),
+                    },
+                    Err(_) => format!("error: {e}"),
+                }
+            }
+            Err(e) => format!("error: {e}"),
+        };
+        return ToolOutcome::Continue(clean_output(output));
     }
 
     let guard = match db.read() {
@@ -1868,10 +2080,15 @@ fn run_subagent(
         SUBAGENT_MAX_TURNS,
         turn.task_depth + 1,
     );
-    let system = agent_loop::system_prompt(
-        &root.to_string_lossy(),
-        "build",
-        &repo_overview(root),
+    let system = format!(
+        "{}{}",
+        agent_loop::system_prompt(
+            &root.to_string_lossy(),
+            "build",
+            &repo_overview(root),
+            agent_loop::Sandbox::Native
+        ),
+        load_project_rules(&root)
     );
     let headers = endpoint_headers(&endpoint, &api_key);
     let model = config.model.clone();
@@ -1941,7 +2158,7 @@ fn run_subagent(
                                 }
                             };
                             match exec_tool(&guard, root, vol, call) {
-                                Ok(output) => output,
+                                Ok(output) => clean_output(output),
                                 Err(e) => format!("error: {e}"),
                             }
                         }
@@ -2113,6 +2330,37 @@ pub fn try_ai_exec(
                     }
                     Some(ai_ok(line, out.trim_end().to_string(), origin))
                 }
+                Err(message) => Some(ai_err(line, message, origin)),
+            }
+        }
+        cybermanju_os::shell::AiCommand::Init { config_id } => {
+            let config_id = match config_id {
+                Some(id) => id,
+                None => {
+                    let guard = shared.read().ok()?;
+                    let configs = list_configs(&guard).ok()?;
+                    drop(guard);
+                    match configs.into_iter().next().map(|c| c.id) {
+                        Some(id) => id,
+                        None => {
+                            return Some(ai_err(
+                                line,
+                                "no agent configs — create one in the Agent panel first".to_string(),
+                                origin,
+                            ))
+                        }
+                    }
+                }
+            };
+            match start_init_job(shared, &config_id) {
+                Ok(job) => Some(ai_ok(
+                    line,
+                    format!(
+                        "started repo-init job {} — the agent will write AGENTS.md; poll with `ai status`",
+                        job.job_id
+                    ),
+                    origin,
+                )),
                 Err(message) => Some(ai_err(line, message, origin)),
             }
         }

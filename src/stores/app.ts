@@ -1457,12 +1457,26 @@ export const useAppStore = defineStore('cybermanju', () => {
     }
   }
 
-  async function approveAgentJob(jobId: string, approved: boolean, answer?: string) {
+  async function approveAgentJob(jobId: string, approved: boolean, answer?: string, remember?: boolean) {
     try {
-      await invoke('approve_agent_job', { jobId, approved, answer })
+      await invoke('approve_agent_job', { jobId, approved, answer, remember: remember ?? false })
       await pollAgentJob(jobId)
     } catch (e) {
       notifyError('Failed to answer approval', e)
+      return null
+    }
+  }
+
+  async function initAgentRun(configId: string) {
+    try {
+      const job = await invoke<AgentJob>('init_agent_run', { configId })
+      activeAgentJob.value = job
+      await pollAgentJob(job.jobId)
+      notifySuccess('Repo-init started — the agent will write AGENTS.md')
+      return job
+    } catch (e) {
+      notifyError('Failed to start repo-init', e)
+      return null
     }
   }
 
@@ -1616,7 +1630,7 @@ export const useAppStore = defineStore('cybermanju', () => {
     agentProviders, agentConfigs, agentSessions, agentJobs, activeAgentJob,
     fetchAgentProviders, fetchAgentConfigs, saveAgentConfig, deleteAgentConfig,
     saveAgentKey, refreshAgentModels, fetchAgentSessions, loadAgentSession, deleteAgentSession,
-    startAgentRun, pollAgentJob, abortAgentJob, approveAgentJob,
+    startAgentRun, pollAgentJob, abortAgentJob, approveAgentJob, initAgentRun,
     compactAgentSession, mcpAddServer, mcpRemoveServer, mcpListTools,
     fetchDisks, createDisk, attachDisk, detachDisk, resizeDisk, checkDisk,
     // User Management

@@ -60,8 +60,10 @@
 - **Zero new runtimes**: pure-Rust core (`crates/agent`) runs on desktop, server, and WASM — tools execute against the Kernel/volume, never a sidecar
 - **10 provider presets** (Anthropic, OpenAI, OpenRouter, Ollama, Gemini, Groq, Mistral, DeepSeek, xAI, Cerebras) + custom endpoints: per-config endpoint URL, model/family, dialect (OpenAI/Anthropic), auth scheme, sealed API keys (`hasKey` only, never echoed)
 - **Permissions** à la opencode/omp: `allow|ask|deny` + wildcards, plan-agent read-only, `deny` beats auto-approve; approvals park as 202-style jobs with UI cards
-- **Hash-anchored edits** (BLAKE3): exact-once replacement, stale-anchor `integrity:` refusal, `conflict:` on ambiguity
+- **Hash-anchored edits** (BLAKE3): exact-once replacement, whitespace-tolerant fallback, stale-anchor `integrity:` refusal, `conflict:` on ambiguity
+- **Tools with a metaprompt**: read/write/edit/list/**grep (regex)**/**glob (`**`)**/bash/task/question, each documented for the model (path conventions, read-before-edit, verify-after-act); honest per-transport sandbox notes
 - **MCP servers** per config (stdio + Streamable HTTP, admin-gated attach): tools surface as `mcp__server__tool`, same ask/deny rules; session compaction into fresh sessions (old kept)
+- **Loop hardening**: rate-limit backoff, doom-loop guard, truncation notes, secret redaction on tool outputs, project rules (`AGENTS.md`/`SKILL.md`/`.cybermanju/rules.md`), repo-init jobs, allow-always approvals
 - Detached runs (`POST /api/agent/prompt` → poll), subagents (depth-guarded, read-only), sessions persisted + export/import, `cybsh ai` terminal surface, offline-capable Pages loop via local models gateways
 
 ### Multi-User Access Control

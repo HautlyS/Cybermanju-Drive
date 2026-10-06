@@ -6,7 +6,7 @@
 // machine prefixes (`auth:`, `rate_limited:`, `network:`, `integrity:`).
 
 use cybermanju_types::agent::{
-    AuthScheme, ChatMessage, LlmDialect, ProviderPreset, TokenUsage, ToolCall,
+    AuthScheme, ChatMessage, ProviderPreset, TokenUsage, ToolCall,
 };
 
 // ─── tool schemas (one set, every transport) ──────────────────────────────
@@ -14,8 +14,10 @@ use cybermanju_types::agent::{
 /// The agent's tool surface. Native executes these against the Kernel and
 /// the volume; WASM executes the file subset against its volume map
 /// (`bash`/`task` answer `unsupported:` there — no fake success).
+/// Descriptions double as the model's usage guide — keep them imperative
+/// and specific about arguments, limits, and failure modes.
 pub const TOOL_NAMES: &[&str] = &[
-    "read", "write", "edit", "list", "grep", "bash", "task",
+    "read", "write", "edit", "list", "grep", "glob", "bash", "task",
 ];
 
 fn tool_def(name: &str, description: &str, properties: serde_json::Value, required: &[&str]) -> serde_json::Value {
@@ -35,58 +37,68 @@ pub fn tool_definitions() -> Vec<serde_json::Value> {
     vec![
         tool_def(
             "read",
-            "Read a UTF-8 text file from the working root. Refuses encrypted, binary and oversized files.",
-            serde_json::json!({ "path": { "type": "string", "description": "Workspace-relative file path" } }),
+            "Read a UTF-8 text file. Always read a file before editing it. Refuses encrypted, binary and oversized files with a prefixed error.",
+            serde_json::json!({ "path": { "type": "string", "description": "Volume path: leading / = volume root, else working-dir-relative" } }),
             &["path"],
         ),
         tool_def(
             "write",
-            "Create or overwrite a text file (snapshots a version first where supported).",
+            "Create or overwrite a whole text file (a version is snapshotted first where supported). Prefer edit for small changes.",
             serde_json::json!({
                 "path": { "type": "string" },
-                "content": { "type": "string", "description": "Full new file content" },
+                "content": { "type": "string", "description": "Complete new file content" },
             }),
             &["path", "content"],
         ),
         tool_def(
             "edit",
-            "Hash-anchored edit: replace one exact old_block with new_block. Fails when the block is missing (not_found:) or ambiguous (conflict:); pass expected_hash (BLAKE3 of the whole file) to also verify it did not change under you.",
+            "Replace ONE exact old_block with new_block. Fails when the block is missing (not_found:) or occurs more than once (conflict:) — then re-read and send a larger unique block. Pass expected_hash (the file BLAKE3 from a prior read) when writers may race you.",
             serde_json::json!({
                 "path": { "type": "string" },
-                "old_block": { "type": "string" },
-                "new_block": { "type": "string" },
+                "old_block": { "type": "string", "description": "Exact current text to replace" },
+                "new_block": { "type": "string", "description": "Replacement text" },
                 "expected_hash": { "type": "string", "description": "Optional BLAKE3 hex of the file before editing" },
             }),
             &["path", "old_block", "new_block"],
         ),
         tool_def(
             "list",
-            "List a directory under the working root.",
+            "List one directory level. Start orientation at / then drill in.",
             serde_json::json!({ "path": { "type": "string", "description": "Directory, default \"/\"" } }),
             &[],
         ),
         tool_def(
             "grep",
-            "Search file contents (bounded recursive scan, text files only).",
+            "Regex search over file contents (an invalid regex searches literally). Use it to locate code; never guess locations. Bounded scan with a match cap.",
             serde_json::json!({
-                "pattern": { "type": "string" },
+                "pattern": { "type": "string", "description": "Regex (e.g. fn\\s+\\w+)" },
                 "path": { "type": "string", "description": "Subdirectory, default \"/\"" },
                 "limit": { "type": "integer", "description": "Max matches, default 50" },
             }),
             &["pattern"],
         ),
         tool_def(
+            "glob",
+            "Find files by pattern without walking whole trees. * stays inside one path segment, ** crosses separators (src/**/*.rs, **/Cargo.toml).",
+            serde_json::json!({
+                "pattern": { "type": "string", "description": "Glob pattern, default \"**\"" },
+                "path": { "type": "string", "description": "Subdirectory to search under, default \"/\"" },
+                "limit": { "type": "integer", "description": "Max paths, default 200" },
+            }),
+            &[],
+        ),
+        tool_def(
             "bash",
-            "Run a shell command with a timeout (native transports only). Output truncated at 64 KiB.",
+            "Run a shell command with a timeout (native transports only). Prefer read/list/grep over cat/ls/find; never run interactive commands; destructive commands pause for approval.",
             serde_json::json!({
                 "command": { "type": "string" },
-                "timeout_secs": { "type": "integer", "description": "Default 120" },
+                "timeout_secs": { "type": "integer", "description": "Default 120, clamped 5-600" },
             }),
             &["command"],
         ),
         tool_def(
             "task",
-            "Launch one subagent for a delegated goal (depth-guarded, reduced turns).",
+            "Launch one bounded read-only subagent for a delegated exploration goal. One nesting level max.",
             serde_json::json!({
                 "goal": { "type": "string" },
                 "context": { "type": "string", "description": "Relevant file paths or notes" },
@@ -537,11 +549,11 @@ pub fn post_raw(
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use cybermanju_types::agent::LlmDialect;
     #[test]
-    fn tool_schemas_cover_seven_tools_in_openai_shape() {
+    fn tool_schemas_cover_eight_tools_in_openai_shape() {
         let tools = openai_tools();
-        assert_eq!(tools.as_array().map(|a| a.len()), Some(7));
+        assert_eq!(tools.as_array().map(|a| a.len()), Some(8));
         let first = &tools[0];
         assert_eq!(first["type"], "function");
         assert_eq!(first["function"]["name"], "read");
@@ -566,7 +578,7 @@ mod tests {
         );
         assert_eq!(body["model"], "gpt-5");
         assert_eq!(body["messages"][0]["role"], "system");
-        assert_eq!(body["tools"].as_array().map(|a| a.len()), Some(7));
+        assert_eq!(body["tools"].as_array().map(|a| a.len()), Some(8));
 
         let reply = serde_json::json!({
             "choices": [{

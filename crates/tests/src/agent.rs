@@ -115,12 +115,28 @@ fn prompt_validates_before_spawning() {
     assert_eq!(status_of(&resp), 404, "{resp}");
 
     // Known config without a key (non-keyless) → 400 auth, no thread.
-    let id = make_config(&d, &auth);
+    let keyed = call(
+        &d,
+        "POST",
+        "/api/agent/configs",
+        r#"{"config":{
+            "id":"", "name":"Keyed", "providerId":"openai", "model":"gpt-4o-mini",
+            "workingDir":"", "agentKind":"build",
+            "permission":{"default":"ask","rules":{}}, "autoApprove":false, "maxTurns":5
+        }}"#,
+        Some(&auth),
+    );
+    assert_eq!(status_of(&keyed), 200, "{keyed}");
+    let keyed_id: String = serde_json::from_str::<serde_json::Value>(body_of(&keyed))
+        .expect("json")["id"]
+        .as_str()
+        .expect("id")
+        .to_string();
     let resp = call(
         &d,
         "POST",
         "/api/agent/prompt",
-        &format!(r#"{{"configId":"{id}","prompt":"hi"}}"#),
+        &format!(r#"{{"configId":"{keyed_id}","prompt":"hi"}}"#),
         Some(&auth),
     );
     assert_eq!(status_of(&resp), 400, "{resp}");
@@ -131,7 +147,7 @@ fn prompt_validates_before_spawning() {
         &d,
         "POST",
         "/api/agent/prompt",
-        &format!(r#"{{"configId":"{id}","prompt":""}}"#),
+        &format!(r#"{{"configId":"{keyed_id}","prompt":""}}"#),
         Some(&auth),
     );
     assert_eq!(status_of(&resp), 400, "{resp}");
@@ -335,4 +351,61 @@ fn compact_validates_before_any_network() {
     );
     assert_eq!(status_of(&resp), 400, "{resp}");
     assert!(body_of(&resp).contains("no messages"), "{resp}");
+}
+
+#[test]
+fn init_validates_config_without_spawning() {
+    let (_dir, d) = mk_dashboard(3456);
+    let token = bootstrap_session(&d, "agent-init", "correct horse battery");
+    let auth = bearer(&token);
+    let resp = call(
+        &d,
+        "POST",
+        "/api/agent/init",
+        r#"{"configId":"missing"}"#,
+        Some(&auth),
+    );
+    assert_eq!(status_of(&resp), 404, "{resp}");
+}
+
+#[test]
+fn mcp_dead_servers_fail_loudly_not_silently() {
+    let (_dir, d) = mk_dashboard(3456);
+    let admin = bearer(&mint(&d, "admin", now_secs() + 3_600, "jti-agent-mcp-live"));
+    let member = bearer(&mint(&d, "user", now_secs() + 3_600, "jti-agent-mcp-live-user"));
+
+    let body = r#"{"config":{
+        "id":"","name":"MCP2","providerId":"ollama","model":"llama3.1:8b",
+        "workingDir":"","agentKind":"build","permission":{"default":"ask","rules":{}},
+        "autoApprove":false,"maxTurns":5}}"#;
+    let resp = call(&d, "POST", "/api/agent/configs", body, Some(&member));
+    assert_eq!(status_of(&resp), 200, "{resp}");
+    let id: String = serde_json::from_str::<serde_json::Value>(body_of(&resp)).expect("json")["id"]
+        .as_str()
+        .expect("id")
+        .to_string();
+
+    // Attach a server whose binary cannot exist — validation passes (bare
+    // name), connection must fail loudly at discovery, not silently.
+    let resp = call(
+        &d,
+        "POST",
+        &format!("/api/agent/configs/{id}/mcp"),
+        r#"{"name":"ghost","server":{"transport":"stdio","command":"definitely-not-a-binary-xyz","args":[]}}"#,
+        Some(&admin),
+    );
+    assert_eq!(status_of(&resp), 200, "{resp}");
+
+    let resp = call(
+        &d,
+        "GET",
+        &format!("/api/agent/configs/{id}/mcp/tools"),
+        "",
+        Some(&admin),
+    );
+    assert_eq!(status_of(&resp), 400, "{resp}");
+    assert!(
+        body_of(&resp).contains("ghost"),
+        "names the dead server: {resp}"
+    );
 }

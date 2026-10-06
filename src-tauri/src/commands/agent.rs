@@ -144,14 +144,33 @@ pub fn abort_agent_job(job_id: String) -> Result<bool, String> {
     cybermanju_web::api::agent_api::abort_job(&job_id)
 }
 
-/// Answer a parked approval or question.
+/// Start a repository-init run: the agent analyzes the repo and writes
+/// AGENTS.md with its own tools (same loop, same permissions).
+#[tauri::command]
+pub fn init_agent_run(
+    config_id: String,
+    state: State<'_, AppState>,
+) -> Result<cybermanju_web::api::agent_api::JobSnapshot, String> {
+    cybermanju_web::api::agent_api::start_init_job(&state.db, &config_id)
+}
+
+/// Answer a parked approval or question. With `remember`, an approval also
+/// stores "allow always" for that tool in the config (explicit, reversible).
 #[tauri::command]
 pub fn approve_agent_job(
     job_id: String,
     approved: bool,
     answer: Option<String>,
+    remember: Option<bool>,
+    state: State<'_, AppState>,
 ) -> Result<bool, String> {
-    cybermanju_web::api::agent_api::approve_job(&job_id, approved, answer)
+    cybermanju_web::api::agent_api::approve_job(
+        &state.db,
+        &job_id,
+        approved,
+        answer,
+        remember.unwrap_or(false),
+    )
 }
 
 /// Compact a session transcript into a fresh session (old kept for revert).

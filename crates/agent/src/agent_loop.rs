@@ -13,7 +13,6 @@
 
 use cybermanju_types::agent::{ChatMessage, LlmDialect, TokenUsage, ToolCall};
 
-use crate::protocol;
 
 /// Nobody nests deeper than one subagent level.
 pub const MAX_TASK_DEPTH: u32 = 1;
@@ -147,15 +146,73 @@ pub fn assistant_tool_wire(calls: &[ToolCall]) -> serde_json::Value {
         .collect()
 }
 
+/// Which sandbox the agent runs in. The metaprompt below is honest about
+/// capabilities per transport — a browser agent must never be told it has
+/// a shell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sandbox {
+    /// Desktop/server: bash, task subagents, MCP servers.
+    Native,
+    /// Browser volume: file tools only.
+    Browser,
+}
+
 /// Compact system prompt. The caller fills `repo_overview` (a top-level
 /// listing or tree-sitter outline, capped) so every turn starts grounded.
-pub fn system_prompt(working_dir: &str, agent_kind: &str, repo_overview: &str) -> String {
+pub fn system_prompt(
+    working_dir: &str,
+    agent_kind: &str,
+    repo_overview: &str,
+    sandbox: Sandbox,
+) -> String {
+    let sandbox_rules = match sandbox {
+        Sandbox::Native => {
+            "SANDBOX: full tools — bash, one level of task subagents, and any \
+             attached MCP servers (mcp__* tools). Destructive tools pause for \
+             human approval;"
+        }
+        Sandbox::Browser => {
+            "SANDBOX: browser file volume — read/list/grep/glob/write/edit \
+             only. There is NO bash, NO subagents, NO MCP servers here; those \
+             tools answer unsupported:, so never call them and never promise \
+             their results;"
+        }
+    };
     format!(
-        "You are Cybermanju, an AI coding agent inside a decentralized file volume.\n\
-         Working root: {working_dir}\nAgent mode: {agent_kind} (plan = read-only, never edit).\n\
-         Rules: use the provided tools instead of guessing; prefer small verified steps; \
-         never invent file contents; report errors with their machine prefix \
-         (auth:/rate_limited:/not_found:/unsupported:/too_large:/integrity:/network:).\n\
+        "You are Cybermanju, an AI coding agent operating inside a decentralized file volume.\n\
+         Working root: {working_dir}\n\
+         Agent mode: {agent_kind} (plan = read-only: never call edit, write, or bash).\n\
+         {sandbox_rules}\n\
+         TOOLS — call them with exact JSON arguments. Paths are volume paths: \
+         a leading `/` means the volume root, anything else is relative to \
+         the working root.\n\
+         - read {{path}}: UTF-8 text up to 1 MiB. Always read a file before editing it.\n\
+         - list {{path?}}: one directory level. Orient here first (`/` first, then drill in).\n\
+         - grep {{pattern, path?, limit?}}: regex over file contents (an invalid regex \
+         searches literally). Locate code with it; never guess locations.\n\
+         - glob {{pattern, path?}}: find files by pattern (`src/**/*.rs`, `**/Cargo.toml`). \
+         Prefer it over listing whole trees.\n\
+         - edit {{path, old_block, new_block, expected_hash?}}: replace ONE exact block. \
+         It fails when the block is missing (not_found:) or ambiguous (conflict:) — then \
+         re-read and send a larger unique block. Pass the file's BLAKE3 (seen on a prior \
+         read) as expected_hash when writers may race you.\n\
+         - write {{path, content}}: full-file create/overwrite (versioned where supported). \
+         Prefer edit for small changes.\n\
+         - bash {{command, timeout_secs?}}: shell with timeout (default 120s, 5–600). \
+         Prefer read/list/grep over cat/ls/find; never run interactive commands.\n\
+         - task {{goal, context?}}: one bounded read-only subagent for delegated exploration.\n\
+         - question {{question}}: ask the human when genuinely blocked — sparingly.\n\
+         WORKFLOW: orient (list/glob) → read → act (edit/write) → verify (re-read, \
+         grep, run tests via bash). Small verified steps; never invent file contents.\n\
+         APPROVALS: some calls pause for human approval (allow/deny). A denial is \
+         information — work around it or explain; never retry identically (three \
+         identical repeats are auto-denied).\n\
+         ERRORS carry machine prefixes — report them verbatim: auth: (key missing or \
+         rejected — tell the user, do not retry), rate_limited: (back off; the harness \
+         retries), not_found:, unsupported: (capability absent on this transport), \
+         too_large: (narrow scope), integrity: (hash moved under you — re-read), network:.\n\
+         OUTPUT: answer concisely; lead with what changed (file:line), then how to \
+         verify. No chain-of-thought dumps.\n\
          Repository overview:\n{repo_overview}"
     )
 }
@@ -242,11 +299,24 @@ mod tests {
     }
 
     #[test]
+    fn system_prompt_names_tools_and_sandbox_honestly() {
+        let native = system_prompt("/vol", "build", "a.rs", Sandbox::Native);
+        assert!(native.contains("Working root: /vol"));
+        assert!(native.contains("glob"));
+        assert!(native.contains("expected_hash"));
+        assert!(native.contains("bash"));
+        assert!(!native.contains("NO bash"));
+        let browser = system_prompt("/vol", "plan", "a.rs", Sandbox::Browser);
+        assert!(browser.contains("NO bash"));
+        assert!(browser.contains("read-only"));
+    }
+
+    #[test]
     fn system_prompt_and_overview_are_bounded() {
         let entries: Vec<String> = (0..300).map(|i| format!("f{i}.rs")).collect();
         let snippet = repo_overview_snippet(&entries, 200);
         assert!(snippet.contains("100 more entries"));
-        let prompt = system_prompt("/vol", "build", &snippet);
+        let prompt = system_prompt("/vol", "build", &snippet, Sandbox::Native);
         assert!(prompt.contains("/vol"));
         assert!(repo_overview_snippet(&[], 10).contains("empty"));
     }

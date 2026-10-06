@@ -118,6 +118,7 @@ pub fn completions(prefix: &str) -> Vec<String> {
         "disk list",
         "disk check",
         "ai ask",
+        "ai init",
         "ai status",
         "ai abort",
         "ai sessions",
@@ -491,6 +492,8 @@ pub enum AiCommand {
     Abort { job_id: Option<String> },
     /// `ai sessions`.
     Sessions,
+    /// `ai init [--config <id>]` — analyze the repo, write AGENTS.md.
+    Init { config_id: Option<String> },
 }
 
 /// Parse a full shell line as one `ai` subcommand. Single-command lines
@@ -541,6 +544,18 @@ pub fn parse_ai_command(line: &str) -> Option<AiCommand> {
             job_id: cmd.get(2).filter(|s| s.as_str() != "--json").cloned(),
         }),
         Some("sessions") => Some(AiCommand::Sessions),
+        Some("init") => {
+            let mut config_id: Option<String> = None;
+            let mut rest = cmd.iter().skip(2);
+            while let Some(arg) = rest.next() {
+                match arg.as_str() {
+                    "--config" => config_id = rest.next().cloned(),
+                    "--json" => {}
+                    _ => return None,
+                }
+            }
+            Some(AiCommand::Init { config_id })
+        }
         _ => None,
     }
 }
@@ -649,7 +664,11 @@ fn help_text(json: bool) -> String {
         ("crypto/search", &["keygen", "encrypt", "decrypt", "search"]),
         (
             "agent",
-            &["ai ask \"…\" [--config <id>] [--session <id>]", "ai status|abort|sessions"],
+            &[
+                "ai ask \"…\" [--config <id>] [--session <id>]",
+                "ai init [--config <id>]",
+                "ai status|abort|sessions",
+            ],
         ),
     ];
     if json {
@@ -1431,14 +1450,14 @@ fn ai_cmd(args: &[String], _db: Option<&Database>, json: bool) -> Result<String,
         .map_err(|e| e.to_string());
     }
     Err(match sub {
-        "ask" => format!("unsupported: `ai ask` needs a detached worker — {HINT}"),
+        "ask" | "init" => format!("unsupported: `ai {sub}` needs a detached worker — {HINT}"),
         "status" | "abort" | "sessions" => {
             format!("unsupported: `ai {sub}` is served over REST — {HINT}")
         }
         other => did_you_mean(
             "unknown ai subcommand",
             other,
-            &["ask", "status", "abort", "sessions"],
+            &["ask", "init", "status", "abort", "sessions"],
         ),
     })
 }
@@ -2254,6 +2273,17 @@ mod tests {
             })
         );
         assert_eq!(parse_ai_command("ai sessions"), Some(AiCommand::Sessions));
+        assert_eq!(
+            parse_ai_command("ai init --config cfg-1"),
+            Some(AiCommand::Init {
+                config_id: Some("cfg-1".into())
+            })
+        );
+        assert_eq!(
+            parse_ai_command("ai init"),
+            Some(AiCommand::Init { config_id: None })
+        );
+        assert!(parse_ai_command("ai init extra").is_none());
         assert!(parse_ai_command("ai ask").is_none());
         assert!(parse_ai_command("ai frobnicate").is_none());
         assert!(parse_ai_command("ai ask x | cat").is_none());
