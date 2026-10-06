@@ -19,7 +19,7 @@ RUN npm install --frozen-lockfile 2>/dev/null || npm install
 COPY index.html ./
 COPY tsconfig.json tsconfig.node.json env.d.ts ./
 COPY vite.config.wasm.ts vite.config.ts ./
-COPY vite-plugin-wasm-stub.ts ./
+COPY vite-plugin-wasm-stub.ts wasm-pkg.ts ./
 COPY public/ ./public/
 COPY keymaps/ ./keymaps/
 COPY src/ ./src/
